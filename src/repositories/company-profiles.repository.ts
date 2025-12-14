@@ -1,0 +1,54 @@
+import {Constructor, Getter, inject} from '@loopback/core';
+import {BelongsToAccessor, DefaultCrudRepository, HasOneRepositoryFactory, repository} from '@loopback/repository';
+import {AmplioDataSource} from '../datasources';
+import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
+import {CompanyPanCards, CompanyProfiles, CompanyProfilesRelations, Media, Users, CompanyEntityType, CompanySectorType, KycApplications} from '../models';
+import {CompanyPanCardsRepository} from './company-pan-cards.repository';
+import {KycApplicationsRepository} from './kyc-applications.repository';
+import {MediaRepository} from './media.repository';
+import {UsersRepository} from './users.repository';
+import {CompanyEntityTypeRepository} from './company-entity-type.repository';
+import {CompanySectorTypeRepository} from './company-sector-type.repository';
+
+export class CompanyProfilesRepository extends TimeStampRepositoryMixin<
+  CompanyProfiles,
+  typeof CompanyProfiles.prototype.id,
+  Constructor<
+    DefaultCrudRepository<
+      CompanyProfiles,
+      typeof CompanyProfiles.prototype.id,
+      CompanyProfilesRelations
+    >
+  >
+>(DefaultCrudRepository) {
+
+  public readonly companyLogoData: BelongsToAccessor<Media, typeof CompanyProfiles.prototype.id>;
+
+  public readonly companyPanCards: HasOneRepositoryFactory<CompanyPanCards, typeof CompanyProfiles.prototype.id>;
+
+  public readonly users: BelongsToAccessor<Users, typeof CompanyProfiles.prototype.id>;
+
+  public readonly companyEntityType: BelongsToAccessor<CompanyEntityType, typeof CompanyProfiles.prototype.id>;
+
+  public readonly companySectorType: BelongsToAccessor<CompanySectorType, typeof CompanyProfiles.prototype.id>;
+
+  public readonly kycApplications: BelongsToAccessor<KycApplications, typeof CompanyProfiles.prototype.id>;
+
+  constructor(
+    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('CompanyPanCardsRepository') protected companyPanCardsRepositoryGetter: Getter<CompanyPanCardsRepository>, @repository.getter('KycApplicationsRepository') protected kycApplicationsRepositoryGetter: Getter<KycApplicationsRepository>, @repository.getter('UsersRepository') protected usersRepositoryGetter: Getter<UsersRepository>, @repository.getter('CompanyEntityTypeRepository') protected companyEntityTypeRepositoryGetter: Getter<CompanyEntityTypeRepository>, @repository.getter('CompanySectorTypeRepository') protected companySectorTypeRepositoryGetter: Getter<CompanySectorTypeRepository>
+  ) {
+    super(CompanyProfiles, dataSource);
+    this.kycApplications = this.createBelongsToAccessorFor('kycApplications', kycApplicationsRepositoryGetter,);
+    this.registerInclusionResolver('kycApplications', this.kycApplications.inclusionResolver);
+    this.companySectorType = this.createBelongsToAccessorFor('companySectorType', companySectorTypeRepositoryGetter,);
+    this.registerInclusionResolver('companySectorType', this.companySectorType.inclusionResolver);
+    this.companyEntityType = this.createBelongsToAccessorFor('companyEntityType', companyEntityTypeRepositoryGetter,);
+    this.registerInclusionResolver('companyEntityType', this.companyEntityType.inclusionResolver);
+    this.users = this.createBelongsToAccessorFor('users', usersRepositoryGetter,);
+    this.registerInclusionResolver('users', this.users.inclusionResolver);
+    this.companyPanCards = this.createHasOneRepositoryFactoryFor('companyPanCards', companyPanCardsRepositoryGetter);
+    this.registerInclusionResolver('companyPanCards', this.companyPanCards.inclusionResolver);
+    this.companyLogoData = this.createBelongsToAccessorFor('companyLogoData', mediaRepositoryGetter,);
+    this.registerInclusionResolver('companyLogoData', this.companyLogoData.inclusionResolver);
+  }
+}
