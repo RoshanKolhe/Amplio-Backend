@@ -5,10 +5,11 @@ import {get, getModelSchemaRef, HttpErrors, param, patch, post, requestBody} fro
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
 import {AuthorizeSignatories, BankDetails, CompanyProfiles, UserUploadedDocuments} from '../models';
-import {CompanyProfilesRepository} from '../repositories';
+import {CompanyProfilesRepository, KycApplicationsRepository} from '../repositories';
 import {BankDetailsService} from '../services/bank-details.service';
 import {KycService} from '../services/kyc.service';
 import {MediaService} from '../services/media.service';
+import {SessionService} from '../services/session.service';
 import {AuthorizeSignatoriesService} from '../services/signatories.service';
 import {UserUploadedDocumentsService} from '../services/user-documents.service';
 
@@ -16,6 +17,8 @@ export class CompaniesController {
   constructor(
     @repository(CompanyProfilesRepository)
     private companyProfilesRepository: CompanyProfilesRepository,
+    @repository(KycApplicationsRepository)
+    private kycApplicationsRepository: KycApplicationsRepository,
     @inject('service.media.service')
     private mediaService: MediaService,
     @inject('service.userUploadedDocuments.service')
@@ -26,7 +29,497 @@ export class CompaniesController {
     private authorizeSignatoriesService: AuthorizeSignatoriesService,
     @inject('service.kyc.service')
     private kycService: KycService,
+    @inject('service.session.service')
+    private sessionService: SessionService,
   ) { }
+
+  // fetch KYC application status...
+  async getKycApplicationStatus(
+    applicationId: string
+  ): Promise<string[]> {
+    const kycApplication = await this.kycApplicationsRepository.findById(applicationId);
+
+    return kycApplication.currentProgress ?? [];
+  }
+
+  // update KYC application status...
+  async updateKycProgress(appId: string, step: string) {
+    const kyc = await this.kycApplicationsRepository.findById(appId);
+
+    const progress = Array.isArray(kyc.currentProgress) ? kyc.currentProgress : [];
+
+    if (!progress.includes(step)) {
+      progress.push(step);
+      await this.kycApplicationsRepository.updateById(appId, {currentProgress: progress});
+    }
+
+    return progress;
+  }
+
+  // for companies get current progress at start...
+  @get('/company-profiles/kyc-progress/{sessionId}')
+  async getCompanyProfileKycProgress(
+    @param.path.string('sessionId') sessionId: string
+  ): Promise<{success: boolean; message: string; currentProgress: string[]; profile: CompanyProfiles | null}> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response: any = await this.sessionService.fetchProfile(sessionId);
+    if (response.success && response?.profile?.id) {
+      const companyProfile = await this.companyProfilesRepository.findOne({
+        where: {
+          and: [
+            {usersId: response?.profile?.id},
+            {isDeleted: false},
+          ]
+        },
+        include: [
+          {relation: 'companyPanCards', scope: {include: [{relation: 'panCardDocument', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}]}},
+          {relation: 'companyEntityType'},
+          {relation: 'companySectorType'},
+          {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
+          {relation: 'kycApplications', scope: {fields: {id: true, status: true, verifiedAt: true, reason: true}}},
+        ]
+      });
+
+      if (!companyProfile) {
+        return {
+          success: true,
+          message: 'New Profile',
+          currentProgress: [],
+          profile: null
+        }
+      }
+
+      const currentProgress = await this.getKycApplicationStatus(companyProfile.kycApplicationsId);
+
+      return {
+        success: true,
+        message: 'New Profile',
+        currentProgress: currentProgress,
+        profile: companyProfile
+      }
+    }
+
+    return {
+      success: true,
+      message: 'New Profile',
+      currentProgress: [],
+      profile: null
+    }
+  }
+
+  // fetch company info with stepper...
+  @get('/company-profiles/kyc-get-data/{stepperId}/{usersId}')
+  async getCompanyProfileKycData(
+    @param.path.string('stepperId') stepperId: string,
+    @param.path.string('usersId') usersId: string,
+    @param.query.string('route') route?: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<{success: boolean; message: string; data: any}> {
+    const steppersAllowed = [
+      'company_documents',
+      'company_bank_details',
+      'company_authorized_signatories'
+    ];
+
+    if (!steppersAllowed.includes(stepperId)) {
+      throw new HttpErrors.BadRequest('Invalid stepper id');
+    }
+
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        and: [
+          {usersId: usersId},
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company not found');
+    }
+
+    const currentProgress = await this.getKycApplicationStatus(companyProfile.kycApplicationsId);
+
+    if (!currentProgress.includes(stepperId)) {
+      throw new HttpErrors.BadRequest('Please complete the steps');
+    }
+
+    if (stepperId === 'company_documents') {
+      if (!route) {
+        throw new HttpErrors.NotFound('Params are missing');
+      }
+
+      const documentsResponse = await this.userUploadDocumentsService.fetchDocuments(companyProfile.usersId, companyProfile.id, 'company', route);
+
+      return {
+        success: true,
+        message: 'Documents Data',
+        data: documentsResponse.documents
+      }
+    }
+
+    if (stepperId === 'company_bank_details') {
+      const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccounts(companyProfile.usersId, 'company');
+
+      return {
+        success: true,
+        message: 'Bank accounts',
+        data: bankDetailsResponse.accounts
+      }
+    }
+
+    if (stepperId === 'company_authorized_signatories') {
+      const signatoriesResponse = await this.authorizeSignatoriesService.fetchAuthorizeSignatories(companyProfile.usersId, 'company', companyProfile.id);
+
+      return {
+        success: true,
+        message: 'Authorize signatories',
+        data: signatoriesResponse.signatories
+      }
+    }
+
+    return {
+      success: false,
+      message: 'No Step found',
+      data: null
+    }
+  }
+
+  // for company but without login just for KYC
+  @post('/company-profiles/kyc-upload-documents')
+  async uploadCompanyKYCDocuments(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'documents'],
+            properties: {
+              usersId: {type: 'string'},
+              documents: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['documentsId', 'documentsFileId'],
+                  properties: {
+                    documentsId: {type: 'string'},
+                    documentsFileId: {type: 'string'}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    body: {
+      usersId: string;
+      documents: {documentsId: string; documentsFileId: string;}[];
+    }
+  ): Promise<{success: boolean; message: string; uploadedDocuments: UserUploadedDocuments[]; currentProgress: string[]}> {
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+
+    try {
+      const company = await this.companyProfilesRepository.findOne(
+        {where: {usersId: body.usersId, isDeleted: false}},
+        {transaction: tx}
+      );
+
+      if (!company) throw new HttpErrors.NotFound("Company not found");
+
+      const newDocs = body.documents.map(doc => new UserUploadedDocuments({
+        ...doc,
+        roleValue: 'company',
+        identifierId: company.id,
+        usersId: body.usersId,
+        status: 0,
+        mode: 1,
+        isActive: true,
+        isDeleted: false,
+      }));
+
+      const result = await this.userUploadDocumentsService.uploadNewDocuments(newDocs, tx);
+
+      const currentProgress = await this.updateKycProgress(company.kycApplicationsId, "company_documents");
+
+      await tx.commit();
+
+      return {...result, currentProgress};
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
+  // for company but without login just for KYC
+  @post('/company-profiles/kyc-bank-details')
+  async uploadCompanyBankDetailsUpload(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'bankDetails'],
+            properties: {
+              usersId: {type: 'string'},
+              bankDetails: {
+                type: 'object',
+                required: ['bankName', 'bankShortCode', 'ifscCode', 'branchName', 'bankAddress', 'accountType', 'accountHolderName', 'accountNumber', 'bankAccountProofType', 'bankAccountProofId'],
+                properties: {
+                  bankName: {type: 'string'},
+                  bankShortCode: {type: 'string'},
+                  ifscCode: {type: 'string'},
+                  branchName: {type: 'string'},
+                  bankAddress: {type: 'string'},
+                  accountType: {type: 'number'},
+                  accountHolderName: {type: 'string'},
+                  accountNumber: {type: 'string'},
+                  bankAccountProofType: {type: 'number'},
+                  bankAccountProofId: {type: 'string'}
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    body: {
+      usersId: string;
+      bankDetails: {
+        bankName: string;
+        bankShortCode: string;
+        ifscCode: string;
+        branchName: string;
+        bankAddress: string;
+        accountType: number;
+        accountHolderName: string;
+        accountNumber: string;
+        bankAccountProofType: number;
+        bankAccountProofId: string;
+      }
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    account: BankDetails;
+    currentProgress: string[];
+  }> {
+    const company = await this.companyProfilesRepository.findOne({
+      where: {usersId: body.usersId, isDeleted: false}
+    });
+
+    if (!company) throw new HttpErrors.NotFound("Company not found");
+
+    const bankData = new BankDetails({
+      ...body.bankDetails,
+      usersId: body.usersId,
+      mode: 1,
+      status: 0,
+      roleValue: 'company'
+    });
+
+    const result = await this.bankDetailsService.createNewBankAccount(bankData);
+
+    const currentProgress = await this.updateKycProgress(company.kycApplicationsId, "company_bank_details");
+
+    return {...result, currentProgress};
+  }
+
+  // for company but without login just for KYC
+  @post('/company-profiles/kyc-authorize-signatories')
+  async uploadAuthorizeSignatories(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'signatories'],
+            properties: {
+              usersId: {type: 'string'},
+              signatories: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['fullName', 'email', 'phone', 'submittedPanFullName', 'submittedPanNumber', 'submittedDateOfBirth', 'panCardFileId', 'boardResolutionFileId', 'designationType', 'designationValue'],
+                  properties: {
+                    fullName: {type: 'string'},
+                    email: {type: 'string'},
+                    phone: {type: 'string'},
+                    extractedPanFullName: {type: 'string'},
+                    extractedPanNumber: {type: 'string'},
+                    extractedDateOfBirth: {type: 'string'},
+                    submittedPanFullName: {type: 'string'},
+                    submittedPanNumber: {type: 'string'},
+                    submittedDateOfBirth: {type: 'string'},
+                    panCardFileId: {type: 'string'},
+                    boardResolutionFileId: {type: 'string'},
+                    designationType: {type: 'string'},
+                    designationValue: {type: 'string'}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    body: {
+      usersId: string;
+      signatories: Array<{
+        fullName: string;
+        email: string;
+        phone: string;
+        extractedPanFullName?: string;
+        extractedPanNumber?: string;
+        extractedDateOfBirth?: string;
+        submittedPanFullName: string;
+        submittedPanNumber: string;
+        submittedDateOfBirth: string;
+        panCardFileId: string;
+        boardResolutionFileId: string;
+        designationType: string;
+        designationValue: string;
+      }>
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    createdAuthorizeSignatories: AuthorizeSignatories[];
+    erroredAuthrizeSignatories: Array<{
+      fullName: string;
+      email: string;
+      phone: string;
+      submittedPanNumber: string;
+      message: string;
+    }>;
+    currentProgress: string[];
+  }> {
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+
+    try {
+      const company = await this.companyProfilesRepository.findOne(
+        {where: {usersId: body.usersId, isDeleted: false}},
+        {transaction: tx}
+      );
+
+      if (!company) throw new HttpErrors.NotFound("Company not found");
+
+      const signatoriesData = body.signatories.map(s => new AuthorizeSignatories({
+        ...s,
+        usersId: body.usersId,
+        roleValue: "company",
+        identifierId: company.id,
+        isActive: true,
+        isDeleted: false
+      }));
+
+      const result = await this.authorizeSignatoriesService.createAuthorizeSignatories(signatoriesData, tx);
+
+      let currentProgress = await this.getKycApplicationStatus(company.kycApplicationsId);
+
+      if (result.createdAuthorizeSignatories.length > 0) {
+        currentProgress = await this.updateKycProgress(company.kycApplicationsId, "company_authorized_signatories");
+      }
+
+      await tx.commit();
+      return {...result, currentProgress};
+
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
+  // for company but without login just for KYC
+  @post('/company-profiles/kyc-authorize-signatory')
+  async uploadAuthorizeSignatoryForKyc(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'signatory'],
+            properties: {
+              usersId: {type: 'string'},
+              signatory: {
+                type: 'object',
+                required: ['fullName', 'email', 'phone', 'submittedPanFullName', 'submittedPanNumber', 'submittedDateOfBirth', 'panCardFileId', 'boardResolutionFileId', 'designationType', 'designationValue'],
+                properties: {
+                  fullName: {type: 'string'},
+                  email: {type: 'string'},
+                  phone: {type: 'string'},
+                  extractedPanFullName: {type: 'string'},
+                  extractedPanNumber: {type: 'string'},
+                  extractedDateOfBirth: {type: 'string'},
+                  submittedPanFullName: {type: 'string'},
+                  submittedPanNumber: {type: 'string'},
+                  submittedDateOfBirth: {type: 'string'},
+                  panCardFileId: {type: 'string'},
+                  boardResolutionFileId: {type: 'string'},
+                  designationType: {type: 'string'},
+                  designationValue: {type: 'string'}
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    body: {
+      usersId: string;
+      signatory: {
+        fullName: string;
+        email: string;
+        phone: string;
+        extractedPanFullName?: string;
+        extractedPanNumber?: string;
+        extractedDateOfBirth?: string;
+        submittedPanFullName: string;
+        submittedPanNumber: string;
+        submittedDateOfBirth: string;
+        panCardFileId: string;
+        boardResolutionFileId: string;
+        designationType: string;
+        designationValue: string;
+      }
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatory: AuthorizeSignatories;
+    currentProgress: string[];
+  }> {
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+
+    try {
+      const company = await this.companyProfilesRepository.findOne(
+        {where: {usersId: body.usersId, isDeleted: false}},
+        {transaction: tx}
+      );
+
+      if (!company) throw new HttpErrors.NotFound("Company not found");
+
+      const signatoriesData = new AuthorizeSignatories({
+        ...body.signatory,
+        usersId: body.usersId,
+        roleValue: "company",
+        identifierId: company.id,
+        isActive: true,
+        isDeleted: false
+      });
+
+      const result = await this.authorizeSignatoriesService.createAuthorizeSignatory(signatoriesData);
+
+      const currentProgress = await this.updateKycProgress(company.kycApplicationsId, "company_authorized_signatories");
+
+      await tx.commit();
+      return {...result, currentProgress};
+
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
 
   // get my company profile..
   @authenticate('jwt')

@@ -960,7 +960,13 @@ export class AuthController {
       companySectorTypeId: string;
       companyEntityTypeId: string;
     }
-  ): Promise<{success: boolean; message: string; kycStatus: number}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    kycStatus: number;
+    currentProgress: string[];
+    usersId: string;
+  }> {
     const tx = await this.companyProfilesRepository.dataSource.beginTransaction({
       isolationLevel: 'READ COMMITTED',
     });
@@ -1101,7 +1107,7 @@ export class AuthController {
             usersId: newUserProfile.id,
             status: 1,
             humanInteraction: true,
-            mode: 1,
+            mode: 0,
             isActive: true,
             isDeleted: false,
             currentProgress: ['company_kyc'],
@@ -1121,13 +1127,14 @@ export class AuthController {
         }
 
         await this.companyProfilesRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
-        console.log('result', result.data);
         await tx.commit();
 
         return {
           success: true,
           message: 'Registration completed',
           kycStatus: 0,
+          currentProgress: newApplication.currentProgress ?? ['company_kyc'],
+          usersId: newUserProfile.id
         };
       }
 
@@ -1165,7 +1172,7 @@ export class AuthController {
           roleValue: registrationSession.roleValue,
           usersId: newUserProfile.id,
           identifierId: newCompanyProfile.id,
-          status: 2,
+          status: 0,
           humanInteraction: false,
           mode: 0,
           isActive: true,
@@ -1191,7 +1198,9 @@ export class AuthController {
       return {
         success: true,
         message: 'Registration completed',
-        kycStatus: 1,
+        kycStatus: 0,
+        currentProgress: newApplication.currentProgress ?? ['company_kyc', 'pan_verified'],
+        usersId: newUserProfile.id
       };
 
     } catch (error) {
@@ -1528,8 +1537,6 @@ export class AuthController {
           transaction: tx,
         });
 
-        console.log('newTrusteeProfile', newTrusteeProfile);
-
         const newKycApplication = await this.kycApplicationsRepository.create(
           {
             roleValue: registrationSession.roleValue,
@@ -1623,7 +1630,6 @@ export class AuthController {
       }
 
       await this.trusteeProfilesRepository.updateById(newTrusteeProfile.id, {kycApplicationsId: newKycApplication.id}, {transaction: tx});
-      console.log('result', result.data);
       await tx.commit();
 
       return {
