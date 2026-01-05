@@ -535,6 +535,23 @@ export class AuthController {
           `Email is already registered as ${role.label}`
         );
       }
+
+    }
+
+    const existingPhoneUser = await this.usersRepository.findOne({
+      where: {
+        and: [
+          {phone: session.phoneNumber},
+          {isActive: true},
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (existingPhoneUser && (existingPhoneUser.email !== body.email)) {
+      throw new HttpErrors.BadRequest(
+        `Phone is already registered with another email`
+      );
     }
 
     await this.otpRepository.updateAll(
@@ -970,6 +987,7 @@ export class AuthController {
     const tx = await this.companyProfilesRepository.dataSource.beginTransaction({
       isolationLevel: 'READ COMMITTED',
     });
+    console.log('body', body);
     try {
       // ----------------------------
       //  Validate Registration Session
