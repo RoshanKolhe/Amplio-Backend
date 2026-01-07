@@ -3,6 +3,7 @@ import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {
   CompanyProfilesRepository,
+  InvestorProfileRepository,
   PermissionsRepository,
   RolePermissionsRepository,
   RolesRepository,
@@ -27,7 +28,9 @@ export class RbacService {
     @repository(PermissionsRepository)
     private permRepo: PermissionsRepository,
     @repository(TrusteeProfilesRepository)
-    private trusteeProfilesRepository: TrusteeProfilesRepository
+    private trusteeProfilesRepository: TrusteeProfilesRepository,
+    @repository(InvestorProfileRepository)
+    private investorProfileRepository: InvestorProfileRepository
   ) { }
 
   // --------------------------------------------validate profile------------------------------------
@@ -169,6 +172,27 @@ export class RbacService {
     });
     return {
       companyName: trustee?.legalEntityName,
+      email: user.email,
+      phone: user.phone,
+      isActive: user.isActive,
+      roles,
+      permissions
+    }
+  }
+
+  async returnInvestorProfile(userId: string, roles: string[], permissions: string[]) {
+    const user = await this.usersRepository.findById(userId);
+    const investor = await this.investorProfileRepository.findOne({
+      where: {
+        and: [
+          {usersId: user.id},
+          {isActive: true},
+          {isDeleted: false}
+        ]
+      }
+    });
+    return {
+      fullName: investor?.fullName,
       email: user.email,
       phone: user.phone,
       isActive: user.isActive,

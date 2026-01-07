@@ -21,3 +21,5 @@ export * from './user-roles.model';
 export * from './user-uploaded-documents.model';
 export * from './users.model';
 
+export * from './investor-profile.model';
+export * from './investor-pan-cards.model';

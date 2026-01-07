@@ -5,7 +5,7 @@ import {get, HttpErrors, post, requestBody} from '@loopback/rest';
 import {securityId, UserProfile} from '@loopback/security';
 import _ from 'lodash';
 import {authorize} from '../authorization';
-import {CompanyPanCardsRepository, CompanyProfilesRepository, KycApplicationsRepository, OtpRepository, RegistrationSessionsRepository, RolesRepository, TrusteePanCardsRepository, TrusteeProfilesRepository, UserRolesRepository, UsersRepository} from '../repositories';
+import {CompanyPanCardsRepository, CompanyProfilesRepository, InvestorPanCardsRepository, InvestorProfileRepository, KycApplicationsRepository, OtpRepository, RegistrationSessionsRepository, RolesRepository, TrusteePanCardsRepository, TrusteeProfilesRepository, UserRolesRepository, UsersRepository} from '../repositories';
 import {BcryptHasher} from '../services/hash.password.bcrypt';
 import {JWTService} from '../services/jwt-service';
 import {MediaService} from '../services/media.service';
@@ -34,6 +34,10 @@ export class AuthController {
     private trusteePanCardsRepository: TrusteePanCardsRepository,
     @repository(KycApplicationsRepository)
     private kycApplicationsRepository: KycApplicationsRepository,
+    @repository(InvestorProfileRepository)
+    private investorProfileRepository: InvestorProfileRepository,
+    @repository(InvestorPanCardsRepository)
+    private investorPanCardsRepository: InvestorPanCardsRepository,
     @inject('service.hasher')
     private hasher: BcryptHasher,
     @inject('service.user.service')
@@ -1737,6 +1741,547 @@ export class AuthController {
     return {
       success: true,
       message: "Trustee login successful",
+      accessToken: token,
+      user: profile
+    };
+  }
+
+  // ------------------------------------------Investor Registration API's------------------------------
+  @post('/auth/investor-registration')
+  async investorRegistration(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: [
+              'sessionId',
+              'fullName',
+              'gender',
+              'kycMode',
+              'submittedPanDetails',
+              'panCardDocumentId',
+              'aadharFrontImageId',
+              'aadharBackImageId',
+              'selfieId'
+            ],
+            properties: {
+              sessionId: {
+                type: 'string',
+                description: 'Registration session id'
+              },
+              fullName: {type: 'string'},
+              gender: {type: 'string'},
+              kycMode: {type: 'string'},
+              humanInteraction: {
+                type: 'boolean',
+                default: false
+              },
+              extractedPanDetails: {
+                type: 'object',
+                required: [],
+                properties: {
+                  extractedCompanyName: {type: 'string'},
+                  extractedPanNumber: {
+                    type: 'string',
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
+                  }
+                }
+              },
+              submittedPanDetails: {
+                type: 'object',
+                required: ['submittedCompanyName', 'submittedPanNumber'],
+                properties: {
+                  submittedCompanyName: {type: 'string'},
+                  submittedPanNumber: {
+                    type: 'string',
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
+                  }
+                }
+              },
+              panCardDocumentId: {
+                type: 'string',
+                description: 'Media ID of uploaded PAN card'
+              },
+              aadharFrontImageId: {
+                type: 'string',
+                description: 'Media ID of uploaded Aadhar card front side'
+              },
+              aadharBackImageId: {
+                type: 'string',
+                description: 'Media ID of uploaded Aadhar card back side'
+              },
+              selfieId: {
+                type: 'string',
+                description: 'Media ID of uploaded selfie'
+              }
+            }
+          }
+        }
+      }
+    })
+    body: {
+      sessionId: string;
+      fullName: string;
+      gender: string;
+      kycMode: string;
+      humanInteraction?: boolean;
+      extractedPanDetails?: {
+        extractedCompanyName?: string;
+        extractedPanNumber?: string;
+      };
+      submittedPanDetails: {
+        submittedCompanyName: string;
+        submittedPanNumber: string;
+      };
+      panCardDocumentId: string;
+      aadharFrontImageId: string;
+      aadharBackImageId: string;
+      selfieId: string;
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    kycStatus: number;
+    currentProgress: string[];
+    usersId: string;
+  }> {
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction({
+      isolationLevel: 'READ COMMITTED',
+    });
+    try {
+      // ----------------------------
+      //  Validate Registration Session
+      // ----------------------------
+      const registrationSession = await this.registrationSessionsRepository.findById(
+        body.sessionId,
+        undefined,
+        {transaction: tx}
+      );
+
+      if (
+        !registrationSession ||
+        !registrationSession.phoneVerified ||
+        !registrationSession.emailVerified ||
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+        registrationSession.isDeleted ||
+        new Date(registrationSession.expiresAt) < new Date()
+      ) {
+        throw new HttpErrors.BadRequest('Session is not valid');
+      }
+
+      // ----------------------------
+      //  Create User
+      // ----------------------------
+      const hashedPassword = await this.hasher.hashPassword("Investor@123");
+
+      let newUserProfile = await this.usersRepository.findOne({
+        where: {
+          and: [
+            {email: registrationSession.email},
+            {phone: registrationSession.phoneNumber},
+            {isActive: true},
+            {isDeleted: false}
+          ]
+        }
+      });
+
+      if (!newUserProfile) {
+        newUserProfile = await this.usersRepository.create(
+          {
+            phone: registrationSession.phoneNumber,
+            email: registrationSession.email,
+            password: hashedPassword,
+            isActive: true,
+            isDeleted: false,
+          },
+          {transaction: tx}
+        );
+      }
+      // ----------------------------
+      //  Create Investor Profile
+      // ----------------------------
+      const newInvestorProfile = await this.investorProfileRepository.create(
+        {
+          usersId: newUserProfile.id,
+          fullName: body.fullName,
+          gender: body.gender,
+          kycMode: body.kycMode,
+          aadharFrontImageId: body.aadharFrontImageId,
+          aadharBackImageId: body.aadharBackImageId,
+          selfieId: body.selfieId,
+          isActive: false,
+          isDeleted: false,
+        },
+        {transaction: tx}
+      );
+
+      // ----------------------------
+      //  Check PAN duplicate
+      // ----------------------------
+      const isPanExist = await this.investorPanCardsRepository.findOne(
+        {
+          where: {
+            and: [
+              {submittedPanNumber: body.submittedPanDetails.submittedPanNumber},
+              {isDeleted: false},
+              {status: 1},
+            ],
+          },
+        },
+        {transaction: tx}
+      );
+
+      if (isPanExist)
+        throw new HttpErrors.BadRequest('Pan already exists with another investor');
+
+      // ----------------------------
+      //  Prepare PAN Data
+      // ----------------------------
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const investorPanData: any = {
+        submittedCompanyName: body.submittedPanDetails.submittedCompanyName,
+        submittedPanNumber: body.submittedPanDetails.submittedPanNumber,
+        extractedCompanyName: body.extractedPanDetails?.extractedCompanyName,
+        extractedPanNumber: body.extractedPanDetails?.extractedPanNumber,
+        panCardDocumentId: body.panCardDocumentId,
+        mode: body.humanInteraction ? 1 : 0,
+        status: 0,
+        isActive: false,
+        isDeleted: false,
+        companyProfilesId: newInvestorProfile.id,
+      };
+
+      // ----------------------------
+      //  Human Interaction Required
+      // ----------------------------
+      if (body.humanInteraction) {
+        await this.investorPanCardsRepository.create(investorPanData, {
+          transaction: tx,
+        });
+
+        const newApplication = await this.kycApplicationsRepository.create(
+          {
+            roleValue: registrationSession.roleValue,
+            usersId: newUserProfile.id,
+            status: 1,
+            humanInteraction: true,
+            mode: 0,
+            isActive: true,
+            isDeleted: false,
+            currentProgress: ['investor_kyc'],
+            identifierId: newInvestorProfile.id
+          },
+          {transaction: tx}
+        );
+
+        await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
+        const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'investor');
+        if (!result.success || !result.data) {
+          if (process.env.NODE_ENV === 'dev') {
+            throw new HttpErrors.InternalServerError('Error while assigning role to user');
+          } else {
+            throw new HttpErrors.InternalServerError('Internal server error');
+          }
+        }
+
+        await this.investorProfileRepository.updateById(newInvestorProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
+        await tx.commit();
+
+        return {
+          success: true,
+          message: 'Registration completed',
+          kycStatus: 0,
+          currentProgress: newApplication.currentProgress ?? ['investor_kyc'],
+          usersId: newUserProfile.id
+        };
+      }
+
+      // ----------------------------
+      //  Auto verification (No Human Interaction)
+      // ----------------------------
+      if (
+        body.submittedPanDetails.submittedCompanyName !== body.fullName
+      ) {
+        throw new HttpErrors.BadRequest('PAN details do not match company name');
+      }
+
+      // // Basic validation: Submitted PAN should match Extracted PAN
+      // if (
+      //   body.extractedPanDetails?.extractedPanNumber &&
+      //   body.extractedPanDetails.extractedPanNumber !==
+      //   body.submittedPanDetails.submittedPanNumber
+      // ) {
+      //   throw new HttpErrors.BadRequest('PAN number mismatch');
+      // }
+
+      // Auto approve PAN
+      investorPanData.status = 1; // Verified
+      investorPanData.isActive = true;
+
+      await this.investorPanCardsRepository.create(investorPanData, {
+        transaction: tx,
+      });
+
+      // ----------------------------
+      //  Create KYC (Auto Approved PAN)
+      // ----------------------------
+      const newApplication = await this.kycApplicationsRepository.create(
+        {
+          roleValue: registrationSession.roleValue,
+          usersId: newUserProfile.id,
+          identifierId: newInvestorProfile.id,
+          status: 0,
+          humanInteraction: false,
+          mode: 0,
+          isActive: true,
+          isDeleted: false,
+          currentProgress: ['investor_kyc', 'pan_verified'],
+        },
+        {transaction: tx}
+      );
+
+      await this.investorProfileRepository.updateById(newInvestorProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
+      await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
+      const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'investor');
+      if (!result.success || !result.data) {
+        if (process.env.NODE_ENV === 'dev') {
+          throw new HttpErrors.InternalServerError('Error while assigning role to user');
+        } else {
+          throw new HttpErrors.InternalServerError('Internal server error');
+        }
+      }
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Registration completed',
+        kycStatus: 0,
+        currentProgress: newApplication.currentProgress ?? ['investor_kyc', 'pan_verified'],
+        usersId: newUserProfile.id
+      };
+
+    } catch (error) {
+      await tx.rollback();
+      console.log('error while registering new investor :', error);
+      throw error;
+    }
+  }
+
+  @post('/auth/investor-login/send-otp')
+  async investorLoginSendOtp(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['email', 'rememberMe'],
+            properties: {
+              emailOrPhone: {type: 'string'},
+              // password: {type: 'string'},
+              rememberMe: {type: 'boolean'},
+            }
+          }
+        }
+      }
+    })
+    body: {emailOrPhone: string; rememberMe: boolean}
+  ): Promise<{success: boolean; message: string}> {
+    const userData = await this.usersRepository.findOne({
+      where: {
+        and: [
+          {
+            or: [
+              {email: body.emailOrPhone},
+              {phone: body.emailOrPhone}
+            ]
+          },
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (!userData) {
+      throw new HttpErrors.BadRequest('User not exist');
+    }
+
+    const isEmail = userData?.email === body.emailOrPhone;
+    const investor = await this.investorProfileRepository.findOne({
+      where: {
+        and: [
+          {usersId: userData.id},
+          {isActive: true},
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (!investor) {
+      throw new HttpErrors.Unauthorized('Unauthorized access');
+    }
+
+    const {roles} = await this.rbacService.getUserRoleAndPermissionsByRole(userData.id, 'investor');
+
+    if (!roles.includes('investor')) {
+      throw new HttpErrors.Forbidden('Access denied. Only investors can login here.');
+    }
+
+    // send otp to user...
+    if (isEmail) {
+      await this.otpRepository.updateAll(
+        {isUsed: true, expiresAt: new Date()},
+        {identifier: body.emailOrPhone, type: 1}
+      );
+    } else {
+      await this.otpRepository.updateAll(
+        {isUsed: true, expiresAt: new Date()},
+        {identifier: body.emailOrPhone, type: 0}
+      );
+    }
+
+    const otp = await this.otpRepository.create({
+      otp: '1234',
+      type: isEmail ? 1 : 0,
+      identifier: body.emailOrPhone,
+      attempts: 0,
+      isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 min
+    });
+
+    if (!otp) {
+      throw new HttpErrors.InternalServerError(
+        process.env.NODE_ENV === 'dev'
+          ? "Failed to create otp"
+          : "Something went wrong"
+      );
+    }
+
+    return {
+      success: true,
+      message: "OTP send successfully",
+    };
+  }
+
+  @post('/auth/investor-login/verify-otp')
+  async investorLoginVerifyOtp(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['email', 'otp', 'rememberMe'],
+            properties: {
+              emailOrPhone: {type: 'string'},
+              otp: {type: 'string'},
+              // password: {type: 'string'},
+              rememberMe: {type: 'boolean'},
+            }
+          }
+        }
+      }
+    })
+    body: {emailOrPhone: string; otp: string; rememberMe: boolean}
+  ): Promise<{success: boolean; message: string; accessToken: string; user: object}> {
+    const userData = await this.usersRepository.findOne({
+      where: {
+        and: [
+          {
+            or: [
+              {email: body.emailOrPhone},
+              {phone: body.emailOrPhone}
+            ]
+          },
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (!userData) {
+      throw new HttpErrors.BadRequest('User not exist');
+    }
+
+    const isEmail = userData?.email === body.emailOrPhone;
+    const investor = await this.investorProfileRepository.findOne({
+      where: {
+        and: [
+          {usersId: userData.id},
+          {isActive: true},
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (!investor) {
+      throw new HttpErrors.Unauthorized('Unauthorized access');
+    }
+
+    const otpEntry = await this.otpRepository.findOne({
+      where: {
+        identifier: body.emailOrPhone,
+        type: isEmail ? 1 : 0,
+        isUsed: false,
+      },
+      order: ['createdAt DESC'],
+    });
+
+    if (!otpEntry) {
+      throw new HttpErrors.BadRequest('OTP expired or not found');
+    }
+
+    if (otpEntry.attempts >= 3) {
+      throw new HttpErrors.BadRequest(
+        'Maximum attempts reached, please request a new OTP',
+      );
+    }
+
+    if (new Date(otpEntry.expiresAt) < new Date()) {
+      await this.otpRepository.updateById(otpEntry.id, {
+        isUsed: true,
+        expiresAt: new Date(),
+      });
+
+      throw new HttpErrors.BadRequest('OTP expired, request a new one');
+    }
+
+    if (otpEntry.otp !== body.otp) {
+      await this.otpRepository.updateById(otpEntry.id, {
+        attempts: otpEntry.attempts + 1,
+      });
+
+      throw new HttpErrors.BadRequest('Invalid OTP');
+    }
+
+    await this.otpRepository.updateById(otpEntry.id, {
+      isUsed: true,
+      expiresAt: new Date(),
+    });
+
+
+    const {roles, permissions} = await this.rbacService.getUserRoleAndPermissionsByRole(userData.id!, 'investor');
+
+    if (!roles.includes('investor')) {
+      throw new HttpErrors.Forbidden('Access denied. Only Investors can login here.');
+    }
+
+    const userProfile: UserProfile & {
+      roles: string[];
+      permissions: string[];
+      phone: string;
+    } = {
+      [securityId]: userData.id!,
+      id: userData.id!,
+      email: userData.email,
+      phone: userData.phone,
+      roles,
+      permissions,
+    };
+
+    const token = await this.jwtService.generateToken(userProfile);
+    const profile = await this.rbacService.returnInvestorProfile(userData.id, roles, permissions);
+
+    return {
+      success: true,
+      message: "Investor login successful",
       accessToken: token,
       user: profile
     };
