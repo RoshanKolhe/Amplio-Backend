@@ -149,20 +149,20 @@ export class DocumentsController {
       content: {
         'application/json': {
           schema: getModelSchemaRef(Documents, {partial: true}).definitions?.Documents?.properties,
-          screens: {type: 'array', items: 'string'}
+          screenIds: {type: 'array', items: 'string'}
         },
       },
     })
-    documents: Documents & {screens?: string[]},
+    documents: Documents & {screenIds?: string[]},
   ): Promise<void> {
     const tx = await this.documentsRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
     try {
-      const {screens, ...documentsData} = documents;
+      const {screenIds = [], ...documentsData} = documents;
       await this.documentsRepository.updateById(id, documentsData, {transaction: tx});
 
       await this.documentsRepository.screens(id).unlinkAll();
 
-      for (const screenId of screens) {
+      for (const screenId of screenIds) {
         await this.documentsRepository.screens(id).link(screenId);
       }
 
