@@ -157,6 +157,7 @@ export class DocumentsController {
   ): Promise<void> {
     const tx = await this.documentsRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
     try {
+      console.log('id', id);
       const {screenIds = [], ...documentsData} = documents;
       await this.documentsRepository.updateById(id, documentsData, {transaction: tx});
 
@@ -171,7 +172,6 @@ export class DocumentsController {
       await tx.rollback();
       throw error;
     }
-    await this.documentsRepository.updateById(id, documents);
   }
 
   // @put('/documents/{id}')
