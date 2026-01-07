@@ -1,4 +1,6 @@
-import {Entity, model, property} from '@loopback/repository';
+import {belongsTo, Entity, model, property} from '@loopback/repository';
+import {Documents} from './documents.model';
+import {Screens} from './screens.model';
 
 @model({
   settings: {
@@ -25,18 +27,10 @@ export class DocumentScreens extends Entity {
   })
   id: string;
 
-  @property({
-    type: 'string',
-    required: true,
-    postgresql: {dataType: 'uuid'},
-  })
+  @belongsTo(() => Documents)
   documentsId: string;
 
-  @property({
-    type: 'string',
-    required: true,
-    postgresql: {dataType: 'uuid'},
-  })
+  @belongsTo(() => Screens)
   screensId: string;
 
   @property({

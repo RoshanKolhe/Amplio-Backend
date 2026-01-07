@@ -149,7 +149,7 @@ export class DocumentsController {
       content: {
         'application/json': {
           schema: getModelSchemaRef(Documents, {partial: true}).definitions?.Documents?.properties,
-          screenIds: {type: 'array', items: 'string'}
+          screenIds: {type: 'array', items:'string'}
         },
       },
     })
@@ -157,7 +157,6 @@ export class DocumentsController {
   ): Promise<void> {
     const tx = await this.documentsRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
     try {
-      console.log('id', id);
       const {screenIds = [], ...documentsData} = documents;
       await this.documentsRepository.updateById(id, documentsData, {transaction: tx});
 

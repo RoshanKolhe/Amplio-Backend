@@ -13,5 +13,4 @@ export * from './roles.controller';
 export * from './screens.controller';
 export * from './trustee-entity-types.controller';
 export * from './trustee-profiles.controller';
-
 export * from './investor-profile.controller';
