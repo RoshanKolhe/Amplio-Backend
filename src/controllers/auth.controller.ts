@@ -1964,7 +1964,7 @@ export class AuthController {
           {
             roleValue: registrationSession.roleValue,
             usersId: newUserProfile.id,
-            status: 1,
+            status: 0,
             humanInteraction: true,
             mode: 0,
             isActive: true,
