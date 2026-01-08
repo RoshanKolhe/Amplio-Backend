@@ -48,12 +48,12 @@ export class InvestorPanCards extends Entity {
 
   @property({
     type: 'string',
-    required: true,
+    required: false,
     jsonSchema: {
       pattern: '^\\d{4}-\\d{2}-\\d{2}$'
     }
   })
-  extractedDateOfBirth: string;
+  extractedDateOfBirth?: string;
 
   @property({
     type: 'string',
