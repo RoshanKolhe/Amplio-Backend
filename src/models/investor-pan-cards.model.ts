@@ -50,6 +50,15 @@ export class InvestorPanCards extends Entity {
     type: 'string',
     required: true,
     jsonSchema: {
+      pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+    }
+  })
+  extractedDateOfBirth: string;
+
+  @property({
+    type: 'string',
+    required: true,
+    jsonSchema: {
       pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
       errorMessage: {
         pattern: 'Invalid PAN format (ABCDE1234F)',
@@ -67,6 +76,15 @@ export class InvestorPanCards extends Entity {
     },
   })
   submittedInvestorName: string;
+
+  @property({
+    type: 'string',
+    required: true,
+    jsonSchema: {
+      pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+    }
+  })
+  submittedDateOfBirth: string;
 
   @property({
     type: 'number',

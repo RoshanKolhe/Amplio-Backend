@@ -1785,7 +1785,8 @@ export class AuthController {
                   extractedPanNumber: {
                     type: 'string',
                     pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
-                  }
+                  },
+                  extractedDateOfBirth: {type: 'string'}
                 }
               },
               submittedPanDetails: {
@@ -1796,7 +1797,8 @@ export class AuthController {
                   submittedPanNumber: {
                     type: 'string',
                     pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
-                  }
+                  },
+                  submittedDateOfBirth: {type: 'string'}
                 }
               },
               panCardDocumentId: {
@@ -1829,10 +1831,12 @@ export class AuthController {
       extractedPanDetails?: {
         extractedInvestorName?: string;
         extractedPanNumber?: string;
+        extractedDateOfBirth?: string;
       };
       submittedPanDetails: {
         submittedInvestorName: string;
         submittedPanNumber: string;
+        submittedDateOfBirth: string;
       };
       panCardDocumentId: string;
       aadharFrontImageId: string;
@@ -1942,8 +1946,10 @@ export class AuthController {
       const investorPanData: any = {
         submittedInvestorName: body.submittedPanDetails.submittedInvestorName,
         submittedPanNumber: body.submittedPanDetails.submittedPanNumber,
+        submittedDateOfBirth: body.submittedPanDetails.submittedDateOfBirth,
         extractedInvestorName: body.extractedPanDetails?.extractedInvestorName,
         extractedPanNumber: body.extractedPanDetails?.extractedPanNumber,
+        extractedDateOfBirth: body.extractedPanDetails?.extractedDateOfBirth,
         panCardDocumentId: body.panCardDocumentId,
         mode: body.humanInteraction ? 1 : 0,
         status: 0,
