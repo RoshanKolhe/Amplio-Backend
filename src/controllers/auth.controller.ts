@@ -1781,7 +1781,7 @@ export class AuthController {
                 type: 'object',
                 required: [],
                 properties: {
-                  extractedCompanyName: {type: 'string'},
+                  extractedInvestorName: {type: 'string'},
                   extractedPanNumber: {
                     type: 'string',
                     pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
@@ -1790,9 +1790,9 @@ export class AuthController {
               },
               submittedPanDetails: {
                 type: 'object',
-                required: ['submittedCompanyName', 'submittedPanNumber'],
+                required: ['submittedInvestorName', 'submittedPanNumber'],
                 properties: {
-                  submittedCompanyName: {type: 'string'},
+                  submittedInvestorName: {type: 'string'},
                   submittedPanNumber: {
                     type: 'string',
                     pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
@@ -1827,11 +1827,11 @@ export class AuthController {
       kycMode: string;
       humanInteraction?: boolean;
       extractedPanDetails?: {
-        extractedCompanyName?: string;
+        extractedInvestorName?: string;
         extractedPanNumber?: string;
       };
       submittedPanDetails: {
-        submittedCompanyName: string;
+        submittedInvestorName: string;
         submittedPanNumber: string;
       };
       panCardDocumentId: string;
@@ -1940,16 +1940,16 @@ export class AuthController {
       // ----------------------------
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const investorPanData: any = {
-        submittedCompanyName: body.submittedPanDetails.submittedCompanyName,
+        submittedInvestorName: body.submittedPanDetails.submittedInvestorName,
         submittedPanNumber: body.submittedPanDetails.submittedPanNumber,
-        extractedCompanyName: body.extractedPanDetails?.extractedCompanyName,
+        extractedInvestorName: body.extractedPanDetails?.extractedInvestorName,
         extractedPanNumber: body.extractedPanDetails?.extractedPanNumber,
         panCardDocumentId: body.panCardDocumentId,
         mode: body.humanInteraction ? 1 : 0,
         status: 0,
         isActive: false,
         isDeleted: false,
-        companyProfilesId: newInvestorProfile.id,
+        investorProfileId: newInvestorProfile.id,
       };
 
       // ----------------------------
@@ -2001,9 +2001,9 @@ export class AuthController {
       //  Auto verification (No Human Interaction)
       // ----------------------------
       if (
-        body.submittedPanDetails.submittedCompanyName !== body.fullName
+        body.submittedPanDetails.submittedInvestorName !== body.fullName
       ) {
-        throw new HttpErrors.BadRequest('PAN details do not match company name');
+        throw new HttpErrors.BadRequest('PAN details do not match investor name');
       }
 
       // // Basic validation: Submitted PAN should match Extracted PAN

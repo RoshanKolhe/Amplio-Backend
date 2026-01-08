@@ -1,6 +1,6 @@
-import {Entity, model, property, belongsTo} from '@loopback/repository';
-import {Media} from './media.model';
+import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {InvestorProfile} from './investor-profile.model';
+import {Media} from './media.model';
 
 @model({
   settings: {
@@ -44,7 +44,7 @@ export class InvestorPanCards extends Entity {
       maxLength: 200,
     },
   })
-  extractedTrusteeName?: string;
+  extractedInvestorName?: string;
 
   @property({
     type: 'string',
@@ -66,7 +66,7 @@ export class InvestorPanCards extends Entity {
       maxLength: 200,
     },
   })
-  submittedTrusteeName: string;
+  submittedInvestorName: string;
 
   @property({
     type: 'number',
