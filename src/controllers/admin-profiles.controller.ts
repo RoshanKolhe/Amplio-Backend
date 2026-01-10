@@ -576,7 +576,6 @@ export class AdminProfilesController {
   @get('/investor-profiles/{investorId}/bank-details')
   async fetchInvestorBankDetails(
     @param.path.string('investorId') investorId: string,
-    @param.path.string('accountId') accountId: string,
   ): Promise<{success: boolean; message: string; bankDetails: BankDetails | null}> {
     const investorProfile = await this.companyProfilesRepository.findOne({
       where: {
