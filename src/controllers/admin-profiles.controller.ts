@@ -4,7 +4,7 @@ import {Filter, repository} from '@loopback/repository';
 import {get, HttpErrors, param, patch, requestBody} from '@loopback/rest';
 import {authorize} from '../authorization';
 import {AuthorizeSignatories, BankDetails, UserUploadedDocuments} from '../models';
-import {CompanyProfilesRepository, TrusteeProfilesRepository} from '../repositories';
+import {CompanyProfilesRepository, InvestorProfileRepository, TrusteeProfilesRepository} from '../repositories';
 import {BankDetailsService} from '../services/bank-details.service';
 import {AuthorizeSignatoriesService} from '../services/signatories.service';
 import {UserUploadedDocumentsService} from '../services/user-documents.service';
@@ -15,6 +15,8 @@ export class AdminProfilesController {
     private trusteeProfilesRepository: TrusteeProfilesRepository,
     @repository(CompanyProfilesRepository)
     private companyProfilesRepository: CompanyProfilesRepository,
+    @repository(InvestorProfileRepository)
+    private investorProfileRepository: InvestorProfileRepository,
     @inject('service.userUploadedDocuments.service')
     private userUploadDocumentsService: UserUploadedDocumentsService,
     @inject('service.bankDetails.service')
@@ -577,7 +579,7 @@ export class AdminProfilesController {
   async fetchInvestorBankDetails(
     @param.path.string('investorId') investorId: string,
   ): Promise<{success: boolean; message: string; bankDetails: BankDetails | null}> {
-    const investorProfile = await this.companyProfilesRepository.findOne({
+    const investorProfile = await this.investorProfileRepository.findOne({
       where: {
         and: [
           {id: investorId},
