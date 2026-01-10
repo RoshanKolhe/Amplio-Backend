@@ -98,6 +98,22 @@ export class KycControllerController {
         };
       }
 
+      if (kycApplication.roleValue === 'investor') {
+        result = await this.kycService.handleInvestorKycApplication(
+          kycApplication.id,
+          kycApplication.identifierId,
+          body.status,
+          body.reason ?? '',
+          tx
+        );
+
+        await tx.commit();
+        return {
+          success: true,
+          message: result.message
+        };
+      }
+
       throw new HttpErrors.BadRequest('Invalid role value');
 
     } catch (error) {

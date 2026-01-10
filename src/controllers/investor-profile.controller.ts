@@ -1,7 +1,7 @@
 import {authenticate, AuthenticationBindings} from '@loopback/authentication';
 import {inject} from '@loopback/core';
-import {Filter, repository} from '@loopback/repository';
-import {get, HttpErrors, param, post, requestBody} from '@loopback/rest';
+import {Filter, IsolationLevel, repository} from '@loopback/repository';
+import {get, getModelSchemaRef, HttpErrors, param, patch, post, requestBody} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
 import {BankDetails, InvestorProfile} from '../models';
@@ -232,7 +232,7 @@ export class InvestorProfileController {
       usersId: body.usersId,
       mode: 1,
       status: 0,
-      roleValue: 'company'
+      roleValue: 'investor'
     });
 
     const result = await this.bankDetailsService.createNewBankAccount(bankData);
@@ -359,5 +359,83 @@ export class InvestorProfileController {
     }
   }
 
+  // fetch bank account
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @get('/investor-profiles/bank-details')
+  async fetchBankDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+  ): Promise<{success: boolean; message: string; bankDetails: BankDetails | null}> {
+    const investorProfile = await this.investorProfileRepository.findOne({
+      where: {
+        and: [
+          {usersId: currentUser.id},
+          {isDeleted: false}
+        ]
+      }
+    });
 
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor not found');
+    }
+
+    const bankAccountList = await this.bankDetailsService.fetchUserBankAccounts(investorProfile.usersId, 'investor');
+
+    if (!bankAccountList || bankAccountList?.accounts?.length === 0) {
+      return {
+        success: true,
+        message: 'Bank accounts',
+        bankDetails: null
+      }
+    }
+    const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccount(bankAccountList.accounts[0].id);
+
+    return {
+      success: true,
+      message: 'Bank accounts',
+      bankDetails: bankDetailsResponse.account
+    }
+  }
+
+  // Update Bank account info for company...
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @patch('/investor-profiles/bank-details/{accountId}')
+  async updateBankDetailsWithId(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @param.path.string('accountId') accountId: string,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: getModelSchemaRef(BankDetails, {partial: true})
+        }
+      }
+    })
+    accountData: Partial<BankDetails>
+  ): Promise<{success: boolean; message: string; account: BankDetails | null}> {
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+    try {
+      const investorProfile = await this.investorProfileRepository.findOne({
+        where: {
+          and: [
+            {usersId: currentUser.id},
+            {isDeleted: false}
+          ]
+        }
+      }, {transaction: tx});
+
+      if (!investorProfile) {
+        throw new HttpErrors.NotFound('Investor not found');
+      }
+
+      const bankDetailsResponse = await this.bankDetailsService.updateBankAccountInfo(accountId, accountData, tx);
+
+      await tx.commit();
+
+      return bankDetailsResponse;
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
 }

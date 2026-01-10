@@ -1,6 +1,6 @@
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
-import {CompanyPanCardsRepository, CompanyProfilesRepository, KycApplicationsRepository, TrusteePanCardsRepository, TrusteeProfilesRepository} from '../repositories';
+import {CompanyPanCardsRepository, CompanyProfilesRepository, InvestorPanCardsRepository, InvestorProfileRepository, KycApplicationsRepository, TrusteePanCardsRepository, TrusteeProfilesRepository} from '../repositories';
 
 export class KycService {
   constructor(
@@ -12,8 +12,12 @@ export class KycService {
     private companyPanCardsRepository: CompanyPanCardsRepository,
     @repository(TrusteeProfilesRepository)
     private trusteeProfilesRepository: TrusteeProfilesRepository,
+    @repository(InvestorProfileRepository)
+    private investorProfileRepository: InvestorProfileRepository,
     @repository(TrusteePanCardsRepository)
     private trusteePanCardsRepository: TrusteePanCardsRepository,
+    @repository(InvestorPanCardsRepository)
+    private investorPanCardsRepository: InvestorPanCardsRepository,
   ) { }
 
   async handleCompanyKycApplication(
@@ -80,7 +84,7 @@ export class KycService {
       throw new HttpErrors.BadRequest('Invalid status value');
 
     } catch (error) {
-      console.log('error in handleCompanyKycApplication:', error);
+      console.log('error in handle Company Kyc Application:', error);
       throw error;
     }
   }
@@ -141,7 +145,7 @@ export class KycService {
 
         return {
           success: true,
-          message: 'Company KYC rejected',
+          message: 'Trustee KYC rejected',
           kycStatus: 3
         };
       }
@@ -149,7 +153,76 @@ export class KycService {
       throw new HttpErrors.BadRequest('Invalid status value');
 
     } catch (error) {
-      console.log('error in handleCompanyKycApplication:', error);
+      console.log('error in handle Trustee Kyc Application:', error);
+      throw error;
+    }
+  }
+
+  async handleInvestorKycApplication(
+    applicationId: string,
+    investorId: string,
+    status: number,
+    reason: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tx: any
+  ) {
+    try {
+      const investorPanCard = await this.investorPanCardsRepository.findOne(
+        {
+          where: {investorProfileId: investorId},
+          order: ['createdAt DESC']
+        }
+      );
+
+      if (!investorPanCard || !investorPanCard.id) {
+        throw new HttpErrors.NotFound('Unable to fetch pan card details');
+      }
+
+      // update kyc application
+      await this.kycApplicationsRepository.updateById(
+        applicationId,
+        {status, verifiedAt: new Date()},
+        {transaction: tx}
+      );
+
+      // APPROVED
+      if (status === 2) {
+        await this.investorProfileRepository.updateById(
+          investorId,
+          {isActive: true},
+          {transaction: tx}
+        );
+
+        await this.investorPanCardsRepository.updateById(investorPanCard?.id, {status: 1, verifiedAt: new Date()})
+
+        return {
+          success: true,
+          message: 'Investor KYC approved successfully',
+          kycStatus: 2
+        };
+      }
+
+      // REJECTED
+      if (status === 3) {
+        await this.investorProfileRepository.updateById(
+          investorId,
+          {isActive: false},
+          {transaction: tx}
+        );
+
+        await this.investorPanCardsRepository.updateById(investorPanCard?.id, {status: 2, reason: reason})
+
+        return {
+          success: true,
+          message: 'Investor KYC rejected',
+          kycStatus: 3
+        };
+      }
+
+      throw new HttpErrors.BadRequest('Invalid status value');
+
+    } catch (error) {
+      console.log('error in handle Investor Kyc Application:', error);
       throw error;
     }
   }

@@ -566,4 +566,78 @@ export class AdminProfilesController {
 
     return result;
   }
+
+
+  // ------------------------------------------------Investor Profile API's-------------------------------------------------
+
+  // fetch bank account
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/investor-profiles/{investorId}/bank-details')
+  async fetchInvestorBankDetails(
+    @param.path.string('investorId') investorId: string,
+    @param.path.string('accountId') accountId: string,
+  ): Promise<{success: boolean; message: string; bankDetails: BankDetails | null}> {
+    const investorProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        and: [
+          {id: investorId},
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor not found');
+    }
+
+    const bankAccountList = await this.bankDetailsService.fetchUserBankAccounts(investorProfile.usersId, 'investor');
+
+    if (!bankAccountList || bankAccountList?.accounts?.length === 0) {
+      return {
+        success: true,
+        message: 'Bank accounts',
+        bankDetails: null
+      }
+    }
+
+    const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccount(bankAccountList.accounts[0].id);
+
+    return {
+      success: true,
+      message: 'Bank accounts',
+      bankDetails: bankDetailsResponse.account
+    }
+  }
+
+  // super admin investor bank account approval API
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/investor-profiles/bank-account-verification')
+  async investorBankAccountVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status', 'accountId'],
+            properties: {
+              status: {type: 'number'},
+              accountId: {type: 'string'},
+              reason: {type: 'string'}
+            }
+          }
+        }
+      }
+    })
+    body: {
+      status: number;
+      accountId: string;
+      reason?: string;
+    }
+  ): Promise<{success: boolean; message: string}> {
+    const result = await this.bankDetailsService.updateAccountStatus(body.accountId, body.status, body.reason ?? '');
+
+    return result;
+  }
 }
