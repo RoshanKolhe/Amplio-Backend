@@ -361,7 +361,7 @@ export class InvestorProfileController {
 
   // fetch bank account
   @authenticate('jwt')
-  @authorize({roles: ['company']})
+  @authorize({roles: ['investor']})
   @get('/investor-profiles/bank-details')
   async fetchBankDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
