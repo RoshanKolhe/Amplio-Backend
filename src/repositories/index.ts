@@ -22,3 +22,4 @@ export * from './bank-details.repository';
 export * from './authorize-signatories.repository';
 export * from './investor-profile.repository';
 export * from './investor-pan-cards.repository';
+export * from './guarantor.repository';

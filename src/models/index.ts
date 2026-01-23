@@ -23,3 +23,4 @@ export * from './users.model';
 
 export * from './investor-profile.model';
 export * from './investor-pan-cards.model';
+export * from './guarantor.model';
