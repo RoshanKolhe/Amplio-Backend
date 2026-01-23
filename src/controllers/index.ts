@@ -14,3 +14,7 @@ export * from './screens.controller';
 export * from './trustee-entity-types.controller';
 export * from './trustee-profiles.controller';
 export * from './investor-profile.controller';
+export * from './charge-types.controller';
+export * from './collateral-types.controller';
+export * from './ownership-types.controller';
+

@@ -1,6 +1,13 @@
 import {Entity, model, property} from '@loopback/repository';
 
-@model()
+@model({
+  settings: {
+    postgresql: {
+      table: 'business_kyc_guarantor',
+      schema: 'public',
+    },
+  },
+})
 export class Guarantor extends Entity {
   @property({
     type: 'string',

@@ -23,4 +23,9 @@ export * from './users.model';
 
 export * from './investor-profile.model';
 export * from './investor-pan-cards.model';
-export * from './guarantor.model';
+export * from './business-kyc-guarantor.model';
+export * from './business-kyc-collateral-assets.model';
+
+export * from './ownership-types.model';
+export * from './charge-types.model';
+export * from './collateral-types.model';

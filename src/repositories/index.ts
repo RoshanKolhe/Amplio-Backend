@@ -22,4 +22,7 @@ export * from './bank-details.repository';
 export * from './authorize-signatories.repository';
 export * from './investor-profile.repository';
 export * from './investor-pan-cards.repository';
-export * from './guarantor.repository';
+export * from './business-kyc-guarantor.repository';
+export * from './ownership-types.repository';
+export * from './charge-types.repository';
+export * from './collateral-types.repository';
