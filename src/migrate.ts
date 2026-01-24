@@ -40,6 +40,7 @@ export async function migrate(args: string[]) {
       'OwnershipTypes',
       'ChargeTypes',
       'CollateralTypes',
+      'BusinessKyc',
     ]
   });
 

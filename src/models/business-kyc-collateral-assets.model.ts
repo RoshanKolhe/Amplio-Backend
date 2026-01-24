@@ -1,5 +1,8 @@
 import {belongsTo, Entity, model, property} from '@loopback/repository';
+import {ChargeTypes} from './charge-types.model';
+import {CollateralTypes} from './collateral-types.model';
 import {Media} from './media.model';
+import {OwnershipTypes} from './ownership-types.model';
 
 @model({
   settings: {
@@ -58,14 +61,14 @@ export class BusinessKycCollateralAssets extends Entity {
   })
   remark?: string;
 
-  // @belongsTo(() => CollateralTypes)
-  // collateralTypesId: string;
+  @belongsTo(() => CollateralTypes)
+  collateralTypesId: string;
 
-  // @belongsTo(() => ChargeTypes)
-  // chargeTypesId: string;
+  @belongsTo(() => ChargeTypes)
+  chargeTypesId: string;
 
-  // @belongsTo(() => OwnershipTypes)
-  // ownershipTypesId: string;
+  @belongsTo(() => OwnershipTypes)
+  ownershipTypesId: string;
 
   @property({
     type: 'boolean',

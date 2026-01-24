@@ -3,12 +3,12 @@ import {Entity, model, property} from '@loopback/repository';
 @model({
   settings: {
     postgresql: {
-      table: 'business_kyc_guarantor',
+      table: 'business_kyc_client_profile',
       schema: 'public',
     },
   },
 })
-export class Guarantor extends Entity {
+export class BusinessKycClientProfile extends Entity {
   @property({
     type: 'string',
     id: true,
@@ -17,11 +17,13 @@ export class Guarantor extends Entity {
   })
   id?: string;
 
+
   @property({
     type: 'string',
     required: true,
   })
-  guarantorCompanyName: string;
+  clientName: string;
+
 
   @property({
     type: 'string',
@@ -29,67 +31,47 @@ export class Guarantor extends Entity {
   })
   CIN: string;
 
-  @property({
-    type: 'string',
-    required: true,
-  })
-  phoneNumber?: string;
 
   @property({
     type: 'string',
     required: true,
   })
-  email: string;
-
-  @property({
-    type: 'string',
-    required: true,
-  })
-  guarantorType: string;
+  GSTIN: string;
 
   @property({
     type: 'number',
-    required: true,
+    required: true
   })
-  guaranteedAmountLimit: number;
+  turnOvers: number
 
   @property({
     type: 'number',
-    required: true,
+    required: true
   })
-  estimatedNetWorth: number;
+  avgCreditDays: number
 
   @property({
-    type: 'string',
-    required: true,
+    type: 'number',
+    required: true
   })
-  fullName: string;
+  relationships: number
 
   @property({
-    type: 'string',
-    required: true,
+    type: 'number',
+    required: true
   })
-  panNumber: string;
+  avgInvoiceSize: number
 
   @property({
-    type: 'string',
-    required: true,
+    type:'string',
+    required: true
   })
-  adharNumber: string;
+  contactDetails: string
 
-  @property({
-    type: 'string',
-    required: true,
-  })
-  companyPanId: string;
 
-  @property({
-    type: 'string',
-    required: true,
-  })
-  companyAadharId: string;
+  //InvoiceId in remaning here
 
-  @property({
+   @property({
     type: 'boolean',
     default: true,
   })
@@ -118,13 +100,13 @@ export class Guarantor extends Entity {
   })
   deletedAt?: Date;
 
-  constructor(data?: Partial<Guarantor>) {
+  constructor(data?: Partial<BusinessKycClientProfile>) {
     super(data);
   }
 }
 
-export interface GuarantorRelations {
+export interface BusinessKycClientProfileRelations {
   // describe navigational properties here
 }
 
-export type GuarantorWithRelations = Guarantor & GuarantorRelations;
+export type BusinessKycClientProfileWithRelations = BusinessKycClientProfile & BusinessKycClientProfileRelations;

@@ -26,3 +26,5 @@ export * from './business-kyc-guarantor.repository';
 export * from './ownership-types.repository';
 export * from './charge-types.repository';
 export * from './collateral-types.repository';
+export * from './business-kyc.repository';
+export * from './business-kyc-client-profile.repository';

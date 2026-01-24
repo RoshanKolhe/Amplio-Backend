@@ -5,6 +5,7 @@ import {CompanySectorType} from './company-sector-type.model';
 import {KycApplications} from './kyc-applications.model';
 import {Media} from './media.model';
 import {Users} from './users.model';
+import {BusinessKyc} from './business-kyc.model';
 
 @model({
   settings: {
@@ -182,6 +183,9 @@ export class CompanyProfiles extends Entity {
 
   @belongsTo(() => KycApplications)
   kycApplicationsId: string;
+
+  @hasOne(() => BusinessKyc)
+  businessKyc: BusinessKyc;
 
   constructor(data?: Partial<CompanyProfiles>) {
     super(data);

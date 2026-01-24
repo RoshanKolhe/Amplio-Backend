@@ -2,13 +2,14 @@ import {Constructor, Getter, inject} from '@loopback/core';
 import {BelongsToAccessor, DefaultCrudRepository, HasOneRepositoryFactory, repository} from '@loopback/repository';
 import {AmplioDataSource} from '../datasources';
 import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
-import {CompanyPanCards, CompanyProfiles, CompanyProfilesRelations, Media, Users, CompanyEntityType, CompanySectorType, KycApplications} from '../models';
+import {CompanyPanCards, CompanyProfiles, CompanyProfilesRelations, Media, Users, CompanyEntityType, CompanySectorType, KycApplications, BusinessKyc} from '../models';
 import {CompanyPanCardsRepository} from './company-pan-cards.repository';
 import {KycApplicationsRepository} from './kyc-applications.repository';
 import {MediaRepository} from './media.repository';
 import {UsersRepository} from './users.repository';
 import {CompanyEntityTypeRepository} from './company-entity-type.repository';
 import {CompanySectorTypeRepository} from './company-sector-type.repository';
+import {BusinessKycRepository} from './business-kyc.repository';
 
 export class CompanyProfilesRepository extends TimeStampRepositoryMixin<
   CompanyProfiles,
@@ -34,10 +35,14 @@ export class CompanyProfilesRepository extends TimeStampRepositoryMixin<
 
   public readonly kycApplications: BelongsToAccessor<KycApplications, typeof CompanyProfiles.prototype.id>;
 
+  public readonly businessKyc: HasOneRepositoryFactory<BusinessKyc, typeof CompanyProfiles.prototype.id>;
+
   constructor(
-    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('CompanyPanCardsRepository') protected companyPanCardsRepositoryGetter: Getter<CompanyPanCardsRepository>, @repository.getter('KycApplicationsRepository') protected kycApplicationsRepositoryGetter: Getter<KycApplicationsRepository>, @repository.getter('UsersRepository') protected usersRepositoryGetter: Getter<UsersRepository>, @repository.getter('CompanyEntityTypeRepository') protected companyEntityTypeRepositoryGetter: Getter<CompanyEntityTypeRepository>, @repository.getter('CompanySectorTypeRepository') protected companySectorTypeRepositoryGetter: Getter<CompanySectorTypeRepository>
+    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('CompanyPanCardsRepository') protected companyPanCardsRepositoryGetter: Getter<CompanyPanCardsRepository>, @repository.getter('KycApplicationsRepository') protected kycApplicationsRepositoryGetter: Getter<KycApplicationsRepository>, @repository.getter('UsersRepository') protected usersRepositoryGetter: Getter<UsersRepository>, @repository.getter('CompanyEntityTypeRepository') protected companyEntityTypeRepositoryGetter: Getter<CompanyEntityTypeRepository>, @repository.getter('CompanySectorTypeRepository') protected companySectorTypeRepositoryGetter: Getter<CompanySectorTypeRepository>, @repository.getter('BusinessKycRepository') protected businessKycRepositoryGetter: Getter<BusinessKycRepository>,
   ) {
     super(CompanyProfiles, dataSource);
+    this.businessKyc = this.createHasOneRepositoryFactoryFor('businessKyc', businessKycRepositoryGetter);
+    this.registerInclusionResolver('businessKyc', this.businessKyc.inclusionResolver);
     this.kycApplications = this.createBelongsToAccessorFor('kycApplications', kycApplicationsRepositoryGetter,);
     this.registerInclusionResolver('kycApplications', this.kycApplications.inclusionResolver);
     this.companySectorType = this.createBelongsToAccessorFor('companySectorType', companySectorTypeRepositoryGetter,);
