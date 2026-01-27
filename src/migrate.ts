@@ -35,7 +35,6 @@ export async function migrate(args: string[]) {
       // investor profile models..
       'InvestorProfile',
       'InvestorPanCards',
-      'Guarantor',
       'BusinessKycCollateralAssets',
       'OwnershipTypes',
       'ChargeTypes',

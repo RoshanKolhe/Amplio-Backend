@@ -239,19 +239,25 @@ export class AuthController {
   @get('/auth/me')
   async whoAmI(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-  ): Promise<{}> {
-    const user = await this.usersRepository.findOne({
-      where: {
-        id: currentUser.id,
-      },
+  ) {
+    const user = await this.usersRepository.findById(currentUser.id);
+
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {usersId: currentUser.id},
+      fields: {isBusinessKycComplete: true},
     });
-    const userData = _.omit(user, 'password, fullName');
-    return Promise.resolve({
+
+    const userData = _.omit(user, ['password', 'fullName']);
+
+    return {
       ...userData,
       roles: currentUser?.roles,
-      permissions: currentUser?.permissions || []
-    });
+      permissions: currentUser?.permissions || [],
+      isBusinessKycComplete:
+        companyProfile?.isBusinessKycComplete ?? false,
+    };
   }
+
 
   // -----------------------------------------registration verification Otp's---------------------------
   @post('/auth/send-phone-otp')
