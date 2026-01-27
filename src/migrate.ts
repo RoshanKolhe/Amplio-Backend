@@ -31,6 +31,7 @@ export async function migrate(args: string[]) {
       'UserUploadedDocuments',
       'BankDetails',
       'AuthorizeSignatories',
+      'AddressDetails',
 
       // investor profile models..
       'InvestorProfile',

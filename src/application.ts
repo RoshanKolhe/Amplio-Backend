@@ -25,6 +25,7 @@ import {AuthorizeSignatoriesService} from './services/signatories.service';
 import {UserUploadedDocumentsService} from './services/user-documents.service';
 import {MyUserService} from './services/user-service';
 import {KycService} from './services/kyc.service';
+import {AddressDetailsService} from './services/address-details.service';
 
 export {ApplicationConfig};
 
@@ -71,6 +72,7 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.jwt.service').toClass(JWTService);
     this.bind('service.user.service').toClass(MyUserService);
     this.bind('service.documentExtraction.service').toClass(DocumentExtractionService);
+    this.bind('service.AddressDetails.service').toClass(AddressDetailsService);
     this.bind('service.media.service').toClass(MediaService);
     this.bind('service.userUploadedDocuments.service').toClass(UserUploadedDocumentsService);
     this.bind('service.bankDetails.service').toClass(BankDetailsService);

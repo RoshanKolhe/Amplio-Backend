@@ -3,9 +3,19 @@ import {inject} from '@loopback/core';
 import {Filter, repository} from '@loopback/repository';
 import {get, HttpErrors, param, patch, requestBody} from '@loopback/rest';
 import {authorize} from '../authorization';
-import {AuthorizeSignatories, BankDetails, UserUploadedDocuments} from '../models';
-import {CompanyProfilesRepository, InvestorProfileRepository, TrusteeProfilesRepository} from '../repositories';
+import {
+  AddressDetails,
+  AuthorizeSignatories,
+  BankDetails,
+  UserUploadedDocuments,
+} from '../models';
+import {
+  CompanyProfilesRepository,
+  InvestorProfileRepository,
+  TrusteeProfilesRepository,
+} from '../repositories';
 import {BankDetailsService} from '../services/bank-details.service';
+import {AddressDetailsService} from '../services/address-details.service';
 import {AuthorizeSignatoriesService} from '../services/signatories.service';
 import {UserUploadedDocumentsService} from '../services/user-documents.service';
 
@@ -23,7 +33,9 @@ export class AdminProfilesController {
     private bankDetailsService: BankDetailsService,
     @inject('services.AuthorizeSignatoriesService.service')
     private authorizeSignatoriesService: AuthorizeSignatoriesService,
-  ) { }
+    @inject('service.AddressDetails.service')
+    private addressDetailsService: AddressDetailsService,
+  ) {}
 
   // ------------------------------------------------Trustee Profile API's-------------------------------------------------
   // fetch bank accounts...
@@ -35,24 +47,25 @@ export class AdminProfilesController {
   ): Promise<{success: boolean; message: string; bankDetails: BankDetails[]}> {
     const trusteeProfile = await this.trusteeProfilesRepository.findOne({
       where: {
-        and: [
-          {id: trusteeId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: trusteeId}, {isDeleted: false}],
+      },
     });
 
     if (!trusteeProfile) {
       throw new HttpErrors.NotFound('Trustee not found');
     }
 
-    const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccounts(trusteeProfile.usersId, 'trustee');
+    const bankDetailsResponse =
+      await this.bankDetailsService.fetchUserBankAccounts(
+        trusteeProfile.usersId,
+        'trustee',
+      );
 
     return {
       success: true,
       message: 'Bank accounts',
-      bankDetails: bankDetailsResponse.accounts
-    }
+      bankDetails: bankDetailsResponse.accounts,
+    };
   }
 
   // fetch bank account
@@ -65,24 +78,22 @@ export class AdminProfilesController {
   ): Promise<{success: boolean; message: string; bankDetails: BankDetails}> {
     const trusteeProfile = await this.trusteeProfilesRepository.findOne({
       where: {
-        and: [
-          {id: trusteeId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: trusteeId}, {isDeleted: false}],
+      },
     });
 
     if (!trusteeProfile) {
       throw new HttpErrors.NotFound('Trustee not found');
     }
 
-    const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccount(accountId);
+    const bankDetailsResponse =
+      await this.bankDetailsService.fetchUserBankAccount(accountId);
 
     return {
       success: true,
       message: 'Bank accounts',
-      bankDetails: bankDetailsResponse.account
-    }
+      bankDetails: bankDetailsResponse.account,
+    };
   }
 
   // fetch authorize signatories...
@@ -92,27 +103,34 @@ export class AdminProfilesController {
   async fetchAuthorizeSignatories(
     @param.path.string('trusteeId') trusteeId: string,
     @param.filter(AuthorizeSignatories) filter: Filter<AuthorizeSignatories>,
-  ): Promise<{success: boolean; message: string; signatories: AuthorizeSignatories[]}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatories: AuthorizeSignatories[];
+  }> {
     const trusteeProfile = await this.trusteeProfilesRepository.findOne({
       where: {
-        and: [
-          {id: trusteeId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: trusteeId}, {isDeleted: false}],
+      },
     });
 
     if (!trusteeProfile) {
       throw new HttpErrors.NotFound('Trustee not found');
     }
 
-    const signatoriesResponse = await this.authorizeSignatoriesService.fetchAuthorizeSignatories(trusteeProfile.usersId, 'trustee', trusteeProfile.id, filter);
+    const signatoriesResponse =
+      await this.authorizeSignatoriesService.fetchAuthorizeSignatories(
+        trusteeProfile.usersId,
+        'trustee',
+        trusteeProfile.id,
+        filter,
+      );
 
     return {
       success: true,
       message: 'Authorize signatories',
-      signatories: signatoriesResponse.signatories
-    }
+      signatories: signatoriesResponse.signatories,
+    };
   }
 
   // fetch authorize signatory
@@ -122,27 +140,31 @@ export class AdminProfilesController {
   async fetchAuthorizeSignatory(
     @param.path.string('trusteeId') trusteeId: string,
     @param.path.string('signatoryId') signatoryId: string,
-  ): Promise<{success: boolean; message: string; signatory: AuthorizeSignatories}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatory: AuthorizeSignatories;
+  }> {
     const trusteeProfile = await this.trusteeProfilesRepository.findOne({
       where: {
-        and: [
-          {id: trusteeId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: trusteeId}, {isDeleted: false}],
+      },
     });
 
     if (!trusteeProfile) {
       throw new HttpErrors.NotFound('Trustee not found');
     }
 
-    const signatoriesResponse = await this.authorizeSignatoriesService.fetchAuthorizeSignatory(signatoryId);
+    const signatoriesResponse =
+      await this.authorizeSignatoriesService.fetchAuthorizeSignatory(
+        signatoryId,
+      );
 
     return {
       success: true,
       message: 'Authorize signatory data',
-      signatory: signatoriesResponse.signatory
-    }
+      signatory: signatoriesResponse.signatory,
+    };
   }
 
   // fetch documents
@@ -151,27 +173,33 @@ export class AdminProfilesController {
   @get('/trustee-profiles/{trusteeId}/documents')
   async fetchDocuments(
     @param.path.string('trusteeId') trusteeId: string,
-  ): Promise<{success: boolean; message: string; documents: UserUploadedDocuments[]}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    documents: UserUploadedDocuments[];
+  }> {
     const trusteeProfile = await this.trusteeProfilesRepository.findOne({
       where: {
-        and: [
-          {id: trusteeId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: trusteeId}, {isDeleted: false}],
+      },
     });
 
     if (!trusteeProfile) {
       throw new HttpErrors.NotFound('Trustee not found');
     }
 
-    const documentsResponse = await this.userUploadDocumentsService.fetchDocumentsWithUser(trusteeProfile.usersId, trusteeProfile.id, 'trustee');
+    const documentsResponse =
+      await this.userUploadDocumentsService.fetchDocumentsWithUser(
+        trusteeProfile.usersId,
+        trusteeProfile.id,
+        'trustee',
+      );
 
     return {
       success: true,
       message: 'Documents data',
-      documents: documentsResponse.documents
-    }
+      documents: documentsResponse.documents,
+    };
   }
 
   // fetch document...
@@ -181,27 +209,60 @@ export class AdminProfilesController {
   async fetchDocument(
     @param.path.string('trusteeId') trusteeId: string,
     @param.path.string('documentId') documentId: string,
-  ): Promise<{success: boolean; message: string; document: UserUploadedDocuments}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    document: UserUploadedDocuments;
+  }> {
     const trusteeProfile = await this.trusteeProfilesRepository.findOne({
       where: {
-        and: [
-          {id: trusteeId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: trusteeId}, {isDeleted: false}],
+      },
     });
 
     if (!trusteeProfile) {
       throw new HttpErrors.NotFound('Trustee not found');
     }
 
-    const documentsResponse = await this.userUploadDocumentsService.fetchDocumentsWithId(documentId);
+    const documentsResponse =
+      await this.userUploadDocumentsService.fetchDocumentsWithId(documentId);
 
     return {
       success: true,
       message: 'Authorize signatory data',
-      document: documentsResponse.document
+      document: documentsResponse.document,
+    };
+  }
+
+  // fetch trustee address details...
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/trustee-profiles/{trusteeId}/address-details')
+  async fetchTrusteeAddressDetails(
+    @param.path.string('trusteeId') trusteeId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    registeredAddress: AddressDetails | null;
+    correspondenceAddress: AddressDetails | null;
+  }> {
+    const trusteeProfile = await this.trusteeProfilesRepository.findOne({
+      where: {
+        and: [{id: trusteeId}, {isDeleted: false}],
+      },
+    });
+
+    if (!trusteeProfile) {
+      throw new HttpErrors.NotFound('Trustee not found');
     }
+
+    const response = await this.addressDetailsService.fetchUserAddressDetails(
+      trusteeProfile.usersId,
+      'trustee',
+      trusteeProfile.id,
+    );
+
+    return response;
   }
 
   // super admin trustee documents approval API
@@ -218,19 +279,23 @@ export class AdminProfilesController {
             properties: {
               status: {type: 'number'},
               documentId: {type: 'string'},
-              reason: {type: 'string'}
-            }
-          }
-        }
-      }
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       status: number;
       documentId: string;
       reason?: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.userUploadDocumentsService.updateDocumentStatus(body.documentId, body.status, body.reason ?? '');
+    const result = await this.userUploadDocumentsService.updateDocumentStatus(
+      body.documentId,
+      body.status,
+      body.reason ?? '',
+    );
 
     return result;
   }
@@ -249,19 +314,23 @@ export class AdminProfilesController {
             properties: {
               status: {type: 'number'},
               accountId: {type: 'string'},
-              reason: {type: 'string'}
-            }
-          }
-        }
-      }
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       status: number;
       accountId: string;
       reason?: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.bankDetailsService.updateAccountStatus(body.accountId, body.status, body.reason ?? '');
+    const result = await this.bankDetailsService.updateAccountStatus(
+      body.accountId,
+      body.status,
+      body.reason ?? '',
+    );
 
     return result;
   }
@@ -280,19 +349,23 @@ export class AdminProfilesController {
             properties: {
               status: {type: 'number'},
               signatoryId: {type: 'string'},
-              reason: {type: 'string'}
-            }
-          }
-        }
-      }
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       status: number;
       signatoryId: string;
       reason?: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.authorizeSignatoriesService.updateSignatoryStatus(body.signatoryId, body.status, body.reason ?? '');
+    const result = await this.authorizeSignatoriesService.updateSignatoryStatus(
+      body.signatoryId,
+      body.status,
+      body.reason ?? '',
+    );
 
     return result;
   }
@@ -307,24 +380,25 @@ export class AdminProfilesController {
   ): Promise<{success: boolean; message: string; bankDetails: BankDetails[]}> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {id: companyId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: companyId}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccounts(companyProfile.usersId, 'company');
+    const bankDetailsResponse =
+      await this.bankDetailsService.fetchUserBankAccounts(
+        companyProfile.usersId,
+        'company',
+      );
 
     return {
       success: true,
       message: 'Bank accounts',
-      bankDetails: bankDetailsResponse.accounts
-    }
+      bankDetails: bankDetailsResponse.accounts,
+    };
   }
 
   // fetch bank account
@@ -337,24 +411,22 @@ export class AdminProfilesController {
   ): Promise<{success: boolean; message: string; bankDetails: BankDetails}> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {id: companyId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: companyId}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccount(accountId);
+    const bankDetailsResponse =
+      await this.bankDetailsService.fetchUserBankAccount(accountId);
 
     return {
       success: true,
       message: 'Bank accounts',
-      bankDetails: bankDetailsResponse.account
-    }
+      bankDetails: bankDetailsResponse.account,
+    };
   }
 
   // fetch authorize signatories...
@@ -364,27 +436,34 @@ export class AdminProfilesController {
   async fetchCompanyAuthorizeSignatories(
     @param.path.string('companyId') companyId: string,
     @param.filter(AuthorizeSignatories) filter?: Filter<AuthorizeSignatories>,
-  ): Promise<{success: boolean; message: string; signatories: AuthorizeSignatories[]}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatories: AuthorizeSignatories[];
+  }> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {id: companyId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: companyId}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const signatoriesResponse = await this.authorizeSignatoriesService.fetchAuthorizeSignatories(companyProfile.usersId, 'company', companyProfile.id, filter);
+    const signatoriesResponse =
+      await this.authorizeSignatoriesService.fetchAuthorizeSignatories(
+        companyProfile.usersId,
+        'company',
+        companyProfile.id,
+        filter,
+      );
 
     return {
       success: true,
       message: 'Authorize signatories',
-      signatories: signatoriesResponse.signatories
-    }
+      signatories: signatoriesResponse.signatories,
+    };
   }
 
   // fetch authorize signatory
@@ -394,27 +473,31 @@ export class AdminProfilesController {
   async fetchCompanyAuthorizeSignatory(
     @param.path.string('companyId') companyId: string,
     @param.path.string('signatoryId') signatoryId: string,
-  ): Promise<{success: boolean; message: string; signatory: AuthorizeSignatories}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatory: AuthorizeSignatories;
+  }> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {id: companyId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: companyId}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const signatoriesResponse = await this.authorizeSignatoriesService.fetchAuthorizeSignatory(signatoryId);
+    const signatoriesResponse =
+      await this.authorizeSignatoriesService.fetchAuthorizeSignatory(
+        signatoryId,
+      );
 
     return {
       success: true,
       message: 'Authorize signatory data',
-      signatory: signatoriesResponse.signatory
-    }
+      signatory: signatoriesResponse.signatory,
+    };
   }
 
   // fetch documents
@@ -423,27 +506,33 @@ export class AdminProfilesController {
   @get('/company-profiles/{companyId}/documents')
   async fetchCompanyDocuments(
     @param.path.string('companyId') companyId: string,
-  ): Promise<{success: boolean; message: string; documents: UserUploadedDocuments[]}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    documents: UserUploadedDocuments[];
+  }> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {id: companyId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: companyId}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const documentsResponse = await this.userUploadDocumentsService.fetchDocumentsWithUser(companyProfile.usersId, companyProfile.id, 'company');
+    const documentsResponse =
+      await this.userUploadDocumentsService.fetchDocumentsWithUser(
+        companyProfile.usersId,
+        companyProfile.id,
+        'company',
+      );
 
     return {
       success: true,
       message: 'Documents data',
-      documents: documentsResponse.documents
-    }
+      documents: documentsResponse.documents,
+    };
   }
 
   // fetch document...
@@ -453,27 +542,60 @@ export class AdminProfilesController {
   async fetchCompanyDocument(
     @param.path.string('companyId') companyId: string,
     @param.path.string('documentId') documentId: string,
-  ): Promise<{success: boolean; message: string; document: UserUploadedDocuments}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    document: UserUploadedDocuments;
+  }> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {id: companyId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: companyId}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const documentsResponse = await this.userUploadDocumentsService.fetchDocumentsWithId(documentId);
+    const documentsResponse =
+      await this.userUploadDocumentsService.fetchDocumentsWithId(documentId);
 
     return {
       success: true,
       message: 'Document data',
-      document: documentsResponse.document
+      document: documentsResponse.document,
+    };
+  }
+
+  // fetch company address details...
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/company-profiles/{companyId}/address-details')
+  async fetchCompanyAddressDetails(
+    @param.path.string('companyId') companyId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    registeredAddress: AddressDetails | null;
+    correspondenceAddress: AddressDetails | null;
+  }> {
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        and: [{id: companyId}, {isDeleted: false}],
+      },
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company not found');
     }
+
+    const response = await this.addressDetailsService.fetchUserAddressDetails(
+      companyProfile.usersId,
+      'company',
+      companyProfile.id,
+    );
+
+    return response;
   }
 
   // super admin company documents approval API
@@ -490,19 +612,23 @@ export class AdminProfilesController {
             properties: {
               status: {type: 'number'},
               documentId: {type: 'string'},
-              reason: {type: 'string'}
-            }
-          }
-        }
-      }
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       status: number;
       documentId: string;
       reason?: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.userUploadDocumentsService.updateDocumentStatus(body.documentId, body.status, body.reason ?? '');
+    const result = await this.userUploadDocumentsService.updateDocumentStatus(
+      body.documentId,
+      body.status,
+      body.reason ?? '',
+    );
 
     return result;
   }
@@ -521,19 +647,23 @@ export class AdminProfilesController {
             properties: {
               status: {type: 'number'},
               accountId: {type: 'string'},
-              reason: {type: 'string'}
-            }
-          }
-        }
-      }
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       status: number;
       accountId: string;
       reason?: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.bankDetailsService.updateAccountStatus(body.accountId, body.status, body.reason ?? '');
+    const result = await this.bankDetailsService.updateAccountStatus(
+      body.accountId,
+      body.status,
+      body.reason ?? '',
+    );
 
     return result;
   }
@@ -552,23 +682,26 @@ export class AdminProfilesController {
             properties: {
               status: {type: 'number'},
               signatoryId: {type: 'string'},
-              reason: {type: 'string'}
-            }
-          }
-        }
-      }
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       status: number;
       signatoryId: string;
       reason?: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.authorizeSignatoriesService.updateSignatoryStatus(body.signatoryId, body.status, body.reason ?? '');
+    const result = await this.authorizeSignatoriesService.updateSignatoryStatus(
+      body.signatoryId,
+      body.status,
+      body.reason ?? '',
+    );
 
     return result;
   }
-
 
   // ------------------------------------------------Investor Profile API's-------------------------------------------------
 
@@ -578,37 +711,44 @@ export class AdminProfilesController {
   @get('/investor-profiles/{investorId}/bank-details')
   async fetchInvestorBankDetails(
     @param.path.string('investorId') investorId: string,
-  ): Promise<{success: boolean; message: string; bankDetails: BankDetails | null}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    bankDetails: BankDetails | null;
+  }> {
     const investorProfile = await this.investorProfileRepository.findOne({
       where: {
-        and: [
-          {id: investorId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: investorId}, {isDeleted: false}],
+      },
     });
 
     if (!investorProfile) {
       throw new HttpErrors.NotFound('Investor not found');
     }
 
-    const bankAccountList = await this.bankDetailsService.fetchUserBankAccounts(investorProfile.usersId, 'investor');
+    const bankAccountList = await this.bankDetailsService.fetchUserBankAccounts(
+      investorProfile.usersId,
+      'investor',
+    );
 
     if (!bankAccountList || bankAccountList?.accounts?.length === 0) {
       return {
         success: true,
         message: 'Bank accounts',
-        bankDetails: null
-      }
+        bankDetails: null,
+      };
     }
 
-    const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccount(bankAccountList.accounts[0].id);
+    const bankDetailsResponse =
+      await this.bankDetailsService.fetchUserBankAccount(
+        bankAccountList.accounts[0].id,
+      );
 
     return {
       success: true,
       message: 'Bank accounts',
-      bankDetails: bankDetailsResponse.account
-    }
+      bankDetails: bankDetailsResponse.account,
+    };
   }
 
   // super admin investor bank account approval API
@@ -625,19 +765,23 @@ export class AdminProfilesController {
             properties: {
               status: {type: 'number'},
               accountId: {type: 'string'},
-              reason: {type: 'string'}
-            }
-          }
-        }
-      }
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       status: number;
       accountId: string;
       reason?: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.bankDetailsService.updateAccountStatus(body.accountId, body.status, body.reason ?? '');
+    const result = await this.bankDetailsService.updateAccountStatus(
+      body.accountId,
+      body.status,
+      body.reason ?? '',
+    );
 
     return result;
   }

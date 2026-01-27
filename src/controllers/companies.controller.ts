@@ -1,11 +1,29 @@
 import {authenticate, AuthenticationBindings} from '@loopback/authentication';
 import {inject} from '@loopback/core';
 import {Filter, IsolationLevel, repository} from '@loopback/repository';
-import {get, getModelSchemaRef, HttpErrors, param, patch, post, requestBody} from '@loopback/rest';
+import {
+  get,
+  getModelSchemaRef,
+  HttpErrors,
+  param,
+  patch,
+  post,
+  requestBody,
+} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
-import {AuthorizeSignatories, BankDetails, CompanyProfiles, UserUploadedDocuments} from '../models';
-import {CompanyProfilesRepository, KycApplicationsRepository} from '../repositories';
+import {
+  AddressDetails,
+  AuthorizeSignatories,
+  BankDetails,
+  CompanyProfiles,
+  UserUploadedDocuments,
+} from '../models';
+import {
+  CompanyProfilesRepository,
+  KycApplicationsRepository,
+} from '../repositories';
+import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
 import {KycService} from '../services/kyc.service';
 import {MediaService} from '../services/media.service';
@@ -31,13 +49,14 @@ export class CompaniesController {
     private kycService: KycService,
     @inject('service.session.service')
     private sessionService: SessionService,
-  ) { }
+    @inject('service.AddressDetails.service')
+    private addressDetailsService: AddressDetailsService,
+  ) {}
 
   // fetch KYC application status...
-  async getKycApplicationStatus(
-    applicationId: string
-  ): Promise<string[]> {
-    const kycApplication = await this.kycApplicationsRepository.findById(applicationId);
+  async getKycApplicationStatus(applicationId: string): Promise<string[]> {
+    const kycApplication =
+      await this.kycApplicationsRepository.findById(applicationId);
 
     return kycApplication.currentProgress ?? [];
   }
@@ -46,11 +65,15 @@ export class CompaniesController {
   async updateKycProgress(appId: string, step: string) {
     const kyc = await this.kycApplicationsRepository.findById(appId);
 
-    const progress = Array.isArray(kyc.currentProgress) ? kyc.currentProgress : [];
+    const progress = Array.isArray(kyc.currentProgress)
+      ? kyc.currentProgress
+      : [];
 
     if (!progress.includes(step)) {
       progress.push(step);
-      await this.kycApplicationsRepository.updateById(appId, {currentProgress: progress});
+      await this.kycApplicationsRepository.updateById(appId, {
+        currentProgress: progress,
+      });
     }
 
     return progress;
@@ -59,25 +82,52 @@ export class CompaniesController {
   // for companies get current progress at start...
   @get('/company-profiles/kyc-progress/{sessionId}')
   async getCompanyProfileKycProgress(
-    @param.path.string('sessionId') sessionId: string
-  ): Promise<{success: boolean; message: string; currentProgress: string[]; profile: CompanyProfiles | null}> {
+    @param.path.string('sessionId') sessionId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    currentProgress: string[];
+    profile: CompanyProfiles | null;
+  }> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const response: any = await this.sessionService.fetchProfile(sessionId);
     if (response.success && response?.profile?.id) {
       const companyProfile = await this.companyProfilesRepository.findOne({
         where: {
-          and: [
-            {usersId: response?.profile?.id},
-            {isDeleted: false},
-          ]
+          and: [{usersId: response?.profile?.id}, {isDeleted: false}],
         },
         include: [
-          {relation: 'companyPanCards', scope: {include: [{relation: 'panCardDocument', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}]}},
+          {
+            relation: 'companyPanCards',
+            scope: {
+              include: [
+                {
+                  relation: 'panCardDocument',
+                  scope: {
+                    fields: {
+                      fileUrl: true,
+                      id: true,
+                      fileOriginalName: true,
+                      fileType: true,
+                    },
+                  },
+                },
+              ],
+            },
+          },
           {relation: 'companyEntityType'},
           {relation: 'companySectorType'},
-          {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
-          {relation: 'kycApplications', scope: {fields: {id: true, status: true, verifiedAt: true, reason: true}}},
-        ]
+          {
+            relation: 'users',
+            scope: {fields: {id: true, phone: true, email: true}},
+          },
+          {
+            relation: 'kycApplications',
+            scope: {
+              fields: {id: true, status: true, verifiedAt: true, reason: true},
+            },
+          },
+        ],
       });
 
       if (!companyProfile) {
@@ -85,26 +135,28 @@ export class CompaniesController {
           success: true,
           message: 'New Profile',
           currentProgress: [],
-          profile: null
-        }
+          profile: null,
+        };
       }
 
-      const currentProgress = await this.getKycApplicationStatus(companyProfile.kycApplicationsId);
+      const currentProgress = await this.getKycApplicationStatus(
+        companyProfile.kycApplicationsId,
+      );
 
       return {
         success: true,
         message: 'New Profile',
         currentProgress: currentProgress,
-        profile: companyProfile
-      }
+        profile: companyProfile,
+      };
     }
 
     return {
       success: true,
       message: 'New Profile',
       currentProgress: [],
-      profile: null
-    }
+      profile: null,
+    };
   }
 
   // fetch company info with stepper...
@@ -118,7 +170,7 @@ export class CompaniesController {
     const steppersAllowed = [
       'company_documents',
       'company_bank_details',
-      'company_authorized_signatories'
+      'company_authorized_signatories',
     ];
 
     if (!steppersAllowed.includes(stepperId)) {
@@ -127,18 +179,17 @@ export class CompaniesController {
 
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {usersId: usersId},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: usersId}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const currentProgress = await this.getKycApplicationStatus(companyProfile.kycApplicationsId);
+    const currentProgress = await this.getKycApplicationStatus(
+      companyProfile.kycApplicationsId,
+    );
 
     if (!currentProgress.includes(stepperId)) {
       throw new HttpErrors.BadRequest('Please complete the steps');
@@ -149,40 +200,55 @@ export class CompaniesController {
         throw new HttpErrors.NotFound('Params are missing');
       }
 
-      const documentsResponse = await this.userUploadDocumentsService.fetchDocuments(companyProfile.usersId, companyProfile.id, 'company', route);
+      const documentsResponse =
+        await this.userUploadDocumentsService.fetchDocuments(
+          companyProfile.usersId,
+          companyProfile.id,
+          'company',
+          route,
+        );
 
       return {
         success: true,
         message: 'Documents Data',
-        data: documentsResponse.documents
-      }
+        data: documentsResponse.documents,
+      };
     }
 
     if (stepperId === 'company_bank_details') {
-      const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccounts(companyProfile.usersId, 'company');
+      const bankDetailsResponse =
+        await this.bankDetailsService.fetchUserBankAccounts(
+          companyProfile.usersId,
+          'company',
+        );
 
       return {
         success: true,
         message: 'Bank accounts',
-        data: bankDetailsResponse.accounts
-      }
+        data: bankDetailsResponse.accounts,
+      };
     }
 
     if (stepperId === 'company_authorized_signatories') {
-      const signatoriesResponse = await this.authorizeSignatoriesService.fetchAuthorizeSignatories(companyProfile.usersId, 'company', companyProfile.id);
+      const signatoriesResponse =
+        await this.authorizeSignatoriesService.fetchAuthorizeSignatories(
+          companyProfile.usersId,
+          'company',
+          companyProfile.id,
+        );
 
       return {
         success: true,
         message: 'Authorize signatories',
-        data: signatoriesResponse.signatories
-      }
+        data: signatoriesResponse.signatories,
+      };
     }
 
     return {
       success: false,
       message: 'No Step found',
-      data: null
-    }
+      data: null,
+    };
   }
 
   // for company but without login just for KYC
@@ -203,44 +269,60 @@ export class CompaniesController {
                   required: ['documentsId', 'documentsFileId'],
                   properties: {
                     documentsId: {type: 'string'},
-                    documentsFileId: {type: 'string'}
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+                    documentsFileId: {type: 'string'},
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     })
     body: {
       usersId: string;
-      documents: {documentsId: string; documentsFileId: string;}[];
-    }
-  ): Promise<{success: boolean; message: string; uploadedDocuments: UserUploadedDocuments[]; currentProgress: string[]}> {
-    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+      documents: {documentsId: string; documentsFileId: string}[];
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    uploadedDocuments: UserUploadedDocuments[];
+    currentProgress: string[];
+  }> {
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
 
     try {
       const company = await this.companyProfilesRepository.findOne(
         {where: {usersId: body.usersId, isDeleted: false}},
-        {transaction: tx}
+        {transaction: tx},
       );
 
-      if (!company) throw new HttpErrors.NotFound("Company not found");
+      if (!company) throw new HttpErrors.NotFound('Company not found');
 
-      const newDocs = body.documents.map(doc => new UserUploadedDocuments({
-        ...doc,
-        roleValue: 'company',
-        identifierId: company.id,
-        usersId: body.usersId,
-        status: 0,
-        mode: 1,
-        isActive: true,
-        isDeleted: false,
-      }));
+      const newDocs = body.documents.map(
+        doc =>
+          new UserUploadedDocuments({
+            ...doc,
+            roleValue: 'company',
+            identifierId: company.id,
+            usersId: body.usersId,
+            status: 0,
+            mode: 1,
+            isActive: true,
+            isDeleted: false,
+          }),
+      );
 
-      const result = await this.userUploadDocumentsService.uploadNewDocuments(newDocs, tx);
+      const result = await this.userUploadDocumentsService.uploadNewDocuments(
+        newDocs,
+        tx,
+      );
 
-      const currentProgress = await this.updateKycProgress(company.kycApplicationsId, "company_documents");
+      const currentProgress = await this.updateKycProgress(
+        company.kycApplicationsId,
+        'company_documents',
+      );
 
       await tx.commit();
 
@@ -264,7 +346,18 @@ export class CompaniesController {
               usersId: {type: 'string'},
               bankDetails: {
                 type: 'object',
-                required: ['bankName', 'bankShortCode', 'ifscCode', 'branchName', 'bankAddress', 'accountType', 'accountHolderName', 'accountNumber', 'bankAccountProofType', 'bankAccountProofId'],
+                required: [
+                  'bankName',
+                  'bankShortCode',
+                  'ifscCode',
+                  'branchName',
+                  'bankAddress',
+                  'accountType',
+                  'accountHolderName',
+                  'accountNumber',
+                  'bankAccountProofType',
+                  'bankAccountProofId',
+                ],
                 properties: {
                   bankName: {type: 'string'},
                   bankShortCode: {type: 'string'},
@@ -275,13 +368,13 @@ export class CompaniesController {
                   accountHolderName: {type: 'string'},
                   accountNumber: {type: 'string'},
                   bankAccountProofType: {type: 'number'},
-                  bankAccountProofId: {type: 'string'}
-                }
-              }
-            }
-          }
-        }
-      }
+                  bankAccountProofId: {type: 'string'},
+                },
+              },
+            },
+          },
+        },
+      },
     })
     body: {
       usersId: string;
@@ -296,8 +389,8 @@ export class CompaniesController {
         accountNumber: string;
         bankAccountProofType: number;
         bankAccountProofId: string;
-      }
-    }
+      };
+    },
   ): Promise<{
     success: boolean;
     message: string;
@@ -305,22 +398,25 @@ export class CompaniesController {
     currentProgress: string[];
   }> {
     const company = await this.companyProfilesRepository.findOne({
-      where: {usersId: body.usersId, isDeleted: false}
+      where: {usersId: body.usersId, isDeleted: false},
     });
 
-    if (!company) throw new HttpErrors.NotFound("Company not found");
+    if (!company) throw new HttpErrors.NotFound('Company not found');
 
     const bankData = new BankDetails({
       ...body.bankDetails,
       usersId: body.usersId,
       mode: 1,
       status: 0,
-      roleValue: 'company'
+      roleValue: 'company',
     });
 
     const result = await this.bankDetailsService.createNewBankAccount(bankData);
 
-    const currentProgress = await this.updateKycProgress(company.kycApplicationsId, "company_bank_details");
+    const currentProgress = await this.updateKycProgress(
+      company.kycApplicationsId,
+      'company_bank_details',
+    );
 
     return {...result, currentProgress};
   }
@@ -340,7 +436,18 @@ export class CompaniesController {
                 type: 'array',
                 items: {
                   type: 'object',
-                  required: ['fullName', 'email', 'phone', 'submittedPanFullName', 'submittedPanNumber', 'submittedDateOfBirth', 'panCardFileId', 'boardResolutionFileId', 'designationType', 'designationValue'],
+                  required: [
+                    'fullName',
+                    'email',
+                    'phone',
+                    'submittedPanFullName',
+                    'submittedPanNumber',
+                    'submittedDateOfBirth',
+                    'panCardFileId',
+                    'boardResolutionFileId',
+                    'designationType',
+                    'designationValue',
+                  ],
                   properties: {
                     fullName: {type: 'string'},
                     email: {type: 'string'},
@@ -354,14 +461,14 @@ export class CompaniesController {
                     panCardFileId: {type: 'string'},
                     boardResolutionFileId: {type: 'string'},
                     designationType: {type: 'string'},
-                    designationValue: {type: 'string'}
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+                    designationValue: {type: 'string'},
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     })
     body: {
       usersId: string;
@@ -379,8 +486,8 @@ export class CompaniesController {
         boardResolutionFileId: string;
         designationType: string;
         designationValue: string;
-      }>
-    }
+      }>;
+    },
   ): Promise<{
     success: boolean;
     message: string;
@@ -394,36 +501,49 @@ export class CompaniesController {
     }>;
     currentProgress: string[];
   }> {
-    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
 
     try {
       const company = await this.companyProfilesRepository.findOne(
         {where: {usersId: body.usersId, isDeleted: false}},
-        {transaction: tx}
+        {transaction: tx},
       );
 
-      if (!company) throw new HttpErrors.NotFound("Company not found");
+      if (!company) throw new HttpErrors.NotFound('Company not found');
 
-      const signatoriesData = body.signatories.map(s => new AuthorizeSignatories({
-        ...s,
-        usersId: body.usersId,
-        roleValue: "company",
-        identifierId: company.id,
-        isActive: true,
-        isDeleted: false
-      }));
+      const signatoriesData = body.signatories.map(
+        s =>
+          new AuthorizeSignatories({
+            ...s,
+            usersId: body.usersId,
+            roleValue: 'company',
+            identifierId: company.id,
+            isActive: true,
+            isDeleted: false,
+          }),
+      );
 
-      const result = await this.authorizeSignatoriesService.createAuthorizeSignatories(signatoriesData, tx);
+      const result =
+        await this.authorizeSignatoriesService.createAuthorizeSignatories(
+          signatoriesData,
+          tx,
+        );
 
-      let currentProgress = await this.getKycApplicationStatus(company.kycApplicationsId);
+      let currentProgress = await this.getKycApplicationStatus(
+        company.kycApplicationsId,
+      );
 
       if (result.createdAuthorizeSignatories.length > 0) {
-        currentProgress = await this.updateKycProgress(company.kycApplicationsId, "company_authorized_signatories");
+        currentProgress = await this.updateKycProgress(
+          company.kycApplicationsId,
+          'company_authorized_signatories',
+        );
       }
 
       await tx.commit();
       return {...result, currentProgress};
-
     } catch (err) {
       await tx.rollback();
       throw err;
@@ -443,7 +563,18 @@ export class CompaniesController {
               usersId: {type: 'string'},
               signatory: {
                 type: 'object',
-                required: ['fullName', 'email', 'phone', 'submittedPanFullName', 'submittedPanNumber', 'submittedDateOfBirth', 'panCardFileId', 'boardResolutionFileId', 'designationType', 'designationValue'],
+                required: [
+                  'fullName',
+                  'email',
+                  'phone',
+                  'submittedPanFullName',
+                  'submittedPanNumber',
+                  'submittedDateOfBirth',
+                  'panCardFileId',
+                  'boardResolutionFileId',
+                  'designationType',
+                  'designationValue',
+                ],
                 properties: {
                   fullName: {type: 'string'},
                   email: {type: 'string'},
@@ -457,13 +588,13 @@ export class CompaniesController {
                   panCardFileId: {type: 'string'},
                   boardResolutionFileId: {type: 'string'},
                   designationType: {type: 'string'},
-                  designationValue: {type: 'string'}
-                }
-              }
-            }
-          }
-        }
-      }
+                  designationValue: {type: 'string'},
+                },
+              },
+            },
+          },
+        },
+      },
     })
     body: {
       usersId: string;
@@ -481,40 +612,47 @@ export class CompaniesController {
         boardResolutionFileId: string;
         designationType: string;
         designationValue: string;
-      }
-    }
+      };
+    },
   ): Promise<{
     success: boolean;
     message: string;
     signatory: AuthorizeSignatories;
     currentProgress: string[];
   }> {
-    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
 
     try {
       const company = await this.companyProfilesRepository.findOne(
         {where: {usersId: body.usersId, isDeleted: false}},
-        {transaction: tx}
+        {transaction: tx},
       );
 
-      if (!company) throw new HttpErrors.NotFound("Company not found");
+      if (!company) throw new HttpErrors.NotFound('Company not found');
 
       const signatoriesData = new AuthorizeSignatories({
         ...body.signatory,
         usersId: body.usersId,
-        roleValue: "company",
+        roleValue: 'company',
         identifierId: company.id,
         isActive: true,
-        isDeleted: false
+        isDeleted: false,
       });
 
-      const result = await this.authorizeSignatoriesService.createAuthorizeSignatory(signatoriesData);
+      const result =
+        await this.authorizeSignatoriesService.createAuthorizeSignatory(
+          signatoriesData,
+        );
 
-      const currentProgress = await this.updateKycProgress(company.kycApplicationsId, "company_authorized_signatories");
+      const currentProgress = await this.updateKycProgress(
+        company.kycApplicationsId,
+        'company_authorized_signatories',
+      );
 
       await tx.commit();
       return {...result, currentProgress};
-
     } catch (err) {
       await tx.rollback();
       throw err;
@@ -526,23 +664,42 @@ export class CompaniesController {
   @authorize({roles: ['company']})
   @get('/company-profiles/me')
   async getMyCompanyProfile(
-    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
   ): Promise<{success: boolean; message: string; profile: CompanyProfiles}> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {usersId: currentUser.id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
+        and: [{usersId: currentUser.id}, {isActive: true}, {isDeleted: false}],
       },
       include: [
-        {relation: 'companyPanCards', scope: {include: [{relation: 'panCardDocument', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}]}},
-        {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
+        {
+          relation: 'companyPanCards',
+          scope: {
+            include: [
+              {
+                relation: 'panCardDocument',
+                scope: {
+                  fields: {
+                    fileUrl: true,
+                    id: true,
+                    fileOriginalName: true,
+                    fileType: true,
+                  },
+                },
+              },
+            ],
+          },
+        },
+        {
+          relation: 'users',
+          scope: {fields: {id: true, phone: true, email: true}},
+        },
         {relation: 'companyEntityType'},
         {relation: 'companySectorType'},
-        {relation: 'companyLogoData', scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}}},
-      ]
+        {
+          relation: 'companyLogoData',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+        },
+      ],
     });
 
     if (!companyProfile) {
@@ -552,8 +709,8 @@ export class CompaniesController {
     return {
       success: true,
       message: 'Company Profile data',
-      profile: companyProfile
-    }
+      profile: companyProfile,
+    };
   }
 
   // Get company profiles...
@@ -569,20 +726,23 @@ export class CompaniesController {
     data: {
       count: number;
       profiles: CompanyProfiles[];
-    }
+    };
   }> {
     let rootWhere = {
-      ...filter?.where
+      ...filter?.where,
     };
 
     if (status !== undefined && status !== null) {
-      const filteredProfiles = await this.kycService.handleKycApplicationFilter(status, 'company');
+      const filteredProfiles = await this.kycService.handleKycApplicationFilter(
+        status,
+        'company',
+      );
 
       rootWhere = {
         ...filter?.where,
-        id: {inq: filteredProfiles.profileIds}
-      }
-    };
+        id: {inq: filteredProfiles.profileIds},
+      };
+    }
 
     const company = await this.companyProfilesRepository.find({
       ...filter,
@@ -590,24 +750,35 @@ export class CompaniesController {
       limit: filter?.limit ?? 10,
       skip: filter?.skip ?? 0,
       include: [
-        {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
-        {relation: 'kycApplications', scope: {fields: {id: true, usersId: true, status: true, mode: true}}},
+        {
+          relation: 'users',
+          scope: {fields: {id: true, phone: true, email: true}},
+        },
+        {
+          relation: 'kycApplications',
+          scope: {fields: {id: true, usersId: true, status: true, mode: true}},
+        },
         {relation: 'companyEntityType'},
         {relation: 'companySectorType'},
-        {relation: 'companyLogoData', scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}}},
-      ]
+        {
+          relation: 'companyLogoData',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+        },
+      ],
     });
 
-    const totalCount = (await this.companyProfilesRepository.count(filter?.where)).count;
+    const totalCount = (
+      await this.companyProfilesRepository.count(filter?.where)
+    ).count;
 
     return {
       success: true,
       message: 'Company Profiles',
       data: {
         count: totalCount,
-        profiles: company
-      }
-    }
+        profiles: company,
+      },
+    };
   }
 
   // Get company profiles by id...
@@ -625,20 +796,43 @@ export class CompaniesController {
     const company = await this.companyProfilesRepository.findById(id, {
       ...filter,
       include: [
-        {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
+        {
+          relation: 'users',
+          scope: {fields: {id: true, phone: true, email: true}},
+        },
         {relation: 'kycApplications'},
-        {relation: 'companyPanCards', scope: {include: [{relation: 'panCardDocument', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}]}},
+        {
+          relation: 'companyPanCards',
+          scope: {
+            include: [
+              {
+                relation: 'panCardDocument',
+                scope: {
+                  fields: {
+                    fileUrl: true,
+                    id: true,
+                    fileOriginalName: true,
+                    fileType: true,
+                  },
+                },
+              },
+            ],
+          },
+        },
         {relation: 'companyEntityType'},
         {relation: 'companySectorType'},
-        {relation: 'companyLogoData', scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}}},
-      ]
+        {
+          relation: 'companyLogoData',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+        },
+      ],
     });
 
     return {
       success: true,
       message: 'Company Profiles',
-      data: company
-    }
+      data: company,
+    };
   }
 
   // update company general data...
@@ -654,57 +848,90 @@ export class CompaniesController {
             type: 'object',
             properties: {
               companyLogo: {type: 'string'},
-              companyAbout: {type: 'string'}
-            }
-          }
-        }
-      }
+              companyAbout: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       companyLogo?: string;
       companyAbout?: string;
-    }
+    },
   ): Promise<{
     success: boolean;
     message: string;
-    updatedProfile: CompanyProfiles
+    updatedProfile: CompanyProfiles;
   }> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {usersId: currentUser.id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: currentUser.id}, {isActive: true}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    await this.companyProfilesRepository.updateById(companyProfile.id, {...body});
-
-    const updatedCompanyProfile = await this.companyProfilesRepository.findById(companyProfile.id, {
-      include: [
-        {relation: 'companyPanCards', scope: {include: [{relation: 'panCardDocument', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}]}},
-        {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
-        {relation: 'companyEntityType'},
-        {relation: 'companySectorType'},
-        {relation: 'companyLogoData', scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}}},
-      ]
+    await this.companyProfilesRepository.updateById(companyProfile.id, {
+      ...body,
     });
 
-    if (companyProfile.companyLogo && companyProfile.companyLogo !== updatedCompanyProfile.companyLogo) {
-      await this.mediaService.updateMediaUsedStatus([companyProfile.companyLogo], false);
-      await this.mediaService.updateMediaUsedStatus([updatedCompanyProfile.companyLogo], true);
+    const updatedCompanyProfile = await this.companyProfilesRepository.findById(
+      companyProfile.id,
+      {
+        include: [
+          {
+            relation: 'companyPanCards',
+            scope: {
+              include: [
+                {
+                  relation: 'panCardDocument',
+                  scope: {
+                    fields: {
+                      fileUrl: true,
+                      id: true,
+                      fileOriginalName: true,
+                      fileType: true,
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          {
+            relation: 'users',
+            scope: {fields: {id: true, phone: true, email: true}},
+          },
+          {relation: 'companyEntityType'},
+          {relation: 'companySectorType'},
+          {
+            relation: 'companyLogoData',
+            scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+          },
+        ],
+      },
+    );
+
+    if (
+      companyProfile.companyLogo &&
+      companyProfile.companyLogo !== updatedCompanyProfile.companyLogo
+    ) {
+      await this.mediaService.updateMediaUsedStatus(
+        [companyProfile.companyLogo],
+        false,
+      );
+      await this.mediaService.updateMediaUsedStatus(
+        [updatedCompanyProfile.companyLogo],
+        true,
+      );
     }
 
     return {
       success: true,
       message: 'Company profile updated',
-      updatedProfile: updatedCompanyProfile
-    }
+      updatedProfile: updatedCompanyProfile,
+    };
   }
 
   // for Company documents upload
@@ -727,41 +954,53 @@ export class CompaniesController {
                   required: ['documentsId', 'documentsFileId'],
                   properties: {
                     documentsId: {type: 'string'},
-                    documentsFileId: {type: 'string'}
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+                    documentsFileId: {type: 'string'},
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     })
     body: {
-      documents: {documentsId: string; documentsFileId: string;}[];
-    }
-  ): Promise<{success: boolean; message: string; uploadedDocuments: UserUploadedDocuments[]}> {
-    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+      documents: {documentsId: string; documentsFileId: string}[];
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    uploadedDocuments: UserUploadedDocuments[];
+  }> {
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
 
     try {
       const company = await this.companyProfilesRepository.findOne(
         {where: {usersId: currentUser.id, isDeleted: false}},
-        {transaction: tx}
+        {transaction: tx},
       );
 
-      if (!company) throw new HttpErrors.NotFound("Company not found");
+      if (!company) throw new HttpErrors.NotFound('Company not found');
 
-      const newDocs = body.documents.map(doc => new UserUploadedDocuments({
-        ...doc,
-        roleValue: 'company',
-        identifierId: company.id,
-        usersId: company.usersId,
-        status: 0,
-        mode: 1,
-        isActive: true,
-        isDeleted: false,
-      }));
+      const newDocs = body.documents.map(
+        doc =>
+          new UserUploadedDocuments({
+            ...doc,
+            roleValue: 'company',
+            identifierId: company.id,
+            usersId: company.usersId,
+            status: 0,
+            mode: 1,
+            isActive: true,
+            isDeleted: false,
+          }),
+      );
 
-      const result = await this.userUploadDocumentsService.uploadNewDocuments(newDocs, tx);
+      const result = await this.userUploadDocumentsService.uploadNewDocuments(
+        newDocs,
+        tx,
+      );
 
       await tx.commit();
 
@@ -890,7 +1129,18 @@ export class CompaniesController {
             properties: {
               signatory: {
                 type: 'object',
-                required: ['fullName', 'email', 'phone', 'submittedPanFullName', 'submittedPanNumber', 'submittedDateOfBirth', 'panCardFileId', 'boardResolutionFileId', 'designationType', 'designationValue'],
+                required: [
+                  'fullName',
+                  'email',
+                  'phone',
+                  'submittedPanFullName',
+                  'submittedPanNumber',
+                  'submittedDateOfBirth',
+                  'panCardFileId',
+                  'boardResolutionFileId',
+                  'designationType',
+                  'designationValue',
+                ],
                 properties: {
                   fullName: {type: 'string'},
                   email: {type: 'string'},
@@ -904,13 +1154,13 @@ export class CompaniesController {
                   panCardFileId: {type: 'string'},
                   boardResolutionFileId: {type: 'string'},
                   designationType: {type: 'string'},
-                  designationValue: {type: 'string'}
-                }
-              }
-            }
-          }
-        }
-      }
+                  designationValue: {type: 'string'},
+                },
+              },
+            },
+          },
+        },
+      },
     })
     body: {
       signatory: {
@@ -927,43 +1177,45 @@ export class CompaniesController {
         boardResolutionFileId: string;
         designationType: string;
         designationValue: string;
-      }
-    }
+      };
+    },
   ): Promise<{
     success: boolean;
     message: string;
     signatory: AuthorizeSignatories;
   }> {
-    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
 
     try {
-      const company = await this.companyProfilesRepository.findOne({
-        where: {
-          and: [
-            {usersId: currentUser.id},
-            {isDeleted: false}
-          ]
-        }
-      },
-        {transaction: tx}
+      const company = await this.companyProfilesRepository.findOne(
+        {
+          where: {
+            and: [{usersId: currentUser.id}, {isDeleted: false}],
+          },
+        },
+        {transaction: tx},
       );
 
-      if (!company) throw new HttpErrors.NotFound("Company not found");
+      if (!company) throw new HttpErrors.NotFound('Company not found');
 
       const signatoriesData = new AuthorizeSignatories({
         ...body.signatory,
         usersId: company.usersId,
-        roleValue: "company",
+        roleValue: 'company',
         identifierId: company.id,
         isActive: true,
-        isDeleted: false
+        isDeleted: false,
       });
 
-      const result = await this.authorizeSignatoriesService.createAuthorizeSignatory(signatoriesData);
+      const result =
+        await this.authorizeSignatoriesService.createAuthorizeSignatory(
+          signatoriesData,
+        );
 
       await tx.commit();
       return result;
-
     } catch (err) {
       await tx.rollback();
       throw err;
@@ -985,7 +1237,18 @@ export class CompaniesController {
             properties: {
               bankDetails: {
                 type: 'object',
-                required: ['bankName', 'bankShortCode', 'ifscCode', 'branchName', 'bankAddress', 'accountType', 'accountHolderName', 'accountNumber', 'bankAccountProofType', 'bankAccountProofId'],
+                required: [
+                  'bankName',
+                  'bankShortCode',
+                  'ifscCode',
+                  'branchName',
+                  'bankAddress',
+                  'accountType',
+                  'accountHolderName',
+                  'accountNumber',
+                  'bankAccountProofType',
+                  'bankAccountProofId',
+                ],
                 properties: {
                   bankName: {type: 'string'},
                   bankShortCode: {type: 'string'},
@@ -996,13 +1259,13 @@ export class CompaniesController {
                   accountHolderName: {type: 'string'},
                   accountNumber: {type: 'string'},
                   bankAccountProofType: {type: 'number'},
-                  bankAccountProofId: {type: 'string'}
-                }
-              }
-            }
-          }
-        }
-      }
+                  bankAccountProofId: {type: 'string'},
+                },
+              },
+            },
+          },
+        },
+      },
     })
     body: {
       bankDetails: {
@@ -1016,8 +1279,8 @@ export class CompaniesController {
         accountNumber: string;
         bankAccountProofType: number;
         bankAccountProofId: string;
-      }
-    }
+      };
+    },
   ): Promise<{
     success: boolean;
     message: string;
@@ -1025,23 +1288,20 @@ export class CompaniesController {
   }> {
     const company = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {usersId: currentUser.id},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
     });
 
     console.log('company Data', company);
 
-    if (!company) throw new HttpErrors.NotFound("Company not found");
+    if (!company) throw new HttpErrors.NotFound('Company not found');
 
     const bankData = new BankDetails({
       ...body.bankDetails,
       usersId: company.usersId,
       mode: 1,
       status: 0,
-      roleValue: 'company'
+      roleValue: 'company',
     });
 
     const result = await this.bankDetailsService.createNewBankAccount(bankData);
@@ -1058,24 +1318,25 @@ export class CompaniesController {
   ): Promise<{success: boolean; message: string; bankDetails: BankDetails[]}> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {usersId: currentUser.id},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccounts(companyProfile.usersId, 'company');
+    const bankDetailsResponse =
+      await this.bankDetailsService.fetchUserBankAccounts(
+        companyProfile.usersId,
+        'company',
+      );
 
     return {
       success: true,
       message: 'Bank accounts',
-      bankDetails: bankDetailsResponse.accounts
-    }
+      bankDetails: bankDetailsResponse.accounts,
+    };
   }
 
   // fetch bank account
@@ -1088,24 +1349,22 @@ export class CompaniesController {
   ): Promise<{success: boolean; message: string; bankDetails: BankDetails}> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {usersId: currentUser.id},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccount(accountId);
+    const bankDetailsResponse =
+      await this.bankDetailsService.fetchUserBankAccount(accountId);
 
     return {
       success: true,
       message: 'Bank accounts',
-      bankDetails: bankDetailsResponse.account
-    }
+      bankDetails: bankDetailsResponse.account,
+    };
   }
 
   // Update Bank account info for company...
@@ -1118,28 +1377,35 @@ export class CompaniesController {
     @requestBody({
       content: {
         'application/json': {
-          schema: getModelSchemaRef(BankDetails, {partial: true})
-        }
-      }
+          schema: getModelSchemaRef(BankDetails, {partial: true}),
+        },
+      },
     })
-    accountData: Partial<BankDetails>
+    accountData: Partial<BankDetails>,
   ): Promise<{success: boolean; message: string; account: BankDetails | null}> {
-    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
     try {
-      const companyProfile = await this.companyProfilesRepository.findOne({
-        where: {
-          and: [
-            {usersId: currentUser.id},
-            {isDeleted: false}
-          ]
-        }
-      }, {transaction: tx});
+      const companyProfile = await this.companyProfilesRepository.findOne(
+        {
+          where: {
+            and: [{usersId: currentUser.id}, {isDeleted: false}],
+          },
+        },
+        {transaction: tx},
+      );
 
       if (!companyProfile) {
         throw new HttpErrors.NotFound('Company not found');
       }
 
-      const bankDetailsResponse = await this.bankDetailsService.updateBankAccountInfo(accountId, accountData, tx);
+      const bankDetailsResponse =
+        await this.bankDetailsService.updateBankAccountInfo(
+          accountId,
+          accountData,
+          tx,
+        );
 
       await tx.commit();
 
@@ -1158,22 +1424,28 @@ export class CompaniesController {
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @param.path.string('accountId') accountId: string,
   ): Promise<{success: boolean; message: string}> {
-    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
     try {
-      const companyProfile = await this.companyProfilesRepository.findOne({
-        where: {
-          and: [
-            {usersId: currentUser.id},
-            {isDeleted: false}
-          ]
-        }
-      }, {transaction: tx});
+      const companyProfile = await this.companyProfilesRepository.findOne(
+        {
+          where: {
+            and: [{usersId: currentUser.id}, {isDeleted: false}],
+          },
+        },
+        {transaction: tx},
+      );
 
       if (!companyProfile) {
         throw new HttpErrors.NotFound('Company not found');
       }
 
-      const bankDetailsResponse = await this.bankDetailsService.markAccountAsPrimaryAccount(accountId, tx);
+      const bankDetailsResponse =
+        await this.bankDetailsService.markAccountAsPrimaryAccount(
+          accountId,
+          tx,
+        );
 
       await tx.commit();
 
@@ -1190,28 +1462,35 @@ export class CompaniesController {
   @get('/company-profiles/authorize-signatory')
   async fetchAuthorizeSignatories(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-    @param.filter(AuthorizeSignatories) filter: Filter<AuthorizeSignatories>
-  ): Promise<{success: boolean; message: string; signatories: AuthorizeSignatories[]}> {
+    @param.filter(AuthorizeSignatories) filter: Filter<AuthorizeSignatories>,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatories: AuthorizeSignatories[];
+  }> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {usersId: currentUser.id},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const signatoriesResponse = await this.authorizeSignatoriesService.fetchAuthorizeSignatories(companyProfile.usersId, 'company', companyProfile.id, filter);
+    const signatoriesResponse =
+      await this.authorizeSignatoriesService.fetchAuthorizeSignatories(
+        companyProfile.usersId,
+        'company',
+        companyProfile.id,
+        filter,
+      );
 
     return {
       success: true,
       message: 'Authorize signatories',
-      signatories: signatoriesResponse.signatories
-    }
+      signatories: signatoriesResponse.signatories,
+    };
   }
 
   // fetch authorize signatory
@@ -1221,27 +1500,31 @@ export class CompaniesController {
   async fetchAuthorizeSignatory(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @param.path.string('signatoryId') signatoryId: string,
-  ): Promise<{success: boolean; message: string; signatory: AuthorizeSignatories}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatory: AuthorizeSignatories;
+  }> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {usersId: currentUser.id},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const signatoriesResponse = await this.authorizeSignatoriesService.fetchAuthorizeSignatory(signatoryId);
+    const signatoriesResponse =
+      await this.authorizeSignatoriesService.fetchAuthorizeSignatory(
+        signatoryId,
+      );
 
     return {
       success: true,
       message: 'Authorize signatory data',
-      signatory: signatoriesResponse.signatory
-    }
+      signatory: signatoriesResponse.signatory,
+    };
   }
 
   // Update Authorize signatory info for company...
@@ -1254,28 +1537,39 @@ export class CompaniesController {
     @requestBody({
       content: {
         'application/json': {
-          schema: getModelSchemaRef(AuthorizeSignatories, {partial: true})
-        }
-      }
+          schema: getModelSchemaRef(AuthorizeSignatories, {partial: true}),
+        },
+      },
     })
-    signatoryData: Partial<AuthorizeSignatories>
-  ): Promise<{success: boolean; message: string; signatory: AuthorizeSignatories | null}> {
-    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+    signatoryData: Partial<AuthorizeSignatories>,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatory: AuthorizeSignatories | null;
+  }> {
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
     try {
-      const companyProfile = await this.companyProfilesRepository.findOne({
-        where: {
-          and: [
-            {usersId: currentUser.id},
-            {isDeleted: false}
-          ]
-        }
-      }, {transaction: tx});
+      const companyProfile = await this.companyProfilesRepository.findOne(
+        {
+          where: {
+            and: [{usersId: currentUser.id}, {isDeleted: false}],
+          },
+        },
+        {transaction: tx},
+      );
 
       if (!companyProfile) {
         throw new HttpErrors.NotFound('Company not found');
       }
 
-      const signatoryResponse = await this.authorizeSignatoriesService.updateSignatoryInfo(signatoryId, signatoryData, tx);
+      const signatoryResponse =
+        await this.authorizeSignatoriesService.updateSignatoryInfo(
+          signatoryId,
+          signatoryData,
+          tx,
+        );
 
       await tx.commit();
 
@@ -1284,6 +1578,113 @@ export class CompaniesController {
       await tx.rollback();
       throw error;
     }
+  }
+
+  // create or update address details API...
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @post('/company-profiles/address-details')
+  async addressDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['registeredAddress', 'correspondenceAddress'],
+            properties: {
+              registeredAddress: getModelSchemaRef(AddressDetails, {
+                partial: true,
+              }),
+              correspondenceAddress: getModelSchemaRef(AddressDetails, {
+                partial: true,
+              }),
+            },
+          },
+        },
+      },
+    })
+    addressDetails: {
+      registeredAddress: Partial<AddressDetails>;
+      correspondenceAddress?: Partial<AddressDetails>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    registeredAddress: AddressDetails | null;
+    correspondenceAddress: AddressDetails | null;
+  }> {
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isActive: true}, {isDeleted: false}],
+      },
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company not found');
+    }
+
+    const {registeredAddress, correspondenceAddress} = addressDetails;
+
+    const addressDetailsArray: Partial<AddressDetails>[] = [
+      {
+        ...registeredAddress,
+        mode: 1,
+        status: 0,
+        usersId: currentUser.id,
+        identifierId: companyProfile.id,
+        roleValue: 'company',
+      },
+    ];
+
+    if (correspondenceAddress) {
+      addressDetailsArray.push({
+        ...correspondenceAddress,
+        mode: 1,
+        status: 0,
+        usersId: currentUser.id,
+        identifierId: companyProfile.id,
+        roleValue: 'company',
+      });
+    }
+
+    const response =
+      await this.addressDetailsService.createOrUpdateAddressDetails(
+        addressDetailsArray,
+      );
+
+    return response;
+  }
+
+  // fetch company address details...
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @get('/company-profiles/address-details')
+  async fetchAddressDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    registeredAddress: AddressDetails | null;
+    correspondenceAddress: AddressDetails | null;
+  }> {
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isActive: true}, {isDeleted: false}],
+      },
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company not found');
+    }
+
+    const response = await this.addressDetailsService.fetchUserAddressDetails(
+      currentUser.id,
+      'company',
+      companyProfile.id,
+    );
+
+    return response;
   }
 
   // super admin company documents approval API
@@ -1300,19 +1701,23 @@ export class CompaniesController {
             properties: {
               status: {type: 'number'},
               documentId: {type: 'string'},
-              reason: {type: 'string'}
-            }
-          }
-        }
-      }
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       status: number;
       documentId: string;
       reason?: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.userUploadDocumentsService.updateDocumentStatus(body.documentId, body.status, body.reason ?? '');
+    const result = await this.userUploadDocumentsService.updateDocumentStatus(
+      body.documentId,
+      body.status,
+      body.reason ?? '',
+    );
 
     return result;
   }
@@ -1331,19 +1736,23 @@ export class CompaniesController {
             properties: {
               status: {type: 'number'},
               accountId: {type: 'string'},
-              reason: {type: 'string'}
-            }
-          }
-        }
-      }
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       status: number;
       accountId: string;
       reason?: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.bankDetailsService.updateAccountStatus(body.accountId, body.status, body.reason ?? '');
+    const result = await this.bankDetailsService.updateAccountStatus(
+      body.accountId,
+      body.status,
+      body.reason ?? '',
+    );
 
     return result;
   }
@@ -1362,19 +1771,23 @@ export class CompaniesController {
             properties: {
               status: {type: 'number'},
               signatoryId: {type: 'string'},
-              reason: {type: 'string'}
-            }
-          }
-        }
-      }
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       status: number;
       signatoryId: string;
       reason?: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.authorizeSignatoriesService.updateSignatoryStatus(body.signatoryId, body.status, body.reason ?? '');
+    const result = await this.authorizeSignatoriesService.updateSignatoryStatus(
+      body.signatoryId,
+      body.status,
+      body.reason ?? '',
+    );
 
     return result;
   }
