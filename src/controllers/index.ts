@@ -18,3 +18,4 @@ export * from './charge-types.controller';
 export * from './collateral-types.controller';
 export * from './ownership-types.controller';
 export * from './business-kyc.controller';
+export * from './business-kyc-status-master.controller';

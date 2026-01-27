@@ -1,11 +1,11 @@
 import {belongsTo, Entity, hasOne, model, property} from '@loopback/repository';
+import {BusinessKyc} from './business-kyc.model';
 import {CompanyEntityType} from './company-entity-type.model';
 import {CompanyPanCards} from './company-pan-cards.model';
 import {CompanySectorType} from './company-sector-type.model';
 import {KycApplications} from './kyc-applications.model';
 import {Media} from './media.model';
 import {Users} from './users.model';
-import {BusinessKyc} from './business-kyc.model';
 
 @model({
   settings: {
@@ -145,6 +145,13 @@ export class CompanyProfiles extends Entity {
 
   @property({
     type: 'boolean',
+    default: false,
+  })
+  isBusinessKycComplete?: boolean;
+
+
+  @property({
+    type: 'boolean',
     default: true,
   })
   isActive?: boolean;
@@ -166,6 +173,8 @@ export class CompanyProfiles extends Entity {
     defaultFn: 'now',
   })
   updatedAt?: Date;
+
+
 
   @property({
     type: 'date',

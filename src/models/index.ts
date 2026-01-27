@@ -31,5 +31,6 @@ export * from './charge-types.model';
 export * from './collateral-types.model';
 export * from './business-kyc.model';
 export * from './business-kyc-client-profile.model';
+export * from './business-kyc-status-master.model';
 export * from './address-details.model';
 
