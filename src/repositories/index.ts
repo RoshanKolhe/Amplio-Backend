@@ -30,3 +30,5 @@ export * from './business-kyc.repository';
 export * from './business-kyc-client-profile.repository';
 export * from './business-kyc-status-master.repository';
 export * from './address-details.repository';
+export * from './business-kyc-profile.repository';
+export * from './business-kyc-audited-financials.repository';

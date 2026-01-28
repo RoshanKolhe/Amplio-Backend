@@ -1,10 +1,9 @@
-import {Constructor, inject} from '@loopback/core';
-import {DefaultCrudRepository} from '@loopback/repository';
+import {Constructor, inject, Getter} from '@loopback/core';
+import {DefaultCrudRepository, repository, BelongsToAccessor} from '@loopback/repository';
 import {AmplioDataSource} from '../datasources';
-import {BusinessKycClientProfile, BusinessKycClientProfileRelations} from '../models';
+import {BusinessKycClientProfile, BusinessKycClientProfileRelations, BusinessKyc} from '../models';
 import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
-
-
+import {BusinessKycRepository} from './business-kyc.repository';
 
 export class BusinessKycClientProfileRepository extends TimeStampRepositoryMixin<
   BusinessKycClientProfile,
@@ -17,7 +16,12 @@ export class BusinessKycClientProfileRepository extends TimeStampRepositoryMixin
     >
   >
 >(DefaultCrudRepository) {
-  constructor(@inject('datasources.amplio') dataSource: AmplioDataSource) {
+
+  public readonly businessKyc: BelongsToAccessor<BusinessKyc, typeof BusinessKycClientProfile.prototype.id>;
+
+  constructor(@inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('BusinessKycRepository') protected businessKycRepositoryGetter: Getter<BusinessKycRepository>,) {
     super(BusinessKycClientProfile, dataSource);
+    this.businessKyc = this.createBelongsToAccessorFor('businessKyc', businessKycRepositoryGetter,);
+    this.registerInclusionResolver('businessKyc', this.businessKyc.inclusionResolver);
   }
 }

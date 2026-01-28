@@ -41,7 +41,11 @@ export async function migrate(args: string[]) {
       'ChargeTypes',
       'CollateralTypes',
       'BusinessKyc',
-      'BusinessKycStatusMaster'
+      'BusinessKycStatusMaster',
+      'BusinessKycProfile',
+      'BusinessKycAuditedFinancials',
+      'BusinessKycGuarantor',
+      'BusinessKycClientProfile'
     ]
   });
 

@@ -1,5 +1,10 @@
-import {Entity, model, property, belongsTo} from '@loopback/repository';
+import {Entity, model, property, belongsTo, hasOne, hasMany} from '@loopback/repository';
 import {CompanyProfiles} from './company-profiles.model';
+import {BusinessKycProfile} from './business-kyc-profile.model';
+import {BusinessKycAuditedFinancials} from './business-kyc-audited-financials.model';
+import {BusinessKycCollateralAssets} from './business-kyc-collateral-assets.model';
+import {BusinessKycClientProfile} from './business-kyc-client-profile.model';
+import {BusinessKycGuarantor} from './business-kyc-guarantor.model';
 
 @model({
   settings: {
@@ -61,7 +66,21 @@ export class BusinessKyc extends Entity {
 
   @belongsTo(() => CompanyProfiles)
   companyProfilesId: string;
-  
+
+  @hasOne(() => BusinessKycProfile)
+  businessKycProfile: BusinessKycProfile;
+
+  @hasOne(() => BusinessKycAuditedFinancials)
+  businessKycAuditedFinancials: BusinessKycAuditedFinancials;
+
+  @hasMany(() => BusinessKycCollateralAssets)
+  businessKycCollateralAssets: BusinessKycCollateralAssets[];
+
+  @hasMany(() => BusinessKycClientProfile)
+  businessKycClientProfiles: BusinessKycClientProfile[];
+
+  @hasMany(() => BusinessKycGuarantor)
+  businessKycGuarantors: BusinessKycGuarantor[];
   // @property({
   //   type: 'string',
   // })

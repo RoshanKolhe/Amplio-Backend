@@ -3,6 +3,7 @@ import {ChargeTypes} from './charge-types.model';
 import {CollateralTypes} from './collateral-types.model';
 import {Media} from './media.model';
 import {OwnershipTypes} from './ownership-types.model';
+import {BusinessKyc} from './business-kyc.model';
 
 @model({
   settings: {
@@ -108,6 +109,8 @@ export class BusinessKycCollateralAssets extends Entity {
   @belongsTo(() => Media)
   valuationReportId: string;
 
+  @belongsTo(() => BusinessKyc)
+  businessKycId: string;
   // @belongsTo(() => BondIssueApplication)
   // bondIssueApplicationId: string;
 

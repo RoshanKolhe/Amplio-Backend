@@ -1,4 +1,5 @@
-import {Entity, model, property} from '@loopback/repository';
+import {Entity, model, property, belongsTo} from '@loopback/repository';
+import {BusinessKyc} from './business-kyc.model';
 
 @model({
   settings: {
@@ -8,7 +9,7 @@ import {Entity, model, property} from '@loopback/repository';
     },
   },
 })
-export class Guarantor extends Entity {
+export class BusinessKycGuarantor extends Entity {
   @property({
     type: 'string',
     id: true,
@@ -118,13 +119,16 @@ export class Guarantor extends Entity {
   })
   deletedAt?: Date;
 
-  constructor(data?: Partial<Guarantor>) {
+  @belongsTo(() => BusinessKyc)
+  businessKycId: string;
+
+  constructor(data?: Partial<BusinessKycGuarantor>) {
     super(data);
   }
 }
 
-export interface GuarantorRelations {
+export interface BusinessKycGuarantorRelations {
   // describe navigational properties here
 }
 
-export type GuarantorWithRelations = Guarantor & GuarantorRelations;
+export type BusinessKycGuarantorWithRelations = BusinessKycGuarantor & BusinessKycGuarantorRelations;

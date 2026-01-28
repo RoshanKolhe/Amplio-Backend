@@ -1,5 +1,6 @@
 import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {Media} from './media.model';
+import {BusinessKyc} from './business-kyc.model';
 
 @model({
   settings: {
@@ -140,7 +141,11 @@ export class BusinessKycAuditedFinancials extends Entity {
   })
   deletedAt?: Date;
 
+
+
   // @belongsTo(() => BusinessKycIssueApplication)
+  @belongsTo(() => BusinessKyc)
+  businessKycId: string;
   // businesskycIssueApplicationId: string;
 
   @belongsTo(() => Media)

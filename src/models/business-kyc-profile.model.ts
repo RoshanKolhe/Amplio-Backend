@@ -1,4 +1,5 @@
-import {Entity, model, property} from '@loopback/repository';
+import {Entity, model, property, belongsTo} from '@loopback/repository';
+import {BusinessKyc} from './business-kyc.model';
 
 @model({
   settings: {
@@ -69,6 +70,9 @@ export class BusinessKycProfile extends Entity {
     type: 'date',
   })
   deletedAt?: Date;
+
+  @belongsTo(() => BusinessKyc)
+  businessKycId: string;
 
   constructor(data?: Partial<BusinessKycProfile>) {
     super(data);

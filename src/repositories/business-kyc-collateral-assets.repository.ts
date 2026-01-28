@@ -6,7 +6,13 @@ import {
 } from '@loopback/repository';
 import {AmplioDataSource} from '../datasources';
 import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
-import {CollateralTypes, ChargeTypes, OwnershipTypes, Media} from '../models';
+import {
+  CollateralTypes,
+  ChargeTypes,
+  OwnershipTypes,
+  Media,
+  BusinessKyc,
+} from '../models';
 import {CollateralTypesRepository} from './collateral-types.repository';
 import {ChargeTypesRepository} from './charge-types.repository';
 import {OwnershipTypesRepository} from './ownership-types.repository';
@@ -15,6 +21,7 @@ import {
   BusinessKycCollateralAssets,
   BusinessKycCollateralAssetsRelations,
 } from '../models/business-kyc-collateral-assets.model';
+import {BusinessKycRepository} from './business-kyc.repository';
 
 export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMixin<
   BusinessKycCollateralAssets,
@@ -57,6 +64,11 @@ export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMi
     typeof BusinessKycCollateralAssets.prototype.id
   >;
 
+  public readonly businessKyc: BelongsToAccessor<
+    BusinessKyc,
+    typeof BusinessKycCollateralAssets.prototype.id
+  >;
+
   constructor(
     @inject('datasources.amplio') dataSource: AmplioDataSource,
     @repository.getter('CollateralTypesRepository')
@@ -67,8 +79,18 @@ export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMi
     protected ownershipTypesRepositoryGetter: Getter<OwnershipTypesRepository>,
     @repository.getter('MediaRepository')
     protected mediaRepositoryGetter: Getter<MediaRepository>,
+    @repository.getter('BusinessKycRepository')
+    protected businessKycRepositoryGetter: Getter<BusinessKycRepository>,
   ) {
     super(BusinessKycCollateralAssets, dataSource);
+    this.businessKyc = this.createBelongsToAccessorFor(
+      'businessKyc',
+      this.businessKycRepositoryGetter,
+    );
+    this.registerInclusionResolver(
+      'businessKyc',
+      this.businessKyc.inclusionResolver,
+    );
     this.valuationReport = this.createBelongsToAccessorFor(
       'valuationReport',
       mediaRepositoryGetter,

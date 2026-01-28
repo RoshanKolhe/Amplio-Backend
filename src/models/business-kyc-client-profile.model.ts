@@ -1,4 +1,5 @@
-import {Entity, model, property} from '@loopback/repository';
+import {Entity, model, property, belongsTo} from '@loopback/repository';
+import {BusinessKyc} from './business-kyc.model';
 
 @model({
   settings: {
@@ -63,7 +64,7 @@ export class BusinessKycClientProfile extends Entity {
   avgInvoiceSize: number
 
   @property({
-    type:'string',
+    type: 'string',
     required: true
   })
   contactDetails: string
@@ -71,7 +72,7 @@ export class BusinessKycClientProfile extends Entity {
 
   //InvoiceId in remaning here
 
-   @property({
+  @property({
     type: 'boolean',
     default: true,
   })
@@ -95,6 +96,8 @@ export class BusinessKycClientProfile extends Entity {
   })
   updatedAt?: Date;
 
+  @belongsTo(() => BusinessKyc)
+  businessKycId: string;
   @property({
     type: 'date',
   })
