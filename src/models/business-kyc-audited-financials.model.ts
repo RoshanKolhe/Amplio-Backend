@@ -1,5 +1,4 @@
 import {belongsTo, Entity, model, property} from '@loopback/repository';
-// import {BusinessKycIssueApplication} from './businesskyc-issue-application.model';
 import {Media} from './media.model';
 
 @model({
@@ -7,19 +6,6 @@ import {Media} from './media.model';
     postgresql: {
       table: 'businesskyc_audited_financials',
       schema: 'public',
-    },
-    indexes: {
-      uniqueBusinessKycAuditedFinancial: {
-        keys: {
-          businesskycIssueApplicationId: 1,
-          category: 1,
-          type: 1,
-          periodStartYear: 1,
-          periodEndYear: 1,
-          month: 1,
-        },
-        options: {unique: true},
-      },
     },
   },
 })
