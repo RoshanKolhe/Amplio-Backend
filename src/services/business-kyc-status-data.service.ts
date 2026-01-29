@@ -1,14 +1,15 @@
 import {inject} from '@loopback/core';
 import {HttpErrors} from '@loopback/rest';
+import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
 
 
 export class BusinessKycStatusDataService {
   constructor(
     @inject('service.businessKycProfileDetailsService.service')
-    private businessKycProfileDetailsService: BusinessKycProfileDetailsService
-    // @inject('service.BondStatusDocument.service')
-    // private bondStatusDocumentService: BondStatusDocumentService,
+    private businessKycProfileDetailsService: BusinessKycProfileDetailsService,
+    @inject('service.businessKycGuarantorDetailsService')
+    private businessKycGuarantorDetailsService: BusinessKycGuarantorDetailsService,
     // @inject('service.BondApplicationFinancials.service')
     // private bondApplicationFinancials: BondApplicationFinancialsService,
     // @inject('service.BondsDummyIntermediary.service')
@@ -34,8 +35,8 @@ export class BusinessKycStatusDataService {
       // case 'fund_position':
       //   return this.bondApplicationFinancials.fetchFundPositionData(applicationId);
 
-      // case 'capital_details':
-      //   return this.bondApplicationFinancials.fetchcapitalDetailsData(applicationId);
+      case 'guarantor_details':
+        return this.businessKycGuarantorDetailsService.fetchBusinessKycGuarantorDetails(businessKycId);
 
       // case 'financial_statements':
       //   return this.bondAuditedFinancialsService.fetchAuditedFinancials(applicationId);

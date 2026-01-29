@@ -35,16 +35,20 @@ export class BusinessKycGuarantorDetailsService {
 
     // delete old
     await this.businessKycRepository
-      .businessKycProfile(businessKycId)
-      .delete({transaction: tx});
+      .businessKycGuarantors(businessKycId)
+      .delete({}, {transaction: tx});
 
     // create new (businessKycId auto-attached)
     for (const profile of GuarantorDetails) {
+
       await this.businessKycRepository
-        .businessKycProfile(businessKycId)
+        .businessKycGuarantors(businessKycId)
         .create(
           {
             ...profile,
+            businessKycId,
+            status: 1,
+            mode: 0,
             isActive: true,
             isDeleted: false,
           },

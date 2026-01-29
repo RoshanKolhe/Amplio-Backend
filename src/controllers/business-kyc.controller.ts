@@ -338,10 +338,38 @@ export class BusinessKycController {
               guarantor: {
                 type: 'array',
                 minItems: 1,
-                items: getModelSchemaRef(BusinessKycGuarantor, {
-                  title: 'CreateGuarantor',
-                  exclude: ['id'],
-                }),
+                items: {
+                  type: 'object',
+                  required: [
+                    'guarantorCompanyName',
+                    'CIN',
+                    'phoneNumber',
+                    'email',
+                    'guarantorType',
+                    'guaranteedAmountLimit',
+                    'estimatedNetWorth',
+                    'fullName',
+                    'panNumber',
+                    'adharNumber',
+                    'companyPanId',
+                    'companyAadharId',
+                  ],
+                  properties: {
+                    guarantorCompanyName: {type: 'string'},
+                    CIN: {type: 'string'},
+                    phoneNumber: {type: 'string'},
+                    email: {type: 'string'},
+                    guarantorType: {type: 'string'},
+                    guaranteedAmountLimit: {type: 'number'},
+                    estimatedNetWorth: {type: 'number'},
+                    fullName: {type: 'string'},
+                    panNumber: {type: 'string'},
+                    adharNumber: {type: 'string'},
+                    companyPanId: {type: 'string'},
+                    companyAadharId: {type: 'string'},
+                  },
+                  additionalProperties: false,
+                },
               },
             },
           },
@@ -398,8 +426,6 @@ export class BusinessKycController {
         data: {
           guarantorDetails: result.GuarantorDetails,
           updateStatus: result.updateStatus,
-          status: 1,
-          model: 0,
         },
       };
     } catch (error) {
@@ -407,6 +433,112 @@ export class BusinessKycController {
       throw error;
     }
   }
+
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @post('/business-kyc/guarantor-details')
+  async addGuarantorDetails(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    currentUser: UserProfile,
+
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: [
+              'guarantorCompanyName',
+              'CIN',
+              'phoneNumber',
+              'email',
+              'guarantorType',
+              'guaranteedAmountLimit',
+              'estimatedNetWorth',
+              'fullName',
+              'panNumber',
+              'adharNumber',
+              'companyPanId',
+              'companyAadharId',
+            ],
+            properties: {
+              guarantorCompanyName: {type: 'string'},
+              CIN: {type: 'string'},
+              phoneNumber: {type: 'string'},
+              email: {type: 'string'},
+              guarantorType: {type: 'string'},
+              guaranteedAmountLimit: {type: 'number'},
+              estimatedNetWorth: {type: 'number'},
+              fullName: {type: 'string'},
+              panNumber: {type: 'string'},
+              adharNumber: {type: 'string'},
+              companyPanId: {type: 'string'},
+              companyAadharId: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: Omit<BusinessKycGuarantor, 'id'>,
+  ) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const companyProfile = await this.companyProfileRepository.findOne({
+        where: {
+          usersId: currentUser.id,
+          isActive: true,
+          isDeleted: false,
+        },
+      });
+
+      if (!companyProfile) {
+        throw new HttpErrors.NotFound('Company profile not found');
+      }
+
+      const kyc = await this.businessKycRepository.findOne({
+        where: {
+          companyProfilesId: companyProfile.id,
+          isActive: true,
+          isDeleted: false,
+        },
+      });
+
+      if (!kyc) {
+        throw new HttpErrors.NotFound('Business KYC not started');
+      }
+
+      const guarantor =
+        await this.businessKycRepository
+          .businessKycGuarantors(kyc.id!)
+          .create(
+            {
+              ...body,
+              businessKycId: kyc.id!,
+              status: 1,
+              mode: 0,
+              isActive: true,
+              isDeleted: false,
+            },
+            {transaction: tx},
+          );
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Guarantor added successfully',
+        data: guarantor,
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
+
 
   //Collateral Assets
   @authenticate('jwt')
