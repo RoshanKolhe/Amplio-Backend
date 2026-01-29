@@ -1,5 +1,6 @@
 import {Entity, model, property, belongsTo} from '@loopback/repository';
 import {BusinessKyc} from './business-kyc.model';
+import {CompanyProfiles} from './company-profiles.model';
 
 @model({
   settings: {
@@ -91,6 +92,34 @@ export class BusinessKycGuarantor extends Entity {
   companyAadharId: string;
 
   @property({
+    type: 'number',
+    required: true,
+    jsonSchema: {
+      enum: [0, 1, 2], // 0 => under review 1 => approved 2 => rejected
+    },
+  })
+  status: number; // 0 => under review 1 => approved 2 => rejected
+
+  @property({
+    type: 'number',
+    required: true,
+    jsonSchema: {
+      enum: [0, 1], // 0=auto OCR, 1=manual team verification
+    },
+  })
+  mode: number; // 0 => auto 1 => human
+
+  @property({
+    type: 'string',
+  })
+  reason?: string; // if rejection is there
+
+  @property({
+    type: 'date',
+  })
+  verifiedAt?: Date;
+
+  @property({
     type: 'boolean',
     default: true,
   })
@@ -122,6 +151,9 @@ export class BusinessKycGuarantor extends Entity {
   @belongsTo(() => BusinessKyc)
   businessKycId: string;
 
+  @belongsTo(() => CompanyProfiles)
+  companyProfilesId: string;
+
   constructor(data?: Partial<BusinessKycGuarantor>) {
     super(data);
   }
@@ -131,4 +163,5 @@ export interface BusinessKycGuarantorRelations {
   // describe navigational properties here
 }
 
-export type BusinessKycGuarantorWithRelations = BusinessKycGuarantor & BusinessKycGuarantorRelations;
+export type BusinessKycGuarantorWithRelations = BusinessKycGuarantor &
+  BusinessKycGuarantorRelations;

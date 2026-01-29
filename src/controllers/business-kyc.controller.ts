@@ -1,13 +1,18 @@
-import {
-  authenticate,
-  AuthenticationBindings,
-} from '@loopback/authentication';
+import {authenticate, AuthenticationBindings} from '@loopback/authentication';
 import {inject} from '@loopback/core';
 import {IsolationLevel, repository} from '@loopback/repository';
-import {get, getModelSchemaRef, HttpErrors, param, patch, post, requestBody} from '@loopback/rest';
+import {
+  get,
+  getModelSchemaRef,
+  HttpErrors,
+  param,
+  patch,
+  post,
+  requestBody,
+} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
-import {BusinessKycProfile, CompanyProfiles} from '../models';
+import {BusinessKycAuditedFinancials, CompanyProfiles} from '../models';
 import {
   BusinessKycRepository,
   CompanyProfilesRepository,
@@ -15,6 +20,9 @@ import {
 import {BusinessKycStatusService} from '../services/businees-kyc-status.service';
 import {BusinessKycProfileDetailsService} from '../services/business-kyc-profile-details.service';
 import {BusinessKycStatusDataService} from '../services/business-kyc-status-data.service';
+import {BusinessKycStateService} from '../services/business-kyc-state.service';
+import {BusinessKycStepDataService} from '../services/business-kyc-step-data.service';
+import {BusinessKycAuditedFinancialsService} from '../services/business-kyc-audited-financials.service';
 
 export class BusinessKycController {
   constructor(
@@ -27,17 +35,19 @@ export class BusinessKycController {
     @inject('service.businessKycProfileDetailsService.service')
     private businessKycProfileDetailsService: BusinessKycProfileDetailsService,
     @inject('service.businessKycStatusDataService.service')
-    private businessKycStatusDataService: BusinessKycStatusDataService
-  ) { }
+    private businessKycStatusDataService: BusinessKycStatusDataService,
+    @inject('service.businessKycStateService.service')
+    private businessKycStateService: BusinessKycStateService,
+    @inject('service.businessKycStepDataService')
+    private businessKycStepDataService: BusinessKycStepDataService,
+    @inject('service.businessKycAuditedFinancialsService.service')
+    private businessKycAuditedFinancialsService: BusinessKycAuditedFinancialsService,
+  ) {}
 
   async verifyCompany(usersId: string): Promise<CompanyProfiles> {
     const companyProfile = await this.companyProfileRepository.findOne({
       where: {
-        and: [
-          {usersId},
-          {isActive: true},
-          {isDeleted: false},
-        ],
+        and: [{usersId}, {isActive: true}, {isDeleted: false}],
       },
     });
 
@@ -55,225 +65,168 @@ export class BusinessKycController {
   async startBusinessKyc(
     @inject(AuthenticationBindings.CURRENT_USER)
     currentUser: UserProfile,
-  ): Promise<{
-    success: boolean;
-    message: string;
-    data: {
-      businessKycId: string;
-      companyProfileId: string;
-      status: string;
-      activeStep: {
-        id: string;
-        label: string;
-        code: string;
-      };
-      completedSteps: {id: string; label: string; code: string}[];
-    };
-  }> {
+  ) {
     const status = await this.statusService.fetchInitialStatus();
 
     const companyProfile = await this.companyProfileRepository.findOne({
       where: {
-        and: [
-          {usersId: currentUser.id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+        usersId: currentUser.id,
+        isActive: true,
+        isDeleted: false,
+      },
     });
 
     if (!companyProfile) {
       throw new HttpErrors.NotFound('No company profile found for this user');
     }
 
-    const companyProfileId = companyProfile.id;
-
-    const kyc = await this.businessKycRepository.create({
-      companyProfilesId: companyProfileId,
-      businessKycStatusMasterId: status.id,
-      status: status.value,
-      isActive: true,
-      isDeleted: false,
+    // 🔑 KEY PART: check existing KYC
+    let kyc = await this.businessKycRepository.findOne({
+      where: {
+        companyProfilesId: companyProfile.id,
+        isActive: true,
+        isDeleted: false,
+      },
     });
+
+    // create only if not exists
+    if (!kyc) {
+      kyc = await this.businessKycRepository.create({
+        companyProfilesId: companyProfile.id,
+        businessKycStatusMasterId: status.id,
+        status: status.value,
+        isActive: true,
+        isDeleted: false,
+      });
+    }
 
     return {
       success: true,
-      message: 'Business KYC started successfully',
+      message: 'Business KYC status fetched successfully',
       data: {
         businessKycId: kyc.id!,
-        companyProfileId: kyc.companyProfilesId,
-        status: kyc.status ?? 'IN_PROGRESS',
+        companyProfileId: companyProfile.id,
         activeStep: {
-          id: status.id,
+          id: kyc.businessKycStatusMasterId,
           label: status.status,
-          code: status.value,
+          code: kyc.status,
         },
-        completedSteps: [
-          {
-            id: status.id,
-            label: status.status,
-            code: status.value,
-          },
-        ],
       },
     };
   }
 
   // access token is missing invalid params are passing no need of company profile id.
-  @get('/business-kyc/company/{companyProfileId}')
-  async fetchBusinessKycStateByCompany(
-    @param.path.string('companyProfileId') companyProfileId: string,
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @get('/business-kyc/state')
+  async fetchBusinessKycState(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    currentUser: UserProfile,
   ) {
-    const kyc = await this.businessKycRepository.findOne({
-      where: {
-        and: [
-          {companyProfilesId: companyProfileId},
-          {isActive: true},
-          {isDeleted: false},
-        ],
-      },
-    });
-
-    if (!kyc) {
-      throw new HttpErrors.NotFound('Business KYC not started for this company');
-    }
-
-    const currentStatus =
-      await this.statusService.fetchApplicationStatusById(
-        kyc.businessKycStatusMasterId!
-      );
-
-    const completedSteps =
-      await this.statusService.fetchCompletedStepsSequence(
-        currentStatus.sequenceOrder
-      );
-
+    const data =
+      await this.businessKycStateService.fetchStateByUser(currentUser);
     return {
       success: true,
-      data: {
-        businessKycId: kyc.id,
-        companyProfileId,
-        completedSteps,
-        activeStep: {
-          id: currentStatus.id,
-          label: currentStatus.status,
-          code: currentStatus.value,
-        },
-      },
+      data,
     };
   }
 
   // here no need business kyc id
   @authenticate('jwt')
   @authorize({roles: ['company']})
-  @get('/business-kyc/{businessKycId}/data-by-status/{statusValue}')
+  @get('/business-kyc/data-by-status/{statusValue}')
   async fetchDataByStatusValue(
-    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-    @param.path.string('businessKycId') businessKycId: string,
-    @param.path.string('statusValue') statusValue: string,
+    @inject(AuthenticationBindings.CURRENT_USER)
+    currentUser: UserProfile,
+
+    @param.path.string('statusValue')
+    statusValue: string,
   ) {
-    const company = await this.verifyCompany(currentUser.id);
-
-    // use and where ever you are checking multiple terms
-    const kyc = await this.businessKycRepository.findOne({
-      where: {
-        id: businessKycId,
-        companyProfilesId: company.id,
-        isActive: true,
-        isDeleted: false,
-      },
-    });
-
-    if (!kyc) {
-      throw new HttpErrors.NotFound('Business KYC not found');
-    }
-
-    const currentStatus =
-      await this.statusService.fetchApplicationStatusById(
-        kyc.businessKycStatusMasterId!,
-      );
-
-    const requestedStatus =
-      await this.statusService.verifyStatusValue(statusValue);
-
-    if (requestedStatus.sequenceOrder > currentStatus.sequenceOrder) {
-      throw new HttpErrors.BadRequest('This step is not completed yet');
-    }
-
-    const data = await this.businessKycStatusDataService.fetchDataWithStatus(
-      businessKycId,
-      requestedStatus.value,
+    const result = await this.businessKycStepDataService.fetchStepDataByStatus(
+      currentUser,
+      statusValue,
     );
 
     return {
       success: true,
-      message: 'KYC step data',
-      stepData: data,
+      message: 'KYC step data fetched successfully',
+      step: result.step,
+      data: result.data,
     };
   }
 
   ///// BUSINESSS KYC PROFILE //////
   @authenticate('jwt')
   @authorize({roles: ['company']})
-  @patch('/business-kyc/{businessKycId}/profile-details')
+  @patch('/business-kyc/profile-details')
   async updateProfileDetails(
     @inject(AuthenticationBindings.CURRENT_USER)
     currentUser: UserProfile,
-    @param.path.string('businessKycId')
-    businessKycId: string,
 
     @requestBody({
       required: true,
       content: {
         'application/json': {
-          schema: getModelSchemaRef(BusinessKycProfile, {partial: true}),
+          schema: {
+            type: 'object',
+            required: ['yearInBusiness', 'turnover', 'projectedTurnover'],
+            properties: {
+              yearInBusiness: {type: 'number'},
+              turnover: {type: 'number'},
+              projectedTurnover: {type: 'number'},
+            },
+          },
         },
       },
     })
     body: {
-      profileDetails: Partial<Omit<BusinessKycProfile, 'id'>>;
+      yearInBusiness: number;
+      turnover: number;
+      projectedTurnover: number;
     },
-  ): Promise<{
-    success: boolean;
-    message: string;
-    data: {
-      businessKycId: string;
-      profileDetails: BusinessKycProfile[];
-      updateStatus: boolean;
-    };
-  }> {
-    const tx = await this.businessKycRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
-    try {
-      const company = await this.verifyCompany(currentUser.id);
+  ) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
 
-      // use and where ever you are checking multiple terms
-      const kyc = await this.businessKycRepository.findOne({
+    try {
+      const companyProfile = await this.companyProfileRepository.findOne({
         where: {
-          companyProfilesId: company.id,
+          usersId: currentUser.id,
           isActive: true,
           isDeleted: false,
         },
       });
 
-      const newProfileDetails = new BusinessKycProfile({
-        ...body.profileDetails,
-        isActive: true,
-        businessKycId: kyc?.id
-      })
+      if (!companyProfile) {
+        throw new HttpErrors.NotFound('Company profile not found');
+      }
+
+      const kyc = await this.businessKycRepository.findOne({
+        where: {
+          companyProfilesId: companyProfile.id,
+          isActive: true,
+          isDeleted: false,
+        },
+      });
+
+      if (!kyc) {
+        throw new HttpErrors.NotFound('Business KYC not started');
+      }
 
       const result =
         await this.businessKycProfileDetailsService.createOrUpdateBusinessKycProfileDetails(
-          businessKycId,
-          newProfileDetails,
-          tx
+          kyc.id!,
+          body, // ✅ PASS FLAT OBJECT
+          tx,
         );
 
       await tx.commit();
+
       return {
         success: true,
-        message: 'Borrowing details updated successfully',
+        message: 'Business profile details updated successfully',
         data: {
-          businessKycId,
           profileDetails: result.profileDetails,
           updateStatus: result.updateStatus,
         },
@@ -282,5 +235,79 @@ export class BusinessKycController {
       await tx.rollback();
       throw error;
     }
+  }
+
+  // update audited financials...
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @patch('/bonds-pre-issue/audited-financials')
+  async updateAuditedFinancials(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['auditedFinancials'],
+            properties: {
+              auditedFinancials: {
+                type: 'array',
+                minItems: 1,
+                items: getModelSchemaRef(BusinessKycAuditedFinancials, {
+                  title: 'CreateBondAuditedFinancial',
+                  exclude: ['id'],
+                }),
+              },
+            },
+          },
+        },
+      },
+    })
+    financials: {
+      auditedFinancials: Omit<BusinessKycAuditedFinancials, 'id'>[];
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    details: {
+      businessKycId: string;
+      auditedFinancials: BusinessKycAuditedFinancials[];
+      isUpdated: boolean;
+    };
+  }> {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+    const company = await this.verifyCompany(currentUser.id);
+
+    const kyc = await this.businessKycRepository.findOne({
+      where: {
+        companyProfilesId: company.id,
+        isActive: true,
+        isDeleted: false,
+      },
+    });
+
+    if (!kyc) {
+      throw new HttpErrors.NotFound('Business KYC not started');
+    }
+
+    const result =
+      await this.businessKycAuditedFinancialsService.createOrUpdateAuditedFinancials(
+        kyc.id!,
+        financials.auditedFinancials,
+        tx,
+      );
+
+    return {
+      success: true,
+      message: 'Audited financials updated',
+      details: {
+        businessKycId: kyc.id!,
+        auditedFinancials: result?.auditedFinancials,
+        isUpdated: result?.isUpdated,
+      },
+    };
   }
 }

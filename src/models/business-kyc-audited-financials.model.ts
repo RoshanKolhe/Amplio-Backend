@@ -1,6 +1,7 @@
 import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {Media} from './media.model';
 import {BusinessKyc} from './business-kyc.model';
+import {CompanyProfiles} from './company-profiles.model';
 
 @model({
   settings: {
@@ -25,13 +26,8 @@ export class BusinessKycAuditedFinancials extends Entity {
     type: 'string',
     required: true,
     jsonSchema: {
-      enum: [
-        'financial_statements',
-        'income_tax_returns',
-        'gstr_9',
-        'gst_3b'
-      ]
-    }
+      enum: ['financial_statements', 'income_tax_returns', 'gstr_9', 'gst_3b'],
+    },
   })
   category: string;
 
@@ -39,33 +35,30 @@ export class BusinessKycAuditedFinancials extends Entity {
     type: 'string',
     required: true,
     jsonSchema: {
-      enum: [
-        'year_wise',
-        'month_wise'
-      ]
-    }
+      enum: ['year_wise', 'month_wise'],
+    },
   })
   type: string;
 
   @property({
     type: 'number',
-    required: true
+    required: true,
   })
   baseFinancialStartYear: number;
 
   @property({
     type: 'number',
-    required: true
+    required: true,
   })
   baseFinancialEndYear: number;
 
   @property({
-    type: 'number'
+    type: 'number',
   })
   periodStartYear?: number;
 
   @property({
-    type: 'number'
+    type: 'number',
   })
   periodEndYear?: number;
 
@@ -85,9 +78,8 @@ export class BusinessKycAuditedFinancials extends Entity {
         'oct',
         'nov',
         'dec',
-      ]
-
-    }
+      ],
+    },
   })
   month?: string;
 
@@ -102,7 +94,7 @@ export class BusinessKycAuditedFinancials extends Entity {
 
   @property({
     type: 'string',
-    required: true
+    required: true,
   })
   auditorName: string;
 
@@ -111,6 +103,34 @@ export class BusinessKycAuditedFinancials extends Entity {
     defaultFn: 'now',
   })
   reportDate: Date;
+  
+  @property({
+    type: 'number',
+    required: true,
+    jsonSchema: {
+      enum: [0, 1, 2], // 0 => under review 1 => approved 2 => rejected
+    },
+  })
+  status: number; // 0 => under review 1 => approved 2 => rejected
+
+  @property({
+    type: 'number',
+    required: true,
+    jsonSchema: {
+      enum: [0, 1], // 0=auto OCR, 1=manual team verification
+    },
+  })
+  mode: number; // 0 => auto 1 => human
+
+  @property({
+    type: 'string',
+  })
+  reason?: string; // if rejection is there
+
+  @property({
+    type: 'date',
+  })
+  verifiedAt?: Date;
 
   @property({
     type: 'boolean',
@@ -144,6 +164,9 @@ export class BusinessKycAuditedFinancials extends Entity {
   // @belongsTo(() => BusinessKycIssueApplication)
   @belongsTo(() => BusinessKyc)
   businessKycId: string;
+
+  @belongsTo(() => CompanyProfiles)
+  companyProfilesId: string;
   // businesskycIssueApplicationId: string;
 
   @belongsTo(() => Media)
@@ -158,4 +181,5 @@ export interface BusinessKycAuditedFinancialsRelations {
   // describe navigational properties here
 }
 
-export type BusinessKycAuditedFinancialsWithRelations = BusinessKycAuditedFinancials & BusinessKycAuditedFinancialsRelations;
+export type BusinessKycAuditedFinancialsWithRelations =
+  BusinessKycAuditedFinancials & BusinessKycAuditedFinancialsRelations;

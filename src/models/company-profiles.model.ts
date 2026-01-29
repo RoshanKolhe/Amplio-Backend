@@ -1,4 +1,4 @@
-import {belongsTo, Entity, hasOne, model, property} from '@loopback/repository';
+import {belongsTo, Entity, hasOne, model, property, hasMany} from '@loopback/repository';
 import {BusinessKyc} from './business-kyc.model';
 import {CompanyEntityType} from './company-entity-type.model';
 import {CompanyPanCards} from './company-pan-cards.model';
@@ -6,6 +6,10 @@ import {CompanySectorType} from './company-sector-type.model';
 import {KycApplications} from './kyc-applications.model';
 import {Media} from './media.model';
 import {Users} from './users.model';
+import {BusinessKycProfile} from './business-kyc-profile.model';
+import {BusinessKycAuditedFinancials} from './business-kyc-audited-financials.model';
+import {BusinessKycGuarantor} from './business-kyc-guarantor.model';
+import {BusinessKycCollateralAssets} from './business-kyc-collateral-assets.model';
 
 @model({
   settings: {
@@ -195,6 +199,18 @@ export class CompanyProfiles extends Entity {
 
   @hasOne(() => BusinessKyc)
   businessKyc: BusinessKyc;
+
+  @hasOne(() => BusinessKycProfile)
+  businessKycProfile: BusinessKycProfile;
+
+  @hasMany(() => BusinessKycAuditedFinancials)
+  businessKycAuditedFinancials: BusinessKycAuditedFinancials[];
+
+  @hasMany(() => BusinessKycGuarantor)
+  businessKycGuarantors: BusinessKycGuarantor[];
+
+  @hasMany(() => BusinessKycCollateralAssets)
+  businessKycCollateralAssets: BusinessKycCollateralAssets[];
 
   constructor(data?: Partial<CompanyProfiles>) {
     super(data);

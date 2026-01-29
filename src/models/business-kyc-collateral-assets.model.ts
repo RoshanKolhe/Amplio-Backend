@@ -1,9 +1,10 @@
 import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {ChargeTypes} from './charge-types.model';
 import {CollateralTypes} from './collateral-types.model';
-import {Media} from './media.model';
+// import {Media} from './media.model';
 import {OwnershipTypes} from './ownership-types.model';
 import {BusinessKyc} from './business-kyc.model';
+import {CompanyProfiles} from './company-profiles.model';
 
 @model({
   settings: {
@@ -72,6 +73,34 @@ export class BusinessKycCollateralAssets extends Entity {
   ownershipTypesId: string;
 
   @property({
+    type: 'number',
+    required: true,
+    jsonSchema: {
+      enum: [0, 1, 2], // 0 => under review 1 => approved 2 => rejected
+    },
+  })
+  status: number; // 0 => under review 1 => approved 2 => rejected
+
+  @property({
+    type: 'number',
+    required: true,
+    jsonSchema: {
+      enum: [0, 1], // 0=auto OCR, 1=manual team verification
+    },
+  })
+  mode: number; // 0 => auto 1 => human
+
+  @property({
+    type: 'string',
+  })
+  reason?: string; // if rejection is there
+
+  @property({
+    type: 'date',
+  })
+  verifiedAt?: Date;
+
+  @property({
     type: 'boolean',
     default: true,
   })
@@ -100,17 +129,20 @@ export class BusinessKycCollateralAssets extends Entity {
   })
   deletedAt?: Date;
 
-  @belongsTo(() => Media)
-  securityDocumentId: string;
+  // @belongsTo(() => Media)
+  // securityDocumentId: string;
 
-  @belongsTo(() => Media)
-  assetCoverCertificateId: string;
+  // @belongsTo(() => Media)
+  // assetCoverCertificateId: string;
 
-  @belongsTo(() => Media)
-  valuationReportId: string;
+  // @belongsTo(() => Media)
+  // valuationReportId: string;
 
   @belongsTo(() => BusinessKyc)
   businessKycId: string;
+
+  @belongsTo(() => CompanyProfiles)
+  companyProfilesId: string;
   // @belongsTo(() => BondIssueApplication)
   // bondIssueApplicationId: string;
 

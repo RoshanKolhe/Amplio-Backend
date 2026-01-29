@@ -17,10 +17,10 @@ export class BusinessKycProfileDetailsService {
 
   async createOrUpdateBusinessKycProfileDetails(
     businessKycId: string,
-    profileDetails: Partial<Omit<BusinessKycProfile, 'id' | 'businessKycId'>>,
+    profileDetails: Partial<Omit<BusinessKycProfile, 'id'>>,
     tx: any,
   ): Promise<{
-    profileDetails: BusinessKycProfile[];
+    profileDetails: BusinessKycProfile;
     updateStatus: boolean;
   }> {
     const existing = await this.businessKycProfileRepository.find({
@@ -31,34 +31,26 @@ export class BusinessKycProfileDetailsService {
       },
     });
 
-    const updateStatus = existing.length === 0;
+    const updateStatus = existing.length > 0;
 
     // delete old
     await this.businessKycRepository
       .businessKycProfile(businessKycId)
       .delete({transaction: tx});
 
-    // create new (businessKycId auto-attached)
-    // for (const profile of profileDetails) {
-      await this.businessKycRepository
-        .businessKycProfile(businessKycId)
-        .create(
-          {
-            ...profileDetails,
-            isActive: true,
-            isDeleted: false,
-          },
-          {transaction: tx},
-        );
-    // }
-
-    const created = await this.businessKycProfileRepository.find({
-      where: {
-        businessKycId,
-        isActive: true,
-        isDeleted: false,
-      },
-    });
+    const created = await this.businessKycRepository
+      .businessKycProfile(businessKycId)
+      .create(
+        {
+          ...profileDetails,
+          status: 0, // under review
+          mode: 1,
+          isActive: true,
+          isDeleted: false,
+        },
+        {transaction: tx},
+      );
+    // });
 
     return {
       profileDetails: created,

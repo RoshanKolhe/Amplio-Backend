@@ -10,18 +10,18 @@ import {
   CollateralTypes,
   ChargeTypes,
   OwnershipTypes,
-  Media,
   BusinessKyc,
+  CompanyProfiles,
 } from '../models';
 import {CollateralTypesRepository} from './collateral-types.repository';
 import {ChargeTypesRepository} from './charge-types.repository';
 import {OwnershipTypesRepository} from './ownership-types.repository';
-import {MediaRepository} from './media.repository';
 import {
   BusinessKycCollateralAssets,
   BusinessKycCollateralAssetsRelations,
 } from '../models/business-kyc-collateral-assets.model';
 import {BusinessKycRepository} from './business-kyc.repository';
+import {CompanyProfilesRepository} from './company-profiles.repository';
 
 export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMixin<
   BusinessKycCollateralAssets,
@@ -49,23 +49,13 @@ export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMi
     typeof BusinessKycCollateralAssets.prototype.id
   >;
 
-  public readonly securityDocument: BelongsToAccessor<
-    Media,
-    typeof BusinessKycCollateralAssets.prototype.id
-  >;
-
-  public readonly assetCoverCertificate: BelongsToAccessor<
-    Media,
-    typeof BusinessKycCollateralAssets.prototype.id
-  >;
-
-  public readonly valuationReport: BelongsToAccessor<
-    Media,
-    typeof BusinessKycCollateralAssets.prototype.id
-  >;
-
   public readonly businessKyc: BelongsToAccessor<
     BusinessKyc,
+    typeof BusinessKycCollateralAssets.prototype.id
+  >;
+
+  public readonly companyProfiles: BelongsToAccessor<
+    CompanyProfiles,
     typeof BusinessKycCollateralAssets.prototype.id
   >;
 
@@ -77,12 +67,20 @@ export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMi
     protected chargeTypesRepositoryGetter: Getter<ChargeTypesRepository>,
     @repository.getter('OwnershipTypesRepository')
     protected ownershipTypesRepositoryGetter: Getter<OwnershipTypesRepository>,
-    @repository.getter('MediaRepository')
-    protected mediaRepositoryGetter: Getter<MediaRepository>,
     @repository.getter('BusinessKycRepository')
     protected businessKycRepositoryGetter: Getter<BusinessKycRepository>,
+    @repository.getter('CompanyProfilesRepository')
+    protected companyProfilesRepositoryGetter: Getter<CompanyProfilesRepository>,
   ) {
     super(BusinessKycCollateralAssets, dataSource);
+    this.companyProfiles = this.createBelongsToAccessorFor(
+      'companyProfiles',
+      companyProfilesRepositoryGetter,
+    );
+    this.registerInclusionResolver(
+      'companyProfiles',
+      this.companyProfiles.inclusionResolver,
+    );
     this.businessKyc = this.createBelongsToAccessorFor(
       'businessKyc',
       this.businessKycRepositoryGetter,
@@ -90,30 +88,6 @@ export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMi
     this.registerInclusionResolver(
       'businessKyc',
       this.businessKyc.inclusionResolver,
-    );
-    this.valuationReport = this.createBelongsToAccessorFor(
-      'valuationReport',
-      mediaRepositoryGetter,
-    );
-    this.registerInclusionResolver(
-      'valuationReport',
-      this.valuationReport.inclusionResolver,
-    );
-    this.assetCoverCertificate = this.createBelongsToAccessorFor(
-      'assetCoverCertificate',
-      mediaRepositoryGetter,
-    );
-    this.registerInclusionResolver(
-      'assetCoverCertificate',
-      this.assetCoverCertificate.inclusionResolver,
-    );
-    this.securityDocument = this.createBelongsToAccessorFor(
-      'securityDocument',
-      mediaRepositoryGetter,
-    );
-    this.registerInclusionResolver(
-      'securityDocument',
-      this.securityDocument.inclusionResolver,
     );
     this.ownershipTypes = this.createBelongsToAccessorFor(
       'ownershipTypes',

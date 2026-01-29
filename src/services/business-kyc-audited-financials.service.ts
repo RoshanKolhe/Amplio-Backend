@@ -13,7 +13,7 @@ type ReplaceResult = {
 type AuditedFinancialInput = Omit<BusinessKycAuditedFinancials, 'id'>;
 
 type AuditedFinancialHandler = (
-  applicationId: string,
+  businessKycId: string,
   records: AuditedFinancialInput[],
   tx: any,
 ) => Promise<ReplaceResult>;
@@ -25,7 +25,7 @@ export class BusinessKycAuditedFinancialsService {
   ) { }
 
   async createOrUpdateAuditedFinancials(
-    applicationId: string,
+    businessKycId: string,
     records: AuditedFinancialInput[],
     tx: any,
   ): Promise<{
@@ -52,7 +52,7 @@ export class BusinessKycAuditedFinancialsService {
       );
     }
 
-    const result = await handler(applicationId, records, tx);
+    const result = await handler(businessKycId, records, tx);
 
     return {
       auditedFinancials: result.financialDetails,
@@ -68,12 +68,12 @@ export class BusinessKycAuditedFinancialsService {
   };
 
   private replaceFinancialStatements(
-    applicationId: string,
+    businessKycId: string,
     records: AuditedFinancialInput[],
     tx: any,
   ) {
     return this.replaceGenericAuditedRecords(
-      applicationId,
+      businessKycId,
       records,
       'financial_statements',
       tx,
@@ -81,12 +81,12 @@ export class BusinessKycAuditedFinancialsService {
   }
 
   private replaceIncomeTaxReturns(
-    applicationId: string,
+    businessKycId: string,
     records: AuditedFinancialInput[],
     tx: any,
   ) {
     return this.replaceGenericAuditedRecords(
-      applicationId,
+      businessKycId,
       records,
       'income_tax_returns',
       tx,
@@ -94,12 +94,12 @@ export class BusinessKycAuditedFinancialsService {
   }
 
   private replaceGSTR9(
-    applicationId: string,
+    businessKycId: string,
     records: AuditedFinancialInput[],
     tx: any,
   ) {
     return this.replaceGenericAuditedRecords(
-      applicationId,
+      businessKycId,
       records,
       'gstr_9',
       tx,
@@ -107,12 +107,12 @@ export class BusinessKycAuditedFinancialsService {
   }
 
   private replaceGST3B(
-    applicationId: string,
+    businessKycId: string,
     records: AuditedFinancialInput[],
     tx: any,
   ) {
     return this.replaceGenericAuditedRecords(
-      applicationId,
+      businessKycId,
       records,
       'gst_3b',
       tx,
@@ -120,7 +120,7 @@ export class BusinessKycAuditedFinancialsService {
   }
 
   private async replaceGenericAuditedRecords(
-    applicationId: string,
+    businessKycId: string,
     records: AuditedFinancialInput[],
     category: string,
     tx: any,
@@ -161,7 +161,7 @@ export class BusinessKycAuditedFinancialsService {
 
     const existingRecords = await this.auditedRepo.find({
       where: {
-        businessKycId: applicationId,
+        businessKycId: businessKycId,
         category,
         baseFinancialStartYear,
         baseFinancialEndYear,
@@ -206,7 +206,9 @@ export class BusinessKycAuditedFinancialsService {
       return this.auditedRepo.create(
         {
           ...record,
-          businessKycId: applicationId,
+          mode: 1,
+          status: 1,
+          businessKycId: businessKycId,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -218,7 +220,7 @@ export class BusinessKycAuditedFinancialsService {
 
     const finalRecords = await this.auditedRepo.find({
       where: {
-        businessKycId: applicationId,
+        businessKycId: businessKycId,
         category,
         baseFinancialStartYear,
         baseFinancialEndYear,
@@ -273,7 +275,7 @@ export class BusinessKycAuditedFinancialsService {
   }
 
   // fetch audited financials...
-  async fetchAuditedFinancials(applicationId: string): Promise<{
+  async fetchAuditedFinancials(businessKycId: string): Promise<{
     financialStatements: BusinessKycAuditedFinancials[];
     incomeTaxReturns: BusinessKycAuditedFinancials[];
     gstr9: BusinessKycAuditedFinancials[];
@@ -282,7 +284,7 @@ export class BusinessKycAuditedFinancialsService {
     const financialStatements = await this.auditedRepo.find({
       where: {
         and: [
-          {businessKycId: applicationId},
+          {businessKycId: businessKycId},
           {category: 'financial_statements'},
           {isActive: true},
           {isDeleted: false}
@@ -296,7 +298,7 @@ export class BusinessKycAuditedFinancialsService {
     const incomeTaxReturns = await this.auditedRepo.find({
       where: {
         and: [
-          {businessKycId: applicationId},
+          {businessKycId: businessKycId},
           {category: 'income_tax_returns'},
           {isActive: true},
           {isDeleted: false}
@@ -310,7 +312,7 @@ export class BusinessKycAuditedFinancialsService {
     const gstr9 = await this.auditedRepo.find({
       where: {
         and: [
-          {businessKycId: applicationId},
+          {businessKycId: businessKycId},
           {category: 'gstr_9'},
           {isActive: true},
           {isDeleted: false}
@@ -324,7 +326,7 @@ export class BusinessKycAuditedFinancialsService {
     const gst3b = await this.auditedRepo.find({
       where: {
         and: [
-          {businessKycId: applicationId},
+          {businessKycId: businessKycId},
           {category: 'gst_3b'},
           {isActive: true},
           {isDeleted: false}

@@ -1,4 +1,7 @@
-import {AuthenticationComponent, registerAuthenticationStrategy} from '@loopback/authentication';
+import {
+  AuthenticationComponent,
+  registerAuthenticationStrategy,
+} from '@loopback/authentication';
 import {BootMixin} from '@loopback/boot';
 import {ApplicationConfig} from '@loopback/core';
 import {RepositoryMixin} from '@loopback/repository';
@@ -11,7 +14,11 @@ import {ServiceMixin} from '@loopback/service-proxy';
 import multer from 'multer';
 import path from 'path';
 import {JWTStrategy} from './authentication-strategy/jwt-strategy';
-import {EmailManagerBindings, FILE_UPLOAD_SERVICE, STORAGE_DIRECTORY} from './keys';
+import {
+  EmailManagerBindings,
+  FILE_UPLOAD_SERVICE,
+  STORAGE_DIRECTORY,
+} from './keys';
 import {MySequence} from './sequence';
 import {AddressDetailsService} from './services/address-details.service';
 import {BankDetailsService} from './services/bank-details.service';
@@ -31,6 +38,8 @@ import {BusinessKycProfileDetailsService} from './services/business-kyc-profile-
 import {BusinessKycStatusDataService} from './services/business-kyc-status-data.service';
 import {BusinessKycAuditedFinancialsService} from './services/business-kyc-audited-financials.service';
 import {BusinessKycCollateralAssetsService} from './services/business-kyc-collateral-assets.service';
+import {BusinessKycStateService} from './services/business-kyc-state.service';
+import {BusinessKycStepDataService} from './services/business-kyc-step-data.service';
 
 export {ApplicationConfig};
 
@@ -76,20 +85,42 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('jwt.expiresIn').to(process.env.JWT_EXPIRES_IN ?? '7h');
     this.bind('service.jwt.service').toClass(JWTService);
     this.bind('service.user.service').toClass(MyUserService);
-    this.bind('service.documentExtraction.service').toClass(DocumentExtractionService);
+    this.bind('service.documentExtraction.service').toClass(
+      DocumentExtractionService,
+    );
     this.bind('service.AddressDetails.service').toClass(AddressDetailsService);
     this.bind('service.media.service').toClass(MediaService);
-    this.bind('service.userUploadedDocuments.service').toClass(UserUploadedDocumentsService);
+    this.bind('service.userUploadedDocuments.service').toClass(
+      UserUploadedDocumentsService,
+    );
     this.bind('service.bankDetails.service').toClass(BankDetailsService);
-    this.bind('services.AuthorizeSignatoriesService.service').toClass(AuthorizeSignatoriesService);
+    this.bind('services.AuthorizeSignatoriesService.service').toClass(
+      AuthorizeSignatoriesService,
+    );
     this.bind('service.session.service').toClass(SessionService);
     this.bind('service.kyc.service').toClass(KycService);
     this.bind(EmailManagerBindings.SEND_MAIL).toClass(EmailService);
-    this.bind('service.businessKycStatusService.service').toClass(BusinessKycStatusService);
-    this.bind('service.businessKycProfileDetailsService.service').toClass(BusinessKycProfileDetailsService),
-    this.bind('service.businessKycStatusDataService.service').toClass(BusinessKycStatusDataService),
-    this.bind('service.businessKycAuditedFinancialsService.service').toClass(BusinessKycAuditedFinancialsService),
-    this.bind('service.businessKycCollateralAssetsService.service').toClass(BusinessKycCollateralAssetsService)
+    this.bind('service.businessKycStatusService.service').toClass(
+      BusinessKycStatusService,
+    );
+    this.bind('service.businessKycProfileDetailsService.service').toClass(
+      BusinessKycProfileDetailsService,
+    );
+    this.bind('service.businessKycStatusDataService.service').toClass(
+      BusinessKycStatusDataService,
+    );
+    this.bind('service.businessKycAuditedFinancialsService.service').toClass(
+      BusinessKycAuditedFinancialsService,
+    );
+    this.bind('service.businessKycCollateralAssetsService.service').toClass(
+      BusinessKycCollateralAssetsService,
+    );
+    this.bind('service.businessKycStateService.service').toClass(
+      BusinessKycStateService,
+    );
+    this.bind('service.businessKycStepDataService').toClass(
+      BusinessKycStepDataService,
+    );
   }
 
   protected configureFileUpload(destination?: string) {

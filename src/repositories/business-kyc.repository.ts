@@ -18,8 +18,7 @@ import {
   BusinessKycProfile,
   BusinessKycRelations,
   BusinessKycStatusMaster,
-  CompanyProfiles,
-} from '../models';
+  CompanyProfiles, BusinessKycAuditedFinancials} from '../models';
 
 import {BusinessKycClientProfileRepository} from './business-kyc-client-profile.repository';
 import {BusinessKycCollateralAssetsRepository} from './business-kyc-collateral-assets.repository';
@@ -27,6 +26,7 @@ import {BusinessKycGuarantorRepository} from './business-kyc-guarantor.repositor
 import {BusinessKycProfileRepository} from './business-kyc-profile.repository';
 import {BusinessKycStatusMasterRepository} from './business-kyc-status-master.repository';
 import {CompanyProfilesRepository} from './company-profiles.repository';
+import {BusinessKycAuditedFinancialsRepository} from './business-kyc-audited-financials.repository';
 
 export class BusinessKycRepository extends TimeStampRepositoryMixin<
   BusinessKyc,
@@ -69,6 +69,8 @@ export class BusinessKycRepository extends TimeStampRepositoryMixin<
     typeof BusinessKyc.prototype.id
   >;
 
+  public readonly businessKycAuditedFinancials: HasManyRepositoryFactory<BusinessKycAuditedFinancials, typeof BusinessKyc.prototype.id>;
+
   constructor(
     @inject('datasources.amplio')
     dataSource: AmplioDataSource,
@@ -89,9 +91,11 @@ export class BusinessKycRepository extends TimeStampRepositoryMixin<
     protected businessKycClientProfileRepositoryGetter: Getter<BusinessKycClientProfileRepository>,
 
     @repository.getter('BusinessKycGuarantorRepository')
-    protected businessKycGuarantorRepositoryGetter: Getter<BusinessKycGuarantorRepository>,
+    protected businessKycGuarantorRepositoryGetter: Getter<BusinessKycGuarantorRepository>, @repository.getter('BusinessKycAuditedFinancialsRepository') protected businessKycAuditedFinancialsRepositoryGetter: Getter<BusinessKycAuditedFinancialsRepository>,
   ) {
     super(BusinessKyc, dataSource);
+    this.businessKycAuditedFinancials = this.createHasManyRepositoryFactoryFor('businessKycAuditedFinancials', businessKycAuditedFinancialsRepositoryGetter,);
+    this.registerInclusionResolver('businessKycAuditedFinancials', this.businessKycAuditedFinancials.inclusionResolver);
 
     // belongsTo
     this.companyProfiles = this.createBelongsToAccessorFor(
