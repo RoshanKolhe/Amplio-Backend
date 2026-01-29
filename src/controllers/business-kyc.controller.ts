@@ -12,17 +12,23 @@ import {
 } from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
-import {BusinessKycAuditedFinancials, CompanyProfiles} from '../models';
+import {
+  BusinessKycAuditedFinancials,
+  BusinessKycCollateralAssets,
+  BusinessKycGuarantor,
+  CompanyProfiles
+} from '../models';
 import {
   BusinessKycRepository,
   CompanyProfilesRepository,
 } from '../repositories';
 import {BusinessKycStatusService} from '../services/businees-kyc-status.service';
+import {BusinessKycAuditedFinancialsService} from '../services/business-kyc-audited-financials.service';
+import {BusinessKycCollateralAssetsService} from '../services/business-kyc-collateral-assets.service';
+import {BusinessKycGuarantorDetailsService} from '../services/business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from '../services/business-kyc-profile-details.service';
-import {BusinessKycStatusDataService} from '../services/business-kyc-status-data.service';
 import {BusinessKycStateService} from '../services/business-kyc-state.service';
 import {BusinessKycStepDataService} from '../services/business-kyc-step-data.service';
-import {BusinessKycAuditedFinancialsService} from '../services/business-kyc-audited-financials.service';
 
 export class BusinessKycController {
   constructor(
@@ -34,15 +40,17 @@ export class BusinessKycController {
     private statusService: BusinessKycStatusService,
     @inject('service.businessKycProfileDetailsService.service')
     private businessKycProfileDetailsService: BusinessKycProfileDetailsService,
-    @inject('service.businessKycStatusDataService.service')
-    private businessKycStatusDataService: BusinessKycStatusDataService,
     @inject('service.businessKycStateService.service')
     private businessKycStateService: BusinessKycStateService,
     @inject('service.businessKycStepDataService')
     private businessKycStepDataService: BusinessKycStepDataService,
     @inject('service.businessKycAuditedFinancialsService.service')
     private businessKycAuditedFinancialsService: BusinessKycAuditedFinancialsService,
-  ) {}
+    @inject('service.businessKycGuarantorDetailsService')
+    private businessKycGuarantorDetailsService: BusinessKycGuarantorDetailsService,
+    @inject('service.businessKycCollateralAssetsService.service')
+    private businessKycCollateralAssetsService: BusinessKycCollateralAssetsService
+  ) { }
 
   async verifyCompany(usersId: string): Promise<CompanyProfiles> {
     const companyProfile = await this.companyProfileRepository.findOne({
@@ -310,4 +318,181 @@ export class BusinessKycController {
       },
     };
   }
+
+  //Patch Guarantor Details
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @patch('/business-kyc/guarantor-details')
+  async updateGurantorDetails(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    currentUser: UserProfile,
+
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['guarantor'],
+            properties: {
+              guarantor: {
+                type: 'array',
+                minItems: 1,
+                items: getModelSchemaRef(BusinessKycGuarantor, {
+                  title: 'CreateGuarantor',
+                  exclude: ['id'],
+                }),
+              },
+            },
+          },
+        },
+      },
+    })
+    body: {
+      guarantor: Omit<BusinessKycGuarantor, 'id'>[];
+    },
+  ) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const companyProfile = await this.companyProfileRepository.findOne({
+        where: {
+          usersId: currentUser.id,
+          isActive: true,
+          isDeleted: false,
+        },
+      });
+
+      if (!companyProfile) {
+        throw new HttpErrors.NotFound('Company profile not found');
+      }
+
+      const kyc = await this.businessKycRepository.findOne({
+        where: {
+          companyProfilesId: companyProfile.id,
+          isActive: true,
+          isDeleted: false,
+        },
+      });
+
+      if (!kyc) {
+        throw new HttpErrors.NotFound('Business KYC not started');
+      }
+
+      const result =
+        await this.businessKycGuarantorDetailsService
+          .createOrUpdateBusinessKycGuarantorDetails(
+            kyc.id!,
+            body.guarantor,
+            tx,
+          );
+
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Business guarantor details updated successfully',
+        data: {
+          guarantorDetails: result.GuarantorDetails,
+          updateStatus: result.updateStatus,
+          status: 1,
+          model: 0,
+        },
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
+
+  //Collateral Assets
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @patch('/business-kyc/collateral-details')
+  async updateCollateralDetails(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    currentUser: UserProfile,
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['collateralAssets'],
+            properties: {
+              collateralAssets: {
+                type: 'array',
+                minItems: 1,
+                items: getModelSchemaRef(BusinessKycCollateralAssets, {
+                  title: 'CreateCollateralAssets',
+                  exclude: ['id'],
+                }),
+              },
+            },
+          },
+        },
+      },
+    })
+    body: {
+      collateralAssets: Omit<BusinessKycCollateralAssets, 'id'>[];
+    },
+  ) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const companyProfile = await this.companyProfileRepository.findOne({
+        where: {
+          usersId: currentUser.id,
+          isActive: true,
+          isDeleted: false,
+        },
+      });
+
+      if (!companyProfile) {
+        throw new HttpErrors.NotFound('Company profile not found');
+      }
+
+      const kyc = await this.businessKycRepository.findOne({
+        where: {
+          companyProfilesId: companyProfile.id,
+          isActive: true,
+          isDeleted: false,
+        },
+      });
+
+      if (!kyc) {
+        throw new HttpErrors.NotFound('Business KYC not started');
+      }
+
+      const result =
+        await this.businessKycCollateralAssetsService
+          .createOrUpdateCollateralAssets(
+            kyc.id!,
+            body.collateralAssets,
+            tx,
+          );
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Business guarantor details updated successfully',
+        data: {
+          collateralAssets: result.collateralAssets,
+          updateStatus: result.updateStatus,
+          status: 1,
+          model: 0,
+        },
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
+
 }

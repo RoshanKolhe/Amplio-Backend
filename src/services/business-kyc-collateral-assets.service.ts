@@ -13,7 +13,7 @@ export class BusinessKycCollateralAssetsService {
     private businessKycRepository: BusinessKycRepository,
     @repository(BusinessKycCollateralAssetsRepository)
     private collateralAssetsRepository: BusinessKycCollateralAssetsRepository,
-  ) {}
+  ) { }
 
   // create or update collateral assets...
   async createOrUpdateCollateralAssets(
@@ -42,12 +42,19 @@ export class BusinessKycCollateralAssetsService {
 
     await this.businessKycRepository
       .businessKycCollateralAssets(businessKycId)
-      .delete(undefined, {transaction: tx});
+      .delete({isActive: true, isDeleted: false}, {transaction: tx});
 
     for (const borrowing of borrowingDetails) {
       await this.businessKycRepository
         .businessKycCollateralAssets(businessKycId)
-        .create(borrowing, {transaction: tx});
+        .create(
+          {
+            ...borrowing,
+            isActive: true,
+            isDeleted: false,
+          },
+          {transaction: tx},
+        );
     }
 
     const createdCollateralAssets = await this.collateralAssetsRepository.find({
