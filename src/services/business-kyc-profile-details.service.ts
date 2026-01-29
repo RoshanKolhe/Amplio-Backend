@@ -17,7 +17,7 @@ export class BusinessKycProfileDetailsService {
 
   async createOrUpdateBusinessKycProfileDetails(
     businessKycId: string,
-    profileDetails: Omit<BusinessKycProfile, 'id' | 'businessKycId'>[],
+    profileDetails: Partial<Omit<BusinessKycProfile, 'id' | 'businessKycId'>>,
     tx: any,
   ): Promise<{
     profileDetails: BusinessKycProfile[];
@@ -39,18 +39,18 @@ export class BusinessKycProfileDetailsService {
       .delete({transaction: tx});
 
     // create new (businessKycId auto-attached)
-    for (const profile of profileDetails) {
+    // for (const profile of profileDetails) {
       await this.businessKycRepository
         .businessKycProfile(businessKycId)
         .create(
           {
-            ...profile,
+            ...profileDetails,
             isActive: true,
             isDeleted: false,
           },
           {transaction: tx},
         );
-    }
+    // }
 
     const created = await this.businessKycProfileRepository.find({
       where: {

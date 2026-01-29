@@ -12,7 +12,6 @@ import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
 
 import {
   BusinessKyc,
-  BusinessKycAuditedFinancials,
   BusinessKycClientProfile,
   BusinessKycCollateralAssets,
   BusinessKycGuarantor,
@@ -22,7 +21,6 @@ import {
   CompanyProfiles,
 } from '../models';
 
-import {BusinessKycAuditedFinancialsRepository} from './business-kyc-audited-financials.repository';
 import {BusinessKycClientProfileRepository} from './business-kyc-client-profile.repository';
 import {BusinessKycCollateralAssetsRepository} from './business-kyc-collateral-assets.repository';
 import {BusinessKycGuarantorRepository} from './business-kyc-guarantor.repository';
@@ -56,11 +54,6 @@ export class BusinessKycRepository extends TimeStampRepositoryMixin<
     typeof BusinessKyc.prototype.id
   >;
 
-  public readonly businessKycAuditedFinancials: HasOneRepositoryFactory<
-    BusinessKycAuditedFinancials,
-    typeof BusinessKyc.prototype.id
-  >;
-
   public readonly businessKycCollateralAssets: HasManyRepositoryFactory<
     BusinessKycCollateralAssets,
     typeof BusinessKyc.prototype.id
@@ -88,9 +81,6 @@ export class BusinessKycRepository extends TimeStampRepositoryMixin<
 
     @repository.getter('BusinessKycProfileRepository')
     protected businessKycProfileRepositoryGetter: Getter<BusinessKycProfileRepository>,
-
-    @repository.getter('BusinessKycAuditedFinancialsRepository')
-    protected businessKycAuditedFinancialsRepositoryGetter: Getter<BusinessKycAuditedFinancialsRepository>,
 
     @repository.getter('BusinessKycCollateralAssetsRepository')
     protected businessKycCollateralAssetsRepositoryGetter: Getter<BusinessKycCollateralAssetsRepository>,
@@ -132,15 +122,6 @@ export class BusinessKycRepository extends TimeStampRepositoryMixin<
       this.businessKycProfile.inclusionResolver,
     );
 
-    this.businessKycAuditedFinancials = this.createHasOneRepositoryFactoryFor(
-      'businessKycAuditedFinancials',
-      businessKycAuditedFinancialsRepositoryGetter,
-    );
-    this.registerInclusionResolver(
-      'businessKycAuditedFinancials',
-      this.businessKycAuditedFinancials.inclusionResolver,
-    );
-
     // hasMany
     this.businessKycCollateralAssets =
       this.createHasManyRepositoryFactoryFor(
@@ -157,6 +138,7 @@ export class BusinessKycRepository extends TimeStampRepositoryMixin<
         'businessKycClientProfiles',
         businessKycClientProfileRepositoryGetter,
       );
+
     this.registerInclusionResolver(
       'businessKycClientProfiles',
       this.businessKycClientProfiles.inclusionResolver,

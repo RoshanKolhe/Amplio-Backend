@@ -3,11 +3,11 @@ import {
   AuthenticationBindings,
 } from '@loopback/authentication';
 import {inject} from '@loopback/core';
-import {repository} from '@loopback/repository';
+import {IsolationLevel, repository} from '@loopback/repository';
 import {get, getModelSchemaRef, HttpErrors, param, patch, post, requestBody} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
-import {BusinessKycProfile} from '../models';
+import {BusinessKycProfile, CompanyProfiles} from '../models';
 import {
   BusinessKycRepository,
   CompanyProfilesRepository,
@@ -20,7 +20,6 @@ export class BusinessKycController {
   constructor(
     @repository(BusinessKycRepository)
     private businessKycRepository: BusinessKycRepository,
-
     @repository(CompanyProfilesRepository)
     private companyProfileRepository: CompanyProfilesRepository,
     @inject('service.businessKycStatusService.service')
@@ -31,8 +30,7 @@ export class BusinessKycController {
     private businessKycStatusDataService: BusinessKycStatusDataService
   ) { }
 
-
-  async verifyCompany(usersId: string) {
+  async verifyCompany(usersId: string): Promise<CompanyProfiles> {
     const companyProfile = await this.companyProfileRepository.findOne({
       where: {
         and: [
@@ -50,6 +48,7 @@ export class BusinessKycController {
     return companyProfile;
   }
 
+  // unnecessary status, active step, completed steps fields we can just pass active step
   @authenticate('jwt')
   @authorize({roles: ['company']})
   @post('/business-kyc')
@@ -120,6 +119,7 @@ export class BusinessKycController {
     };
   }
 
+  // access token is missing invalid params are passing no need of company profile id.
   @get('/business-kyc/company/{companyProfileId}')
   async fetchBusinessKycStateByCompany(
     @param.path.string('companyProfileId') companyProfileId: string,
@@ -163,8 +163,7 @@ export class BusinessKycController {
     };
   }
 
-
-
+  // here no need business kyc id
   @authenticate('jwt')
   @authorize({roles: ['company']})
   @get('/business-kyc/{businessKycId}/data-by-status/{statusValue}')
@@ -175,6 +174,7 @@ export class BusinessKycController {
   ) {
     const company = await this.verifyCompany(currentUser.id);
 
+    // use and where ever you are checking multiple terms
     const kyc = await this.businessKycRepository.findOne({
       where: {
         id: businessKycId,
@@ -212,9 +212,7 @@ export class BusinessKycController {
     };
   }
 
-
   ///// BUSINESSS KYC PROFILE //////
-
   @authenticate('jwt')
   @authorize({roles: ['company']})
   @patch('/business-kyc/{businessKycId}/profile-details')
@@ -228,25 +226,12 @@ export class BusinessKycController {
       required: true,
       content: {
         'application/json': {
-          schema: {
-            type: 'object',
-            required: ['profileDetails'],
-            properties: {
-              profileDetails: {
-                type: 'array',
-                minItems: 1,
-                items: getModelSchemaRef(BusinessKycProfile, {
-                  title: 'CreateBusinessKycPrfileDetails',
-                  exclude: ['id', 'businessKycId'],
-                }),
-              },
-            },
-          },
+          schema: getModelSchemaRef(BusinessKycProfile, {partial: true}),
         },
       },
     })
     body: {
-      profileDetails: Omit<BusinessKycProfile, 'id' | 'businessKycId'>[];
+      profileDetails: Partial<Omit<BusinessKycProfile, 'id'>>;
     },
   ): Promise<{
     success: boolean;
@@ -257,27 +242,45 @@ export class BusinessKycController {
       updateStatus: boolean;
     };
   }> {
-    await this.verifyCompany(currentUser.id);
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+    try {
+      const company = await this.verifyCompany(currentUser.id);
 
-    const result =
-      await this.businessKycProfileDetailsService.createOrUpdateBusinessKycProfileDetails(
-        businessKycId,
-        body.profileDetails,
-        null, // tx (optional)
-      );
+      // use and where ever you are checking multiple terms
+      const kyc = await this.businessKycRepository.findOne({
+        where: {
+          companyProfilesId: company.id,
+          isActive: true,
+          isDeleted: false,
+        },
+      });
 
-    return {
-      success: true,
-      message: 'Borrowing details updated successfully',
-      data: {
-        businessKycId,
-        profileDetails: result.profileDetails,
-        updateStatus: result.updateStatus,
-      },
-    };
+      const newProfileDetails = new BusinessKycProfile({
+        ...body.profileDetails,
+        isActive: true,
+        businessKycId: kyc?.id
+      })
+
+      const result =
+        await this.businessKycProfileDetailsService.createOrUpdateBusinessKycProfileDetails(
+          businessKycId,
+          newProfileDetails,
+          tx
+        );
+
+      await tx.commit();
+      return {
+        success: true,
+        message: 'Borrowing details updated successfully',
+        data: {
+          businessKycId,
+          profileDetails: result.profileDetails,
+          updateStatus: result.updateStatus,
+        },
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
   }
-
-
-
-
 }

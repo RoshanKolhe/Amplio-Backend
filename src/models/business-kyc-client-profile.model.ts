@@ -98,6 +98,7 @@ export class BusinessKycClientProfile extends Entity {
 
   @belongsTo(() => BusinessKyc)
   businessKycId: string;
+  
   @property({
     type: 'date',
   })

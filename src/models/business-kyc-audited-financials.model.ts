@@ -141,8 +141,6 @@ export class BusinessKycAuditedFinancials extends Entity {
   })
   deletedAt?: Date;
 
-
-
   // @belongsTo(() => BusinessKycIssueApplication)
   @belongsTo(() => BusinessKyc)
   businessKycId: string;

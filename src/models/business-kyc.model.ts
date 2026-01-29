@@ -1,5 +1,4 @@
 import {belongsTo, Entity, hasMany, hasOne, model, property} from '@loopback/repository';
-import {BusinessKycAuditedFinancials} from './business-kyc-audited-financials.model';
 import {BusinessKycClientProfile} from './business-kyc-client-profile.model';
 import {BusinessKycCollateralAssets} from './business-kyc-collateral-assets.model';
 import {BusinessKycGuarantor} from './business-kyc-guarantor.model';
@@ -13,6 +12,12 @@ import {CompanyProfiles} from './company-profiles.model';
       table: 'business_kyc',
       schema: 'public',
     },
+    indexes: {
+      uniqueBusinessKycCompanyId: {
+        keys: {companyProfilesId: 1},
+        options: {unique: true},
+      }
+    }
   },
 })
 export class BusinessKyc extends Entity {
@@ -28,13 +33,14 @@ export class BusinessKyc extends Entity {
     type: 'string',
     required: true,
   })
-  status?: string;
+  status: string;
 
   @property({
     type: 'boolean',
     default: true,
+    required: true,
   })
-  isActive?: boolean;
+  isActive: boolean;
 
   @property({
     type: 'boolean',
@@ -65,9 +71,6 @@ export class BusinessKyc extends Entity {
   @hasOne(() => BusinessKycProfile)
   businessKycProfile: BusinessKycProfile;
 
-  @hasOne(() => BusinessKycAuditedFinancials)
-  businessKycAuditedFinancials: BusinessKycAuditedFinancials;
-
   @hasMany(() => BusinessKycCollateralAssets)
   businessKycCollateralAssets: BusinessKycCollateralAssets[];
 
@@ -76,7 +79,6 @@ export class BusinessKyc extends Entity {
 
   @hasMany(() => BusinessKycGuarantor)
   businessKycGuarantors: BusinessKycGuarantor[];
-
 
   @belongsTo(() => BusinessKycStatusMaster)
   businessKycStatusMasterId?: string;
