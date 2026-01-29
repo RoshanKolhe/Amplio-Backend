@@ -13,19 +13,24 @@ import path from 'path';
 import {JWTStrategy} from './authentication-strategy/jwt-strategy';
 import {EmailManagerBindings, FILE_UPLOAD_SERVICE, STORAGE_DIRECTORY} from './keys';
 import {MySequence} from './sequence';
+import {AddressDetailsService} from './services/address-details.service';
 import {BankDetailsService} from './services/bank-details.service';
+import {BusinessKycStatusService} from './services/businees-kyc-status.service';
 import {DocumentExtractionService} from './services/document-extraction.service';
 import {EmailService} from './services/email.service';
 import {BcryptHasher} from './services/hash.password.bcrypt';
 import {JWTService} from './services/jwt-service';
+import {KycService} from './services/kyc.service';
 import {MediaService} from './services/media.service';
 import {RbacService} from './services/rbac.service';
 import {SessionService} from './services/session.service';
 import {AuthorizeSignatoriesService} from './services/signatories.service';
 import {UserUploadedDocumentsService} from './services/user-documents.service';
 import {MyUserService} from './services/user-service';
-import {KycService} from './services/kyc.service';
-import {AddressDetailsService} from './services/address-details.service';
+import {BusinessKycProfileDetailsService} from './services/business-kyc-profile-details.service';
+import {BusinessKycStatusDataService} from './services/business-kyc-status-data.service';
+import {BusinessKycAuditedFinancialsService} from './services/business-kyc-audited-financials.service';
+import {BusinessKycCollateralAssetsService} from './services/business-kyc-collateral-assets.service';
 
 export {ApplicationConfig};
 
@@ -80,6 +85,11 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.session.service').toClass(SessionService);
     this.bind('service.kyc.service').toClass(KycService);
     this.bind(EmailManagerBindings.SEND_MAIL).toClass(EmailService);
+    this.bind('service.businessKycStatusService.service').toClass(BusinessKycStatusService);
+    this.bind('service.businessKycProfileDetailsService.service').toClass(BusinessKycProfileDetailsService),
+    this.bind('service.businessKycStatusDataService.service').toClass(BusinessKycStatusDataService),
+    this.bind('service.businessKycAuditedFinancialsService.service').toClass(BusinessKycAuditedFinancialsService),
+    this.bind('service.businessKycCollateralAssetsService.service').toClass(BusinessKycCollateralAssetsService)
   }
 
   protected configureFileUpload(destination?: string) {

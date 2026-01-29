@@ -36,3 +36,5 @@ export * from './address-details.model';
 export * from './business-kyc-profile.model';
 export * from './business-kyc-audited-financials.model';
 
+export * from './business-kyc-profile.model';
+export * from './business-kyc-audited-financials.model';

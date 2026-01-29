@@ -1,10 +1,11 @@
-import {Entity, model, property, belongsTo, hasOne, hasMany} from '@loopback/repository';
-import {CompanyProfiles} from './company-profiles.model';
-import {BusinessKycProfile} from './business-kyc-profile.model';
+import {belongsTo, Entity, hasMany, hasOne, model, property} from '@loopback/repository';
 import {BusinessKycAuditedFinancials} from './business-kyc-audited-financials.model';
-import {BusinessKycCollateralAssets} from './business-kyc-collateral-assets.model';
 import {BusinessKycClientProfile} from './business-kyc-client-profile.model';
+import {BusinessKycCollateralAssets} from './business-kyc-collateral-assets.model';
 import {BusinessKycGuarantor} from './business-kyc-guarantor.model';
+import {BusinessKycProfile} from './business-kyc-profile.model';
+import {BusinessKycStatusMaster} from './business-kyc-status-master.model';
+import {CompanyProfiles} from './company-profiles.model';
 
 @model({
   settings: {
@@ -22,12 +23,6 @@ export class BusinessKyc extends Entity {
     postgresql: {dataType: 'uuid'},
   })
   id?: string;
-
-  @property({
-    type: 'string',
-    required: true,
-  })
-  progress: string;
 
   @property({
     type: 'string',
@@ -81,6 +76,11 @@ export class BusinessKyc extends Entity {
 
   @hasMany(() => BusinessKycGuarantor)
   businessKycGuarantors: BusinessKycGuarantor[];
+
+
+  @belongsTo(() => BusinessKycStatusMaster)
+  businessKycStatusMasterId?: string;
+
   // @property({
   //   type: 'string',
   // })
@@ -92,7 +92,6 @@ export class BusinessKyc extends Entity {
 }
 
 export interface BusinessKycRelations {
-  // describe navigational properties here
 }
 
 export type BusinessKycWithRelations = BusinessKyc & BusinessKycRelations;
