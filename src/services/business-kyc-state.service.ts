@@ -44,8 +44,16 @@ export class BusinessKycStateService {
       },
     });
 
+    // if (!kyc) {
+    //   throw new HttpErrors.NotFound('Business KYC not started');
+    // }
     if (!kyc) {
-      throw new HttpErrors.NotFound('Business KYC not started');
+      return {
+        businessKycId: null,
+        companyProfileId: companyProfile.id,
+        completedSteps: [],
+        activeStep: null,
+      };
     }
 
     /* -------------------- 3️⃣ Current DB status -------------------- */
