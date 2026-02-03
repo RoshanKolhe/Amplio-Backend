@@ -41,6 +41,7 @@ import {BusinessKycCollateralAssetsService} from './services/business-kyc-collat
 import {BusinessKycStateService} from './services/business-kyc-state.service';
 import {BusinessKycStepDataService} from './services/business-kyc-step-data.service';
 import {BusinessKycGuarantorDetailsService} from './services/business-kyc-guarantor-details.service';
+import {BusinessKycTransactionsService} from './services/business-kyc-transaction.service';
 
 export {ApplicationConfig};
 
@@ -123,8 +124,11 @@ export class AmplioBackendApplication extends BootMixin(
       BusinessKycStepDataService,
     );
     this.bind('service.businessKycGuarantorDetailsService').toClass(
-      BusinessKycGuarantorDetailsService
-    )
+      BusinessKycGuarantorDetailsService,
+    );
+    this.bind('service.businessKycTransactionsService').toClass(
+      BusinessKycTransactionsService,
+    );
   }
 
   protected configureFileUpload(destination?: string) {

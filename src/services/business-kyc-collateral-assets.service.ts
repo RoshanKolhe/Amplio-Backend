@@ -13,11 +13,12 @@ export class BusinessKycCollateralAssetsService {
     private businessKycRepository: BusinessKycRepository,
     @repository(BusinessKycCollateralAssetsRepository)
     private collateralAssetsRepository: BusinessKycCollateralAssetsRepository,
-  ) { }
+  ) {}
 
   // create or update collateral assets...
   async createOrUpdateCollateralAssets(
     businessKycId: string,
+    companyProfilesId: string,
     borrowingDetails: Omit<BusinessKycCollateralAssets, 'id'>[],
     tx: any,
   ): Promise<{
@@ -42,7 +43,7 @@ export class BusinessKycCollateralAssetsService {
 
     await this.businessKycRepository
       .businessKycCollateralAssets(businessKycId)
-      .delete({isActive: true, isDeleted: false}, {transaction: tx});
+      .delete(undefined, {transaction: tx});
 
     for (const borrowing of borrowingDetails) {
       await this.businessKycRepository
@@ -50,20 +51,39 @@ export class BusinessKycCollateralAssetsService {
         .create(
           {
             ...borrowing,
+            companyProfilesId,
+            status: 0,
+            mode: 1,
             isActive: true,
             isDeleted: false,
+            businessKycId,
           },
           {transaction: tx},
         );
     }
 
-    const createdCollateralAssets = await this.collateralAssetsRepository.find({
-      where: {
-        businessKycId,
-        isActive: true,
-        isDeleted: false,
+    const createdCollateralAssets = await this.collateralAssetsRepository.find(
+      {
+        where: {
+          businessKycId,
+          isActive: true,
+          isDeleted: false,
+        },
+        include: [
+          {
+            relation: 'securityDocument',
+            scope: {
+              fields: {
+                id: true,
+                fileOriginalName: true,
+                fileUrl: true,
+              },
+            },
+          },
+        ],
       },
-    });
+      {transaction: tx},
+    );
 
     return {
       collateralAssets: createdCollateralAssets,
@@ -81,6 +101,18 @@ export class BusinessKycCollateralAssetsService {
         isActive: true,
         isDeleted: false,
       },
+      include: [
+        {
+          relation: 'securityDocument',
+          scope: {
+            fields: {
+              id: true,
+              fileOriginalName: true,
+              fileUrl: true,
+            },
+          },
+        },
+      ],
     });
 
     return collateralAssets;

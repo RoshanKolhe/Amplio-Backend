@@ -22,7 +22,7 @@ export class BusinessKycAuditedFinancialsService {
   constructor(
     @repository(BusinessKycAuditedFinancialsRepository)
     private auditedRepo: BusinessKycAuditedFinancialsRepository,
-  ) { }
+  ) {}
 
   async createOrUpdateAuditedFinancials(
     businessKycId: string,
@@ -33,9 +33,7 @@ export class BusinessKycAuditedFinancialsService {
     isUpdated: boolean;
   }> {
     if (!records?.length) {
-      throw new HttpErrors.BadRequest(
-        'Audited financial details are required',
-      );
+      throw new HttpErrors.BadRequest('Audited financial details are required');
     }
 
     const category = records[0].category;
@@ -125,13 +123,13 @@ export class BusinessKycAuditedFinancialsService {
     category: string,
     tx: any,
   ): Promise<ReplaceResult> {
-    const {
-      baseFinancialStartYear,
-      baseFinancialEndYear,
-    } = records[0];
+    const {baseFinancialStartYear, baseFinancialEndYear} = records[0];
 
     for (const record of records) {
-      if (record.type === 'year_wise' && (!record.periodStartYear || !record.periodEndYear)) {
+      if (
+        record.type === 'year_wise' &&
+        (!record.periodStartYear || !record.periodEndYear)
+      ) {
         throw new HttpErrors.BadRequest(
           'Period start year and end year are required',
         );
@@ -159,16 +157,20 @@ export class BusinessKycAuditedFinancialsService {
     // category-specific domain rules
     this.applyCategoryRules(category, records);
 
-    const existingRecords = await this.auditedRepo.find({
-      where: {
-        businessKycId: businessKycId,
-        category,
-        baseFinancialStartYear,
-        baseFinancialEndYear,
-        isActive: true,
-        isDeleted: false,
+    const existingRecords = await this.auditedRepo.find(
+      {
+        where: {
+          businessKycId: businessKycId,
+          category,
+          baseFinancialStartYear,
+          baseFinancialEndYear,
+          isActive: true,
+          isDeleted: false,
+        },
       },
-    }, {transaction: tx});
+      {transaction: tx},
+    );
+    console.log('existingRecords', existingRecords);
 
     const existingMap = new Map<string, BusinessKycAuditedFinancials>();
     for (const row of existingRecords) {
@@ -179,8 +181,10 @@ export class BusinessKycAuditedFinancialsService {
       );
       existingMap.set(key, row);
     }
+    console.log('existingMap', existingMap);
 
     let isUpdated = false;
+    console.log('record', records);
 
     const operations = records.map(record => {
       const key = this.buildPeriodKey(
@@ -190,6 +194,7 @@ export class BusinessKycAuditedFinancialsService {
       );
 
       const existing = existingMap.get(key);
+      console.log('existing', existing);
 
       if (existing) {
         isUpdated = true;
@@ -198,6 +203,10 @@ export class BusinessKycAuditedFinancialsService {
           {
             ...record,
             updatedAt: new Date(),
+            status: existing.status,
+            mode: existing.mode,
+            isActive: true,
+            isDeleted: false,
           },
           {transaction: tx},
         );
@@ -207,8 +216,10 @@ export class BusinessKycAuditedFinancialsService {
         {
           ...record,
           mode: 1,
-          status: 1,
+          status: 0,
           businessKycId: businessKycId,
+          isActive: true,
+          isDeleted: false,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -218,18 +229,20 @@ export class BusinessKycAuditedFinancialsService {
 
     await Promise.all(operations);
 
-    const finalRecords = await this.auditedRepo.find({
-      where: {
-        businessKycId: businessKycId,
-        category,
-        baseFinancialStartYear,
-        baseFinancialEndYear,
-        isActive: true,
-        isDeleted: false,
+    const finalRecords = await this.auditedRepo.find(
+      {
+        where: {
+          businessKycId: businessKycId,
+          category,
+          baseFinancialStartYear,
+          baseFinancialEndYear,
+          isActive: true,
+          isDeleted: false,
+        },
+        order: ['periodStartYear ASC', 'month ASC'],
       },
-      order: ['periodStartYear ASC', 'month ASC'],
-    });
-
+      {transaction: tx},
+    );
     return {
       financialDetails: finalRecords,
       isUpdated,
@@ -245,17 +258,13 @@ export class BusinessKycAuditedFinancialsService {
       case 'income_tax_returns':
       case 'gstr_9':
         if (records.some(r => r.type !== 'year_wise')) {
-          throw new HttpErrors.BadRequest(
-            `${category} must be year-wise`,
-          );
+          throw new HttpErrors.BadRequest(`${category} must be year-wise`);
         }
         break;
 
       case 'gst_3b':
         if (records.some(r => r.type !== 'month_wise')) {
-          throw new HttpErrors.BadRequest(
-            'GST 3B must be month-wise',
-          );
+          throw new HttpErrors.BadRequest('GST 3B must be month-wise');
         }
         break;
 
@@ -287,12 +296,15 @@ export class BusinessKycAuditedFinancialsService {
           {businessKycId: businessKycId},
           {category: 'financial_statements'},
           {isActive: true},
-          {isDeleted: false}
-        ]
+          {isDeleted: false},
+        ],
       },
       include: [
-        {relation: 'file', scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}}}
-      ]
+        {
+          relation: 'file',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+        },
+      ],
     });
 
     const incomeTaxReturns = await this.auditedRepo.find({
@@ -301,12 +313,15 @@ export class BusinessKycAuditedFinancialsService {
           {businessKycId: businessKycId},
           {category: 'income_tax_returns'},
           {isActive: true},
-          {isDeleted: false}
-        ]
+          {isDeleted: false},
+        ],
       },
       include: [
-        {relation: 'file', scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}}}
-      ]
+        {
+          relation: 'file',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+        },
+      ],
     });
 
     const gstr9 = await this.auditedRepo.find({
@@ -315,12 +330,15 @@ export class BusinessKycAuditedFinancialsService {
           {businessKycId: businessKycId},
           {category: 'gstr_9'},
           {isActive: true},
-          {isDeleted: false}
-        ]
+          {isDeleted: false},
+        ],
       },
       include: [
-        {relation: 'file', scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}}}
-      ]
+        {
+          relation: 'file',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+        },
+      ],
     });
 
     const gst3b = await this.auditedRepo.find({
@@ -329,19 +347,51 @@ export class BusinessKycAuditedFinancialsService {
           {businessKycId: businessKycId},
           {category: 'gst_3b'},
           {isActive: true},
-          {isDeleted: false}
-        ]
+          {isDeleted: false},
+        ],
       },
       include: [
-        {relation: 'file', scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}}}
-      ]
+        {
+          relation: 'file',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+        },
+      ],
     });
 
     return {
       financialStatements,
       incomeTaxReturns,
       gstr9,
-      gst3b
-    }
+      gst3b,
+    };
+  }
+
+  async isAuditedFinancialsComplete(
+    businessKycId: string,
+    tx: any,
+  ): Promise<boolean> {
+    const requiredCategories = [
+      'financial_statements',
+      'income_tax_returns',
+      'gstr_9',
+      'gst_3b',
+    ];
+
+    const counts = await this.auditedRepo.find(
+      {
+        where: {
+          businessKycId,
+          category: {inq: requiredCategories},
+          isActive: true,
+          isDeleted: false,
+        },
+        fields: ['category'],
+      },
+      {transaction: tx},
+    );
+
+    const completedCategories = new Set(counts.map(r => r.category));
+
+    return requiredCategories.every(cat => completedCategories.has(cat));
   }
 }

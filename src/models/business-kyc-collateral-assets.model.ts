@@ -5,6 +5,7 @@ import {CollateralTypes} from './collateral-types.model';
 import {OwnershipTypes} from './ownership-types.model';
 import {BusinessKyc} from './business-kyc.model';
 import {CompanyProfiles} from './company-profiles.model';
+import {Media} from './media.model';
 
 @model({
   settings: {
@@ -129,22 +130,14 @@ export class BusinessKycCollateralAssets extends Entity {
   })
   deletedAt?: Date;
 
-  // @belongsTo(() => Media)
-  // securityDocumentId: string;
-
-  // @belongsTo(() => Media)
-  // assetCoverCertificateId: string;
-
-  // @belongsTo(() => Media)
-  // valuationReportId: string;
-
   @belongsTo(() => BusinessKyc)
   businessKycId: string;
 
   @belongsTo(() => CompanyProfiles)
   companyProfilesId: string;
-  // @belongsTo(() => BondIssueApplication)
-  // bondIssueApplicationId: string;
+
+  @belongsTo(() => Media)
+  securityDocumentId: string;
 
   constructor(data?: Partial<BusinessKycCollateralAssets>) {
     super(data);

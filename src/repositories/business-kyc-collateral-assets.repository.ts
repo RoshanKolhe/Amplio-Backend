@@ -11,8 +11,7 @@ import {
   ChargeTypes,
   OwnershipTypes,
   BusinessKyc,
-  CompanyProfiles,
-} from '../models';
+  CompanyProfiles, Media} from '../models';
 import {CollateralTypesRepository} from './collateral-types.repository';
 import {ChargeTypesRepository} from './charge-types.repository';
 import {OwnershipTypesRepository} from './ownership-types.repository';
@@ -22,6 +21,7 @@ import {
 } from '../models/business-kyc-collateral-assets.model';
 import {BusinessKycRepository} from './business-kyc.repository';
 import {CompanyProfilesRepository} from './company-profiles.repository';
+import {MediaRepository} from './media.repository';
 
 export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMixin<
   BusinessKycCollateralAssets,
@@ -59,6 +59,8 @@ export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMi
     typeof BusinessKycCollateralAssets.prototype.id
   >;
 
+  public readonly securityDocument: BelongsToAccessor<Media, typeof BusinessKycCollateralAssets.prototype.id>;
+
   constructor(
     @inject('datasources.amplio') dataSource: AmplioDataSource,
     @repository.getter('CollateralTypesRepository')
@@ -70,9 +72,11 @@ export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMi
     @repository.getter('BusinessKycRepository')
     protected businessKycRepositoryGetter: Getter<BusinessKycRepository>,
     @repository.getter('CompanyProfilesRepository')
-    protected companyProfilesRepositoryGetter: Getter<CompanyProfilesRepository>,
+    protected companyProfilesRepositoryGetter: Getter<CompanyProfilesRepository>, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>,
   ) {
     super(BusinessKycCollateralAssets, dataSource);
+    this.securityDocument = this.createBelongsToAccessorFor('securityDocument', mediaRepositoryGetter,);
+    this.registerInclusionResolver('securityDocument', this.securityDocument.inclusionResolver);
     this.companyProfiles = this.createBelongsToAccessorFor(
       'companyProfiles',
       companyProfilesRepositoryGetter,

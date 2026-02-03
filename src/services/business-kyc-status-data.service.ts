@@ -2,7 +2,8 @@ import {inject} from '@loopback/core';
 import {HttpErrors} from '@loopback/rest';
 import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
-
+import {BusinessKycCollateralAssetsService} from './business-kyc-collateral-assets.service';
+import {BusinessKycAuditedFinancialsService} from './business-kyc-audited-financials.service';
 
 export class BusinessKycStatusDataService {
   constructor(
@@ -10,67 +11,34 @@ export class BusinessKycStatusDataService {
     private businessKycProfileDetailsService: BusinessKycProfileDetailsService,
     @inject('service.businessKycGuarantorDetailsService')
     private businessKycGuarantorDetailsService: BusinessKycGuarantorDetailsService,
-    // @inject('service.BondApplicationFinancials.service')
-    // private bondApplicationFinancials: BondApplicationFinancialsService,
-    // @inject('service.BondsDummyIntermediary.service')
-    // private bondsDummyIntermediaryService: BondsDummyIntermediaryService,
-    // @inject('service.BondAuditedFinancials.service')
-    // private bondAuditedFinancialsService: BondAuditedFinancialsService,
-    // @inject('service.BondBorrowingDetails.service')
-    // private bondBorrowingDetailsService: BondBorrowingDetailsService,
-    // @inject('service.BondApplicationCollateralAssets.service')
-    // private bondCollateralAssetsService: BondApplicationCollateralAssetsService,
-    // @inject('service.BondApplicationCreditRatings.service')
-    // private bondCreditRatingsService: BondApplicationCreditRatingsService,
-  ) { }
+    @inject('service.businessKycAuditedFinancialsService.service')
+    private businessKycAuditedFinancialsService: BusinessKycAuditedFinancialsService,
+    @inject('service.businessKycCollateralAssetsService.service')
+    private businessKycCollateralAssetsService: BusinessKycCollateralAssetsService,
+  ) {}
 
   async fetchDataWithStatus(businessKycId: string, status: string) {
     switch (status) {
       case 'business_profile':
-        return this.businessKycProfileDetailsService.fetchBusinessKycProfileDetails(businessKycId);
+        return this.businessKycProfileDetailsService.fetchBusinessKycProfileDetails(
+          businessKycId,
+        );
+      case 'financial_statements':
+      case 'income_tax_returns':
+      case 'gstr_9':
+      case 'gst_3b':
+        return this.businessKycAuditedFinancialsService.fetchAuditedFinancials(
+          businessKycId,
+        );
 
-      // case 'document_upload':
-      //   return this.bondStatusDocumentService.fetchDocumentsWithApplicationIdAndStatus(applicationId, 'document_upload');
-
-      // case 'fund_position':
-      //   return this.bondApplicationFinancials.fetchFundPositionData(applicationId);
-
+      case 'collateral_assets':
+        return this.businessKycCollateralAssetsService.fetchBusinessKycCollateralAssets(
+          businessKycId,
+        );
       case 'guarantor_details':
-        return this.businessKycGuarantorDetailsService.fetchBusinessKycGuarantorDetails(businessKycId);
-
-      // case 'financial_statements':
-      //   return this.bondAuditedFinancialsService.fetchAuditedFinancials(applicationId);
-
-      // case 'income_tax_returns':
-      //   return this.bondAuditedFinancialsService.fetchAuditedFinancials(applicationId);
-
-      // case 'gstr-9':
-      //   return this.bondAuditedFinancialsService.fetchAuditedFinancials(applicationId);
-
-      // case 'gst-3b':
-      //   return this.bondAuditedFinancialsService.fetchAuditedFinancials(applicationId);
-
-      // case 'borrowing_details':
-      //   return this.bondBorrowingDetailsService.fetchApplicationBorrowingDetails(applicationId);
-
-      // case 'collateral_assets':
-      //   return this.bondCollateralAssetsService.fetchApplicationCollateralAssets(applicationId);
-
-      // case 'financial_details':
-      //   return this.bondApplicationFinancials.fetchFinancialRatiosAndProfitabilityDetails(applicationId);
-
-      // case 'credit_rating_approval':
-      //   return this.bondCreditRatingsService.fetchApplicationCreditRatings(applicationId);
-
-      // // dummy case later we can delete once done properly...
-      // case 'intermediary_appointments_pending':
-      //   return this.bondsDummyIntermediaryService.fetchIntermediaries(applicationId);
-
-      // // dummy case later we can delete once done properly...
-      // case 'intermediary_appointments_success':
-      //   return this.bondsDummyIntermediaryService.fetchIntermediaries(applicationId);
-
-
+        return this.businessKycGuarantorDetailsService.getGuarantorsByBusinessKycId(
+          businessKycId,
+        );
       default:
         throw new HttpErrors.BadRequest('Invalid status value');
     }

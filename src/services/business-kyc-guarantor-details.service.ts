@@ -1,76 +1,116 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {repository} from '@loopback/repository';
+import {HttpErrors} from '@loopback/rest';
 import {BusinessKycGuarantor} from '../models';
 import {
   BusinessKycGuarantorRepository,
   BusinessKycRepository,
+  CompanyProfilesRepository,
 } from '../repositories';
 
 export class BusinessKycGuarantorDetailsService {
   constructor(
+    @repository(BusinessKycGuarantorRepository)
+    private businessKycGuarantorRepository: BusinessKycGuarantorRepository,
+
     @repository(BusinessKycRepository)
     private businessKycRepository: BusinessKycRepository,
 
-    @repository(BusinessKycGuarantorRepository)
-    private businessKycGuarantorRepository: BusinessKycGuarantorRepository,
-  ) { }
+    @repository(CompanyProfilesRepository)
+    private companyProfileRepository: CompanyProfilesRepository,
+  ) {}
 
-  async createOrUpdateBusinessKycGuarantorDetails(
+  /**
+   * ✅ CREATE single guarantor
+   */
+  async createGuarantor(
     businessKycId: string,
-    GuarantorDetails: Omit<BusinessKycGuarantor, 'id'>[],
+    userId: string,
+    payload: Omit<
+      BusinessKycGuarantor,
+      'id' | 'businessKycId' | 'companyProfilesId'
+    >,
     tx: any,
-  ): Promise<{
-    GuarantorDetails: BusinessKycGuarantor[];
-    updateStatus: boolean;
-  }> {
-    const existing = await this.businessKycGuarantorRepository.find({
+  ): Promise<BusinessKycGuarantor> {
+    const companyProfile = await this.companyProfileRepository.findOne({
       where: {
-        businessKycId,
+        usersId: userId,
         isActive: true,
         isDeleted: false,
       },
     });
 
-    const updateStatus = existing.length === 0;
-
-    // delete old
-    await this.businessKycRepository
-      .businessKycGuarantors(businessKycId)
-      .delete({}, {transaction: tx});
-
-    // create new (businessKycId auto-attached)
-    for (const profile of GuarantorDetails) {
-
-      await this.businessKycRepository
-        .businessKycGuarantors(businessKycId)
-        .create(
-          {
-            ...profile,
-            businessKycId,
-            status: 1,
-            mode: 0,
-            isActive: true,
-            isDeleted: false,
-          },
-          {transaction: tx},
-        );
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company profile not found');
     }
 
-    const created = await this.businessKycGuarantorRepository.find({
-      where: {
+    return this.businessKycGuarantorRepository.create(
+      {
+        ...payload,
         businessKycId,
+        companyProfilesId: companyProfile.id,
+        status: 1,
+        mode: 0,
+        isActive: true,
+        isDeleted: false,
+      },
+      {transaction: tx},
+    );
+  }
+
+  /**
+   * ✅ UPDATE single guarantor by ID (PATCH)
+   */
+  async updateGuarantorById(
+    guarantorId: string,
+    userId: string,
+    payload: Omit<BusinessKycGuarantor, 'id' | 'businessKycId' | 'companyProfilesId'>,
+    tx: any,
+  ): Promise<BusinessKycGuarantor> {
+    // company profile
+    const companyProfile = await this.companyProfileRepository.findOne({
+      where: {
+        usersId: userId,
         isActive: true,
         isDeleted: false,
       },
     });
 
-    return {
-      GuarantorDetails: created,
-      updateStatus,
-    };
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company profile not found');
+    }
+
+    // guarantor
+    const guarantor =
+      await this.businessKycGuarantorRepository.findById(guarantorId);
+
+    if (!guarantor || guarantor.isDeleted) {
+      throw new HttpErrors.NotFound('Guarantor not found');
+    }
+
+    // ownership check
+    const kyc = await this.businessKycRepository.findById(
+      guarantor.businessKycId,
+    );
+
+    if (kyc.companyProfilesId !== companyProfile.id) {
+      throw new HttpErrors.Forbidden('Unauthorized guarantor update');
+    }
+
+    // patch update
+    await this.businessKycGuarantorRepository.updateById(guarantorId, payload, {
+      transaction: tx,
+    });
+
+    return this.businessKycGuarantorRepository.findById(guarantorId, {
+      include:['companyPan', 'companyAadhar']
+    });
   }
 
-  async fetchBusinessKycGuarantorDetails(
+  /**
+   * ✅ GET all guarantors for a business KYC
+   */
+  async getGuarantorsByBusinessKycId(
     businessKycId: string,
   ): Promise<BusinessKycGuarantor[]> {
     return this.businessKycGuarantorRepository.find({
@@ -79,6 +119,20 @@ export class BusinessKycGuarantorDetailsService {
         isActive: true,
         isDeleted: false,
       },
+      include: ['companyPan', 'companyAadhar'],
     });
   }
+
+  async countGuarantors(businessKycId: string, tx: any): Promise<number> {
+      return this.businessKycGuarantorRepository
+        .count(
+          {
+            businessKycId,
+            isActive: true,
+            isDeleted: false,
+          },
+          {transaction: tx},
+        )
+        .then(res => res.count);
+    }
 }

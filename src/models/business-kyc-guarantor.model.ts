@@ -1,6 +1,7 @@
 import {Entity, model, property, belongsTo} from '@loopback/repository';
 import {BusinessKyc} from './business-kyc.model';
 import {CompanyProfiles} from './company-profiles.model';
+import {Media} from './media.model';
 
 @model({
   settings: {
@@ -78,19 +79,6 @@ export class BusinessKycGuarantor extends Entity {
     required: true,
   })
   adharNumber: string;
-
-  @property({
-    type: 'string',
-    required: true,
-  })
-  companyPanId: string;
-
-  @property({
-    type: 'string',
-    required: true,
-  })
-  companyAadharId: string;
-
   @property({
     type: 'number',
     required: true,
@@ -153,6 +141,12 @@ export class BusinessKycGuarantor extends Entity {
 
   @belongsTo(() => CompanyProfiles)
   companyProfilesId: string;
+
+  @belongsTo(() => Media)
+  companyAadharId: string;
+
+  @belongsTo(() => Media)
+  companyPanId: string;
 
   constructor(data?: Partial<BusinessKycGuarantor>) {
     super(data);

@@ -1,7 +1,10 @@
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {BusinessKycStatusMaster} from '../models';
-import {BusinessKycRepository, BusinessKycStatusMasterRepository} from '../repositories';
+import {
+  BusinessKycRepository,
+  BusinessKycStatusMasterRepository,
+} from '../repositories';
 
 export class BusinessKycStatusService {
   constructor(
@@ -9,18 +12,16 @@ export class BusinessKycStatusService {
     private businessKycStatusMasterRepository: BusinessKycStatusMasterRepository,
     @repository(BusinessKycRepository)
     private businessKycRepository: BusinessKycRepository,
-  ) { }
+  ) {}
 
   // verify status by value...
-  async verifyStatusValue(statusValue: string): Promise<BusinessKycStatusMaster> {
+  async verifyStatusValue(
+    statusValue: string,
+  ): Promise<BusinessKycStatusMaster> {
     const status = await this.businessKycStatusMasterRepository.findOne({
       where: {
-        and: [
-          {value: statusValue},
-          {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+        and: [{value: statusValue}, {isActive: true}, {isDeleted: false}],
+      },
     });
 
     if (!status) {
@@ -34,11 +35,7 @@ export class BusinessKycStatusService {
   async fetchInitialStatus(): Promise<BusinessKycStatusMaster> {
     const status = await this.businessKycStatusMasterRepository.findOne({
       where: {
-        and: [
-          {isInitial: true},
-          {isActive: true},
-          {isDeleted: false}
-        ]
+        and: [{isInitial: true}, {isActive: true}, {isDeleted: false}],
       },
     });
 
@@ -50,14 +47,16 @@ export class BusinessKycStatusService {
   }
 
   // fetch next status with sequence order
-  async fetchNextStatus(sequenceOrder: number): Promise<BusinessKycStatusMaster> {
+  async fetchNextStatus(
+    sequenceOrder: number,
+  ): Promise<BusinessKycStatusMaster> {
     const status = await this.businessKycStatusMasterRepository.findOne({
       where: {
         and: [
           {sequenceOrder: sequenceOrder + 1},
           {isActive: true},
-          {isDeleted: false}
-        ]
+          {isDeleted: false},
+        ],
       },
     });
 
@@ -69,15 +68,13 @@ export class BusinessKycStatusService {
   }
 
   // fetch application status by id
-  async fetchApplicationStatusById(id: string): Promise<BusinessKycStatusMaster> {
+  async fetchApplicationStatusById(
+    id: string,
+  ): Promise<BusinessKycStatusMaster> {
     const status = await this.businessKycStatusMasterRepository.findOne({
       where: {
-        and: [
-          {id: id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+        and: [{id: id}, {isActive: true}, {isDeleted: false}],
+      },
     });
 
     // later we will check for approvals and documents condition too..
@@ -90,11 +87,13 @@ export class BusinessKycStatusService {
   }
 
   // fetch completed steps sequence
-  async fetchCompletedStepsSequence(currentSequenceOrder: number): Promise<{
-    id: string;
-    label: string;
-    code: string;
-  }[]> {
+  async fetchCompletedStepsSequence(currentSequenceOrder: number): Promise<
+    {
+      id: string;
+      label: string;
+      code: string;
+    }[]
+  > {
     const completedSteps: {
       id: string;
       label: string;
@@ -104,12 +103,8 @@ export class BusinessKycStatusService {
     for (let count = 1; count <= currentSequenceOrder; count++) {
       const status = await this.businessKycStatusMasterRepository.findOne({
         where: {
-          and: [
-            {sequenceOrder: count},
-            {isActive: true},
-            {isDeleted: false}
-          ]
-        }
+          and: [{sequenceOrder: count}, {isActive: true}, {isDeleted: false}],
+        },
       });
 
       if (!status) {
@@ -119,13 +114,12 @@ export class BusinessKycStatusService {
       completedSteps.push({
         id: status.id,
         label: status.status,
-        code: status.value
-      })
+        code: status.value,
+      });
     }
 
     return completedSteps;
   }
-
 
   async advanceBusinessKycStatus(businessKycId: string): Promise<{
     currentStatus: {
@@ -140,13 +134,11 @@ export class BusinessKycStatusService {
       throw new HttpErrors.BadRequest('KYC status not initialized');
     }
 
-    const currentStatus =
-      await this.fetchApplicationStatusById(
-        kyc.businessKycStatusMasterId
-      );
+    const currentStatus = await this.fetchApplicationStatusById(
+      kyc.businessKycStatusMasterId,
+    );
 
-    const nextStatus =
-      await this.fetchNextStatus(currentStatus.sequenceOrder);
+    const nextStatus = await this.fetchNextStatus(currentStatus.sequenceOrder);
 
     await this.businessKycRepository.updateById(businessKycId, {
       businessKycStatusMasterId: nextStatus.id,
@@ -161,5 +153,4 @@ export class BusinessKycStatusService {
       },
     };
   }
-
 }
