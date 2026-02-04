@@ -450,4 +450,38 @@ export class BusinessKycTransactionsService {
       throw e;
     }
   }
+
+  async submitReview(userId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const {kyc} = await this.resolveCompanyAndKyc(userId);
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      if (currentStatus.value !== 'review_and_submit') {
+        throw new HttpErrors.BadRequest(
+          `Cannot submit review from ${currentStatus.value}`,
+        );
+      }
+
+      // 🔥 Move to next status (agreement)
+      const nextStatus = await this.advanceStatusIfRequired(kyc.id!, tx);
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Review submitted successfully',
+        currentStatus: nextStatus,
+      };
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  }
 }

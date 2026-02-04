@@ -316,4 +316,18 @@ export class BusinessKycController {
       body.collateralAssets,
     );
   }
+  
+  /* ------------------------------------------------------------------ */
+  /* REVIEW SUBMIT */
+  /* ------------------------------------------------------------------ */
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @post('/business-kyc/review-submit')
+  async submitReview(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    user: UserProfile,
+  ) {
+    return this.kycTxnService.submitReview(user.id);
+  }
 }
