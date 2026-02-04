@@ -170,13 +170,37 @@ export class BusinessKycTransactionsService {
           tx,
         );
 
-      if (result.updateStatus) {
-        const currentStatus = await this.advanceStatusIfRequired(kyc.id!, tx);
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      if (!result.updateStatus && currentStatus.value === 'business_profile') {
+        const nextStatus = await this.statusService.fetchNextStatus(
+          currentStatus.sequenceOrder,
+        );
+
+        await this.businessKycRepository.updateById(
+          kyc.id!,
+          {
+            businessKycStatusMasterId: nextStatus.id,
+            status: nextStatus.value,
+          },
+          {transaction: tx},
+        );
 
         await tx.commit();
-        return {profileDetails: result.profileDetails, currentStatus};
+
+        return {
+          profileDetails: result.profileDetails,
+          currentStatus: {
+            id: nextStatus.id,
+            label: nextStatus.status,
+            code: nextStatus.value,
+          },
+        };
       }
 
+      // Just update the data, don't advance status
       await tx.commit();
       return {profileDetails: result.profileDetails};
     } catch (e) {
