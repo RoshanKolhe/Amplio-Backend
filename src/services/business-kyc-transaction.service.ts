@@ -170,13 +170,37 @@ export class BusinessKycTransactionsService {
           tx,
         );
 
-      if (result.updateStatus) {
-        const currentStatus = await this.advanceStatusIfRequired(kyc.id!, tx);
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      if (!result.updateStatus && currentStatus.value === 'business_profile') {
+        const nextStatus = await this.statusService.fetchNextStatus(
+          currentStatus.sequenceOrder,
+        );
+
+        await this.businessKycRepository.updateById(
+          kyc.id!,
+          {
+            businessKycStatusMasterId: nextStatus.id,
+            status: nextStatus.value,
+          },
+          {transaction: tx},
+        );
 
         await tx.commit();
-        return {profileDetails: result.profileDetails, currentStatus};
+
+        return {
+          profileDetails: result.profileDetails,
+          currentStatus: {
+            id: nextStatus.id,
+            label: nextStatus.status,
+            code: nextStatus.value,
+          },
+        };
       }
 
+      // Just update the data, don't advance status
       await tx.commit();
       return {profileDetails: result.profileDetails};
     } catch (e) {
@@ -422,6 +446,40 @@ export class BusinessKycTransactionsService {
 
       await tx.commit();
       return {collateralAssets: result.collateralAssets};
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  }
+
+  async submitReview(userId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const {kyc} = await this.resolveCompanyAndKyc(userId);
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      if (currentStatus.value !== 'review_and_submit') {
+        throw new HttpErrors.BadRequest(
+          `Cannot submit review from ${currentStatus.value}`,
+        );
+      }
+
+      // 🔥 Move to next status (agreement)
+      const nextStatus = await this.advanceStatusIfRequired(kyc.id!, tx);
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Review submitted successfully',
+        currentStatus: nextStatus,
+      };
     } catch (e) {
       await tx.rollback();
       throw e;
