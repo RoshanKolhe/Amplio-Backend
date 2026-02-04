@@ -6,6 +6,7 @@ import {BusinessKycProfile} from './business-kyc-profile.model';
 import {BusinessKycStatusMaster} from './business-kyc-status-master.model';
 import {CompanyProfiles} from './company-profiles.model';
 import {BusinessKycAuditedFinancials} from './business-kyc-audited-financials.model';
+import {BusinessKycAgreement} from './business-kyc-agreement.model';
 
 @model({
   settings: {
@@ -86,6 +87,9 @@ export class BusinessKyc extends Entity {
 
   @hasMany(() => BusinessKycAuditedFinancials)
   businessKycAuditedFinancials: BusinessKycAuditedFinancials[];
+
+  @hasOne(() => BusinessKycAgreement)
+  businessKycAgreement: BusinessKycAgreement;
   // @property({
   //   type: 'string',
   // })

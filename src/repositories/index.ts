@@ -35,3 +35,4 @@ export * from './business-kyc-audited-financials.repository';
 export * from './business-kyc-collateral-assets.repository';
 
 export * from './business-kyc-guarantor-verification.repository';
+export * from './business-kyc-agreement.repository';
