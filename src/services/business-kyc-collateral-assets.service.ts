@@ -13,7 +13,7 @@ export class BusinessKycCollateralAssetsService {
     private businessKycRepository: BusinessKycRepository,
     @repository(BusinessKycCollateralAssetsRepository)
     private collateralAssetsRepository: BusinessKycCollateralAssetsRepository,
-  ) {}
+  ) { }
 
   // create or update collateral assets...
   async createOrUpdateCollateralAssets(
@@ -95,28 +95,60 @@ export class BusinessKycCollateralAssetsService {
   async fetchBusinessKycCollateralAssets(
     businessKycId: string,
   ): Promise<BusinessKycCollateralAssets[]> {
-    const collateralAssets = await this.collateralAssetsRepository.find({
-      where: {
-        businessKycId,
-        isActive: true,
-        isDeleted: false,
-      },
-      include: [
-        {
-          relation: 'securityDocument',
-          scope: {
-            fields: {
-              id: true,
-              fileOriginalName: true,
-              fileUrl: true,
+    const collateralAssets =
+      await this.collateralAssetsRepository.find({
+        where: {
+          businessKycId,
+          isActive: true,
+          isDeleted: false,
+        },
+        include: [
+          {
+            relation: 'collateralTypes',
+            scope: {
+              fields: {
+                id: true,
+                label: true,
+                value: true,
+              },
             },
           },
-        },
-      ],
-    });
+          {
+            relation: 'chargeTypes',
+            scope: {
+              fields: {
+                id: true,
+                label: true,
+                value: true,
+              },
+            },
+          },
+          {
+            relation: 'ownershipTypes',
+            scope: {
+              fields: {
+                id: true,
+                label: true,
+                value: true,
+              },
+            },
+          },
+          {
+            relation: 'securityDocument',
+            scope: {
+              fields: {
+                id: true,
+                fileOriginalName: true,
+                fileUrl: true,
+              },
+            },
+          },
+        ],
+      });
 
     return collateralAssets;
   }
+
 
   // Approve collateral assets....
   async approveCollateralAssets(

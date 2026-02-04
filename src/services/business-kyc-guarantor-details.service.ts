@@ -18,7 +18,7 @@ export class BusinessKycGuarantorDetailsService {
 
     @repository(CompanyProfilesRepository)
     private companyProfileRepository: CompanyProfilesRepository,
-  ) {}
+  ) { }
 
   /**
    * ✅ CREATE single guarantor
@@ -103,7 +103,7 @@ export class BusinessKycGuarantorDetailsService {
     });
 
     return this.businessKycGuarantorRepository.findById(guarantorId, {
-      include:['companyPan', 'companyAadhar']
+      include: ['companyPan', 'companyAadhar']
     });
   }
 
@@ -124,15 +124,15 @@ export class BusinessKycGuarantorDetailsService {
   }
 
   async countGuarantors(businessKycId: string, tx: any): Promise<number> {
-      return this.businessKycGuarantorRepository
-        .count(
-          {
-            businessKycId,
-            isActive: true,
-            isDeleted: false,
-          },
-          {transaction: tx},
-        )
-        .then(res => res.count);
-    }
+    return this.businessKycGuarantorRepository
+      .count(
+        {
+          businessKycId,
+          isActive: true,
+          isDeleted: false,
+        },
+        {transaction: tx},
+      )
+      .then(res => res.count);
+  }
 }

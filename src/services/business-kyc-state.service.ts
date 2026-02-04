@@ -2,12 +2,12 @@ import {inject} from '@loopback/core';
 import {HttpErrors} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 
+import {repository} from '@loopback/repository';
 import {
   BusinessKycRepository,
   CompanyProfilesRepository,
 } from '../repositories';
 import {BusinessKycStatusService} from './businees-kyc-status.service';
-import {repository} from '@loopback/repository';
 
 export class BusinessKycStateService {
   constructor(
@@ -19,7 +19,7 @@ export class BusinessKycStateService {
 
     @inject('services.BusinessKycStatusService')
     private statusService: BusinessKycStatusService,
-  ) {}
+  ) { }
 
   async fetchStateByUser(currentUser: UserProfile) {
     /* -------------------- 1️⃣ Verify company -------------------- */

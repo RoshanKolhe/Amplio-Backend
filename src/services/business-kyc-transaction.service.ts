@@ -15,10 +15,10 @@ import {
 } from '../repositories';
 
 import {BusinessKycStatusService} from './businees-kyc-status.service';
-import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
 import {BusinessKycAuditedFinancialsService} from './business-kyc-audited-financials.service';
-import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-details.service';
 import {BusinessKycCollateralAssetsService} from './business-kyc-collateral-assets.service';
+import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-details.service';
+import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
 
 export class BusinessKycTransactionsService {
   constructor(
@@ -45,7 +45,7 @@ export class BusinessKycTransactionsService {
 
     @inject('service.businessKycCollateralAssetsService.service')
     private collateralService: BusinessKycCollateralAssetsService,
-  ) {}
+  ) { }
 
   /* ------------------------------------------------------------------ */
   /* 🔒 COMMON HELPERS */
@@ -381,6 +381,7 @@ export class BusinessKycTransactionsService {
       throw e;
     }
   }
+
 
   /* ------------------------------------------------------------------ */
   /* 4️⃣ COLLATERAL ASSETS */

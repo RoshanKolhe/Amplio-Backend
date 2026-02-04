@@ -18,15 +18,18 @@ import {
   BusinessKycGuarantor,
 } from '../models';
 
-import {BusinessKycStateService} from '../services/business-kyc-state.service';
-import {BusinessKycStepDataService} from '../services/business-kyc-step-data.service';
-import {BusinessKycTransactionsService} from '../services/business-kyc-transaction.service';
+import {repository} from '@loopback/repository';
 import {
+  BusinessKycGuarantorRepository,
+  BusinessKycGuarantorVerificationRepository,
   BusinessKycRepository,
   CompanyProfilesRepository,
 } from '../repositories';
-import {repository} from '@loopback/repository';
 import {BusinessKycGuarantorDetailsService} from '../services/business-kyc-guarantor-details.service';
+import {BusinessKycStateService} from '../services/business-kyc-state.service';
+import {BusinessKycStepDataService} from '../services/business-kyc-step-data.service';
+import {BusinessKycTransactionsService} from '../services/business-kyc-transaction.service';
+import {JWTService} from '../services/jwt-service';
 
 export class BusinessKycController {
   constructor(
@@ -34,17 +37,56 @@ export class BusinessKycController {
     private businessKycRepository: BusinessKycRepository,
     @repository(CompanyProfilesRepository)
     private companyProfileRepository: CompanyProfilesRepository,
+    @repository(BusinessKycGuarantorVerificationRepository)
+    private businessKycGuarantorVerificationRepository: BusinessKycGuarantorVerificationRepository,
+    @repository(BusinessKycGuarantorRepository)
+    private businessKycGuarantorRepository: BusinessKycGuarantorRepository,
     @inject('service.businessKycGuarantorDetailsService')
     private businessKycGuarantorDetailsService: BusinessKycGuarantorDetailsService,
     @inject('service.businessKycTransactionsService')
     private kycTxnService: BusinessKycTransactionsService,
-
+    @inject('service.jwt.service')
+    private jwtService: JWTService,
     @inject('service.businessKycStateService.service')
     private businessKycStateService: BusinessKycStateService,
-
     @inject('service.businessKycStepDataService')
     private businessKycStepDataService: BusinessKycStepDataService,
-  ) {}
+  ) { }
+
+  private async createGuarantorVerificationLink(
+    guarantorId: string,
+    tx: any,
+  ): Promise<string> {
+    const verification =
+      await this.businessKycGuarantorVerificationRepository.create(
+        {
+          businessKycGuarantorId: guarantorId,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          isVerified: false,
+          isUsed: false,
+        },
+        {transaction: tx},
+      );
+
+    const token =
+      await this.jwtService.generateGuarantorVerificationToken({
+        guarantorId,
+        verificationId: verification.id,
+      });
+
+    const siteUrl = process.env.REACT_APP_SITE_URL;
+    const verificationUrl =
+      `${siteUrl}/kyc/invoiceFinancing/verify?token=${token}`;
+
+    await this.businessKycGuarantorVerificationRepository.updateById(
+      verification.id,
+      {verificationUrl},
+      {transaction: tx},
+    );
+
+    return verificationUrl;
+  }
+
 
   /* ------------------------------------------------------------------ */
   /* START KYC */
@@ -200,8 +242,22 @@ export class BusinessKycController {
     @requestBody()
     body: Omit<BusinessKycGuarantor, 'id' | 'businessKycId'>,
   ) {
-    return this.kycTxnService.addGuarantor(user.id, body);
+    const result = await this.kycTxnService.addGuarantor(user.id, body);
+
+    const guarantor = result.guarantor;
+
+    const verificationUrl =
+      await this.createGuarantorVerificationLink(
+        guarantor.id!,
+        null,
+      );
+
+    return {
+      ...result,
+      verificationUrl,
+    };
   }
+
 
   @authenticate('jwt')
   @authorize({roles: ['company']})
@@ -267,6 +323,72 @@ export class BusinessKycController {
       data: guarantors,
     };
   }
+
+
+  @get('/business-kyc/guarantor/verify')
+  async verifyGuarantorByLink(
+    @param.query.string('token', {required: true}) token: string,
+  ) {
+    let payload: any;
+
+    try {
+      payload = await this.jwtService.verifyGuarantorVerificationToken(token);
+    } catch {
+      throw new HttpErrors.Unauthorized('Invalid or expired verification link');
+    }
+
+    const {guarantorId, verificationId} = payload;
+
+    const verification =
+      await this.businessKycGuarantorVerificationRepository.findById(
+        verificationId,
+      );
+
+    if (!verification || verification.isDeleted) {
+      throw new HttpErrors.NotFound('Verification record not found');
+    }
+
+    if (verification.expiresAt && verification.expiresAt < new Date()) {
+      throw new HttpErrors.BadRequest('Verification link expired');
+    }
+
+    const guarantor =
+      await this.businessKycGuarantorRepository.findById(guarantorId);
+
+    if (!guarantor) {
+      throw new HttpErrors.NotFound('Guarantor not found');
+    }
+
+    if (!verification.isUsed) {
+      await this.businessKycGuarantorVerificationRepository.updateById(
+        verificationId,
+        {
+          isVerified: true,
+          isUsed: true,
+          verifiedAt: new Date(),
+        },
+      );
+
+      await this.businessKycGuarantorRepository.updateById(guarantorId, {
+        status: 2,
+      });
+    }
+
+    return {
+      success: true,
+      message: verification.isUsed
+        ? 'Guarantor already verified'
+        : 'Guarantor verified successfully',
+      data: {
+        guarantorId: guarantor.id,
+        guarantorName: guarantor.guarantorCompanyName,
+        cin: guarantor.CIN,
+        // documentUrl: guarantor.businessKycGuarantorVerification.mediaId
+      },
+    };
+  }
+
+
   /* ------------------------------------------------------------------ */
   /* COLLATERAL ASSETS */
   /* ------------------------------------------------------------------ */

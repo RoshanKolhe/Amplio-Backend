@@ -1,9 +1,9 @@
 import {inject} from '@loopback/core';
 import {HttpErrors} from '@loopback/rest';
+import {BusinessKycAuditedFinancialsService} from './business-kyc-audited-financials.service';
+import {BusinessKycCollateralAssetsService} from './business-kyc-collateral-assets.service';
 import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
-import {BusinessKycCollateralAssetsService} from './business-kyc-collateral-assets.service';
-import {BusinessKycAuditedFinancialsService} from './business-kyc-audited-financials.service';
 
 export class BusinessKycStatusDataService {
   constructor(
@@ -15,7 +15,7 @@ export class BusinessKycStatusDataService {
     private businessKycAuditedFinancialsService: BusinessKycAuditedFinancialsService,
     @inject('service.businessKycCollateralAssetsService.service')
     private businessKycCollateralAssetsService: BusinessKycCollateralAssetsService,
-  ) {}
+  ) { }
 
   async fetchDataWithStatus(businessKycId: string, status: string) {
     switch (status) {

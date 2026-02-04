@@ -1,7 +1,8 @@
-import {Entity, model, property, belongsTo} from '@loopback/repository';
+import {Entity, model, property, belongsTo, hasOne} from '@loopback/repository';
 import {BusinessKyc} from './business-kyc.model';
 import {CompanyProfiles} from './company-profiles.model';
 import {Media} from './media.model';
+import {BusinessKycGuarantorVerification} from './business-kyc-guarantor-verification.model';
 
 @model({
   settings: {
@@ -147,6 +148,9 @@ export class BusinessKycGuarantor extends Entity {
 
   @belongsTo(() => Media)
   companyPanId: string;
+
+  @hasOne(() => BusinessKycGuarantorVerification)
+  businessKycGuarantorVerification: BusinessKycGuarantorVerification;
 
   constructor(data?: Partial<BusinessKycGuarantor>) {
     super(data);

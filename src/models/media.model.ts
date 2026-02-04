@@ -66,6 +66,8 @@ export class Media extends Entity {
     defaultFn: 'now',
   })
   updatedAt?: Date;
+
+
   constructor(data?: Partial<Media>) {
     super(data);
   }

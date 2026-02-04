@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {injectable, BindingScope, inject} from '@loopback/core';
 import {TokenService} from '@loopback/authentication';
+import {BindingScope, inject, injectable} from '@loopback/core';
 import {HttpErrors} from '@loopback/rest';
 import {securityId, UserProfile} from '@loopback/security';
 import * as jwt from 'jsonwebtoken';
@@ -10,7 +10,7 @@ export class JWTService implements TokenService {
   constructor(
     @inject('jwt.secret') private jwtSecret: string,
     @inject('jwt.expiresIn') private jwtExpiresIn: string,
-  ) {}
+  ) { }
 
 
   private async signJwt(
@@ -60,6 +60,24 @@ export class JWTService implements TokenService {
     return this.signJwt('10m', '10m' as jwt.SignOptions['expiresIn']);
   }
 
+  async generateGuarantorVerificationToken(payload: object): Promise<string> {
+    return this.signJwt(
+      payload,
+      '1d' as jwt.SignOptions['expiresIn'],
+    );
+  }
+
+  async verifyGuarantorVerificationToken(token: string): Promise<any> {
+    if (!token) {
+      throw new HttpErrors.Unauthorized('Token missing');
+    }
+
+    try {
+      return await this.verifyJwt(token);
+    } catch (e) {
+      throw new HttpErrors.Unauthorized('Invalid or expired verification token');
+    }
+  }
 
   async verifyToken(token: string): Promise<UserProfile> {
     if (!token) {
