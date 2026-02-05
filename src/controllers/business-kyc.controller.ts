@@ -51,41 +51,8 @@ export class BusinessKycController {
     private businessKycStateService: BusinessKycStateService,
     @inject('service.businessKycStepDataService')
     private businessKycStepDataService: BusinessKycStepDataService,
-  ) { }
+  ) {}
 
-  private async createGuarantorVerificationLink(
-    guarantorId: string,
-    tx: any,
-  ): Promise<string> {
-    const verification =
-      await this.businessKycGuarantorVerificationRepository.create(
-        {
-          businessKycGuarantorId: guarantorId,
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-          isVerified: false,
-          isUsed: false,
-        },
-        {transaction: tx},
-      );
-
-    const token =
-      await this.jwtService.generateGuarantorVerificationToken({
-        guarantorId,
-        verificationId: verification.id,
-      });
-
-    const siteUrl = process.env.REACT_APP_SITE_URL;
-    const verificationUrl =
-      `${siteUrl}/kyc/invoiceFinancing/verify?token=${token}`;
-
-    await this.businessKycGuarantorVerificationRepository.updateById(
-      verification.id,
-      {verificationUrl},
-      {transaction: tx},
-    );
-
-    return verificationUrl;
-  }
 
 
   /* ------------------------------------------------------------------ */
@@ -242,22 +209,8 @@ export class BusinessKycController {
     @requestBody()
     body: Omit<BusinessKycGuarantor, 'id' | 'businessKycId'>,
   ) {
-    const result = await this.kycTxnService.addGuarantor(user.id, body);
-
-    const guarantor = result.guarantor;
-
-    const verificationUrl =
-      await this.createGuarantorVerificationLink(
-        guarantor.id!,
-        null,
-      );
-
-    return {
-      ...result,
-      verificationUrl,
-    };
+    return this.kycTxnService.addGuarantor(user.id, body);
   }
-
 
   @authenticate('jwt')
   @authorize({roles: ['company']})
@@ -324,12 +277,11 @@ export class BusinessKycController {
     };
   }
 
-
   @get('/business-kyc/guarantor/verify')
   async verifyGuarantorByLink(
     @param.query.string('token', {required: true}) token: string,
   ) {
-    let payload: any;
+    let payload;
 
     try {
       payload = await this.jwtService.verifyGuarantorVerificationToken(token);
@@ -388,7 +340,6 @@ export class BusinessKycController {
     };
   }
 
-
   /* ------------------------------------------------------------------ */
   /* COLLATERAL ASSETS */
   /* ------------------------------------------------------------------ */
@@ -438,7 +389,7 @@ export class BusinessKycController {
       body.collateralAssets,
     );
   }
-  
+
   /* ------------------------------------------------------------------ */
   /* REVIEW SUBMIT */
   /* ------------------------------------------------------------------ */

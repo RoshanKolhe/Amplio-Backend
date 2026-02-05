@@ -19,7 +19,7 @@ export class BusinessKycStateService {
 
     @inject('services.BusinessKycStatusService')
     private statusService: BusinessKycStatusService,
-  ) { }
+  ) {}
 
   async fetchStateByUser(currentUser: UserProfile) {
     /* -------------------- 1️⃣ Verify company -------------------- */
@@ -104,6 +104,30 @@ export class BusinessKycStateService {
       });
     }
 
+    // 5️⃣ Review and submit
+    if (currentStatus.sequenceOrder > 8) {
+      completedSteps.push({
+        code: 'review_and_submit',
+        label: 'Review and Submit',
+      });
+    }
+
+    // 6️⃣ Pending
+    if (currentStatus.sequenceOrder > 9) {
+      completedSteps.push({
+        code: 'pending',
+        label: 'Pending',
+      });
+    }
+
+    // 7️⃣ Agreement (FINAL)
+    if (currentStatus.sequenceOrder >= 10) {
+      completedSteps.push({
+        code: 'agreement',
+        label: 'Agreement',
+      });
+    }
+
     /* -------------------- 6️⃣ Active step (UI view) -------------------- */
     let activeStep: {code: string; label: string} | null = null;
 
@@ -123,6 +147,21 @@ export class BusinessKycStateService {
         code: 'guarantor_details',
         label: 'Guarantor Details',
       };
+    } else if (currentStatus.value === 'review_and_submit') {
+      activeStep = {
+        code: 'review_and_submit',
+        label: 'Review and Submit',
+      };
+    } else if (currentStatus.value === 'pending') {
+      activeStep = {
+        code: 'pending',
+        label: 'Pending',
+      };
+    } else if (currentStatus.value === 'agreement') {
+      activeStep = {
+        code: 'agreement',
+        label: 'Agreement',
+      };
     } else {
       // fallback (business_profile or any future step)
       activeStep = {
@@ -131,11 +170,27 @@ export class BusinessKycStateService {
       };
     }
 
+    let currentStage = 'KYC_STEPPER';
+
+    if (currentStatus.value === 'pending') {
+      currentStage = 'PENDING';
+    }
+
+    if (currentStatus.value === 'agreement') {
+      currentStage = 'AGREEMENTS';
+    }
+
+    if (currentStatus.value === 'completed') {
+      currentStage = 'COMPLETED';
+    }
+
     /* -------------------- 7️⃣ Final response -------------------- */
     return {
       businessKycId: kyc.id,
       companyProfileId: companyProfile.id,
       completedSteps,
+      currentStage,
+      isBusinessKycComplete: currentStatus.value === 'completed',
       activeStep,
     };
   }

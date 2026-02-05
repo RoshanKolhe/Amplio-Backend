@@ -312,8 +312,15 @@ export class BusinessKycTransactionsService {
 
       // const currentStatus = await this.advanceStatusIfRequired(kyc.id!, tx);
 
+      const verificationUrl =
+      await this.guarantorService.createGuarantorVerificationLink(
+        guarantor.id!,
+        tx,
+      );
+
+
       await tx.commit();
-      return {guarantor};
+      return {guarantor, verificationUrl};
     } catch (e) {
       await tx.rollback();
       throw e;
@@ -470,7 +477,6 @@ export class BusinessKycTransactionsService {
         );
       }
 
-      // 🔥 Move to next status (agreement)
       const nextStatus = await this.advanceStatusIfRequired(kyc.id!, tx);
 
       await tx.commit();

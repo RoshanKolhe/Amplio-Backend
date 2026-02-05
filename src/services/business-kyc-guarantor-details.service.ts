@@ -4,9 +4,12 @@ import {HttpErrors} from '@loopback/rest';
 import {BusinessKycGuarantor} from '../models';
 import {
   BusinessKycGuarantorRepository,
+  BusinessKycGuarantorVerificationRepository,
   BusinessKycRepository,
   CompanyProfilesRepository,
 } from '../repositories';
+import {JWTService} from './jwt-service';
+import {inject} from '@loopback/core';
 
 export class BusinessKycGuarantorDetailsService {
   constructor(
@@ -18,7 +21,13 @@ export class BusinessKycGuarantorDetailsService {
 
     @repository(CompanyProfilesRepository)
     private companyProfileRepository: CompanyProfilesRepository,
-  ) { }
+
+    @repository(BusinessKycGuarantorVerificationRepository)
+    private businessKycGuarantorVerificationRepository: BusinessKycGuarantorVerificationRepository,
+
+    @inject('service.jwt.service')
+    private jwtService: JWTService,
+  ) {}
 
   /**
    * ✅ CREATE single guarantor
@@ -64,7 +73,10 @@ export class BusinessKycGuarantorDetailsService {
   async updateGuarantorById(
     guarantorId: string,
     userId: string,
-    payload: Omit<BusinessKycGuarantor, 'id' | 'businessKycId' | 'companyProfilesId'>,
+    payload: Omit<
+      BusinessKycGuarantor,
+      'id' | 'businessKycId' | 'companyProfilesId'
+    >,
     tx: any,
   ): Promise<BusinessKycGuarantor> {
     // company profile
@@ -103,7 +115,7 @@ export class BusinessKycGuarantorDetailsService {
     });
 
     return this.businessKycGuarantorRepository.findById(guarantorId, {
-      include: ['companyPan', 'companyAadhar']
+      include: ['companyPan', 'companyAadhar'],
     });
   }
 
@@ -134,5 +146,37 @@ export class BusinessKycGuarantorDetailsService {
         {transaction: tx},
       )
       .then(res => res.count);
+  }
+
+  async createGuarantorVerificationLink(
+    guarantorId: string,
+    tx: any,
+  ): Promise<string> {
+    const verification =
+      await this.businessKycGuarantorVerificationRepository.create(
+        {
+          businessKycGuarantorId: guarantorId,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          isVerified: false,
+          isUsed: false,
+        },
+        {transaction: tx},
+      );
+
+    const token = await this.jwtService.generateGuarantorVerificationToken({
+      guarantorId,
+      verificationId: verification.id,
+    });
+
+    const siteUrl = process.env.REACT_APP_SITE_URL;
+    const verificationUrl = `${siteUrl}/kyc/invoiceFinancing/verify?token=${token}`;
+
+    await this.businessKycGuarantorVerificationRepository.updateById(
+      verification.id,
+      {verificationUrl},
+      {transaction: tx},
+    );
+
+    return verificationUrl;
   }
 }
