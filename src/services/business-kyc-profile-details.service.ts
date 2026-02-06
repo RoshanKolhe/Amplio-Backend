@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {repository} from '@loopback/repository';
+import {HttpErrors} from '@loopback/rest';
 import {BusinessKycProfile} from '../models';
 import {
   BusinessKycProfileRepository,
@@ -13,7 +14,7 @@ export class BusinessKycProfileDetailsService {
 
     @repository(BusinessKycProfileRepository)
     private businessKycProfileRepository: BusinessKycProfileRepository,
-  ) {}
+  ) { }
 
   async createOrUpdateBusinessKycProfileDetails(
     businessKycId: string,
@@ -70,5 +71,46 @@ export class BusinessKycProfileDetailsService {
         isDeleted: false,
       },
     });
+  }
+
+
+  async updateBusinessProfileStatus(id: string, status: number, reason: string): Promise<{success: boolean; message: string}> {
+    const existingProfile = await this.businessKycProfileRepository.findById(id);
+
+    if (!existingProfile) {
+      throw new HttpErrors.NotFound('No profile found');
+    }
+
+    const statusOptions = [0, 1, 2];
+
+    if (!statusOptions.includes(status)) {
+      throw new HttpErrors.BadRequest('Invalid status');
+    }
+
+    if (status === 1) {
+      await this.businessKycProfileRepository.updateById(existingProfile.id, {status: 1, verifiedAt: new Date()});
+      return {
+        success: true,
+        message: 'Business Profile Approved'
+      }
+    }
+
+    if (status === 2) {
+      await this.businessKycProfileRepository.updateById(existingProfile.id, {status: 2, reason: reason});
+      return {
+        success: true,
+        message: 'Business Profile Rejected'
+      }
+    }
+
+    if (status === 3) {
+      await this.businessKycProfileRepository.updateById(existingProfile.id, {status: 0});
+      return {
+        success: true,
+        message: 'Business Profile status is in under review'
+      }
+    }
+
+    throw new HttpErrors.BadRequest('invalid status');
   }
 }

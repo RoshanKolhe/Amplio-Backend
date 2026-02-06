@@ -184,4 +184,45 @@ export class BusinessKycCollateralAssetsService {
       isUpdated: true,
     };
   }
+
+
+    async updateCollateralAssetsStatus(id: string, status: number, reason: string): Promise<{success: boolean; message: string}> {
+    const existingProfile = await this.collateralAssetsRepository.findById(id);
+
+    if (!existingProfile) {
+      throw new HttpErrors.NotFound('No collateral assets found');
+    }
+
+    const statusOptions = [0, 1, 2];
+
+    if (!statusOptions.includes(status)) {
+      throw new HttpErrors.BadRequest('Invalid status');
+    }
+
+    if (status === 1) {
+      await this.collateralAssetsRepository.updateById(existingProfile.id, {status: 1, verifiedAt: new Date()});
+      return {
+        success: true,
+        message: 'collateral assets Approved'
+      }
+    }
+
+    if (status === 2) {
+      await this.collateralAssetsRepository.updateById(existingProfile.id, {status: 2, reason: reason});
+      return {
+        success: true,
+        message: 'Collateral Assets Rejected'
+      }
+    }
+
+    if (status === 3) {
+      await this.collateralAssetsRepository.updateById(existingProfile.id, {status: 0});
+      return {
+        success: true,
+        message: 'Collateral Assets status is in under review'
+      }
+    }
+
+    throw new HttpErrors.BadRequest('invalid status');
+  }
 }

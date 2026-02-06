@@ -3,7 +3,7 @@
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {BusinessKycAuditedFinancials} from '../models';
-import {BusinessKycAuditedFinancialsRepository} from '../repositories';
+import {BusinessKycAuditedFinancialsRepository, BusinessKycRepository} from '../repositories';
 
 type ReplaceResult = {
   financialDetails: BusinessKycAuditedFinancials[];
@@ -22,7 +22,10 @@ export class BusinessKycAuditedFinancialsService {
   constructor(
     @repository(BusinessKycAuditedFinancialsRepository)
     private auditedRepo: BusinessKycAuditedFinancialsRepository,
-  ) {}
+    @repository(BusinessKycRepository)
+    private businessKycRepo: BusinessKycRepository
+
+  ) { }
 
   async createOrUpdateAuditedFinancials(
     businessKycId: string,
@@ -123,6 +126,20 @@ export class BusinessKycAuditedFinancialsService {
     category: string,
     tx: any,
   ): Promise<ReplaceResult> {
+
+    const businessKyc = await this.businessKycRepo.findById(
+      businessKycId,
+      {fields: {companyProfilesId: true}},
+      {transaction: tx},
+    );
+
+    if (!businessKyc.companyProfilesId) {
+      throw new HttpErrors.BadRequest(
+        'Company profile not linked with this Business KYC',
+      );
+    }
+
+    const companyProfilesId = businessKyc.companyProfilesId;
     const {baseFinancialStartYear, baseFinancialEndYear} = records[0];
 
     for (const record of records) {
@@ -212,12 +229,14 @@ export class BusinessKycAuditedFinancialsService {
         );
       }
 
+
       return this.auditedRepo.create(
         {
           ...record,
           mode: 1,
           status: 0,
           businessKycId: businessKycId,
+          companyProfilesId: companyProfilesId,
           isActive: true,
           isDeleted: false,
           createdAt: new Date(),
@@ -394,4 +413,77 @@ export class BusinessKycAuditedFinancialsService {
 
     return requiredCategories.every(cat => completedCategories.has(cat));
   }
+
+
+  async updateAuditedFinancialsStatusByCompany(
+    companyProfilesId: string,
+    status: number,
+    reason: string,
+  ): Promise<{success: boolean; message: string}> {
+
+    const statusOptions = [0, 1, 2];
+    if (!statusOptions.includes(status)) {
+      throw new HttpErrors.BadRequest('Invalid status');
+    }
+
+    const records = await this.auditedRepo.find({
+      where: {
+        companyProfilesId,
+        isActive: true,
+        isDeleted: false,
+      },
+    });
+
+    if (!records.length) {
+      throw new HttpErrors.NotFound('No audited financials found for this company');
+    }
+
+    if (status === 1) {
+      await this.auditedRepo.updateAll(
+        {
+          status: 1,
+          verifiedAt: new Date(),
+        },
+        {companyProfilesId},
+      );
+
+      return {
+        success: true,
+        message: 'All audited financials approved',
+      };
+    }
+
+    if (status === 2) {
+      await this.auditedRepo.updateAll(
+        {
+          status: 2,
+          reason,
+        },
+        {companyProfilesId},
+      );
+
+      return {
+        success: true,
+        message: 'All audited financials rejected',
+      };
+    }
+
+    // UNDER REVIEW
+    if (status === 0) {
+      await this.auditedRepo.updateAll(
+        {
+          status: 0,
+        },
+        {companyProfilesId},
+      );
+
+      return {
+        success: true,
+        message: 'Audited financials moved to under review',
+      };
+    }
+
+    throw new HttpErrors.BadRequest('Invalid status');
+  }
+
 }

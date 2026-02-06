@@ -5,7 +5,7 @@
 import {authenticate} from '@loopback/authentication';
 import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
-import {get, HttpErrors, param} from '@loopback/rest';
+import {get, HttpErrors, param, patch, requestBody} from '@loopback/rest';
 import {authorize} from '../authorization';
 import { } from '../models';
 import {BusinessKycRepository, CompanyProfilesRepository} from '../repositories';
@@ -242,6 +242,148 @@ export class BusinessKycSuperAdminController {
       message: 'Guarantor details fetched successfully',
       data: businessKycProfile,
     };
+  }
+
+
+  // Business Kyc Approvel Apis //
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/company-profiles/business-profile-verification')
+  async comapnyBusinessProfileVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status', 'id'],
+            properties: {
+              status: {type: 'number'},
+              id: {type: 'string'},
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      status: number;
+      id: string;
+      reason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    const result = await this.businessKycProfileDetailsService.updateBusinessProfileStatus(
+      body.id,
+      body.status,
+      body.reason ?? '',
+    );
+
+    return result;
+  }
+
+  // Audited Financial Remaining
+
+  @authenticate('jwt')
+@authorize({roles: ['super_admin']})
+@patch('/company-profiles/audited-financial-verification')
+async companyAuditedFinancialVerification(
+  @requestBody({
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          required: ['status', 'companyProfilesId'],
+          properties: {
+            status: {type: 'number'},        // 1 approve, 2 reject
+            companyProfilesId: {type: 'string'},
+            reason: {type: 'string'},
+          },
+        },
+      },
+    },
+  })
+  body: {
+    status: number;
+    companyProfilesId: string;
+    reason?: string;
+  },
+): Promise<{success: boolean; message: string}> {
+
+  return this.businessKycAuditedFinancialsService
+    .updateAuditedFinancialsStatusByCompany(
+      body.companyProfilesId,
+      body.status,
+      body.reason ?? '',
+    );
+}
+
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/company-profiles/guarantor-profile-verification')
+  async comapnyGuarantorProfileVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status', 'id'],
+            properties: {
+              status: {type: 'number'},
+              id: {type: 'string'},
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      status: number;
+      id: string;
+      reason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    const result = await this.businessKycGuarantorDetailsService.updateGuarantorDetailsStatus(
+      body.id,
+      body.status,
+      body.reason ?? '',
+    );
+
+    return result;
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/company-profiles/collateral-assets-verification')
+  async comapnyCollateralAssetsVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status', 'id'],
+            properties: {
+              status: {type: 'number'},
+              id: {type: 'string'},
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      status: number;
+      id: string;
+      reason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    const result = await this.businessKycCollateralAssetsService.updateCollateralAssetsStatus(
+      body.id,
+      body.status,
+      body.reason ?? '',
+    );
+
+    return result;
   }
 
 }
