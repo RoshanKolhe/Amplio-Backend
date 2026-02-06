@@ -17,6 +17,7 @@ export class BusinessKycProfileDetailsService {
 
   async createOrUpdateBusinessKycProfileDetails(
     businessKycId: string,
+    companyProfilesId: string,
     profileDetails: Partial<Omit<BusinessKycProfile, 'id'>>,
     tx: any,
   ): Promise<{
@@ -43,6 +44,7 @@ export class BusinessKycProfileDetailsService {
       .create(
         {
           ...profileDetails,
+          companyProfilesId,
           status: 0, // under review
           mode: 1,
           isActive: true,

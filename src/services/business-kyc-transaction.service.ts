@@ -161,11 +161,12 @@ export class BusinessKycTransactionsService {
     });
 
     try {
-      const {kyc} = await this.resolveCompanyAndKyc(userId);
+      const {kyc, company} = await this.resolveCompanyAndKyc(userId);
 
       const result =
         await this.profileService.createOrUpdateBusinessKycProfileDetails(
           kyc.id!,
+          company.id,
           payload,
           tx,
         );
@@ -313,10 +314,10 @@ export class BusinessKycTransactionsService {
       // const currentStatus = await this.advanceStatusIfRequired(kyc.id!, tx);
 
       const verificationUrl =
-      await this.guarantorService.createGuarantorVerificationLink(
-        guarantor.id!,
-        tx,
-      );
+        await this.guarantorService.createGuarantorVerificationLink(
+          guarantor.id!,
+          tx,
+        );
 
 
       await tx.commit();
