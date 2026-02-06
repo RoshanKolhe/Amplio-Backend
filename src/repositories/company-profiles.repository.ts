@@ -50,14 +50,15 @@ export class CompanyProfilesRepository extends TimeStampRepositoryMixin<
 
   public readonly businessKycCollateralAssets: HasManyRepositoryFactory<BusinessKycCollateralAssets, typeof CompanyProfiles.prototype.id>;
 
-  public readonly businessKycAgreement: HasOneRepositoryFactory<BusinessKycAgreement, typeof CompanyProfiles.prototype.id>;
+
+  public readonly businessKycAgreements: HasManyRepositoryFactory<BusinessKycAgreement, typeof CompanyProfiles.prototype.id>;
 
   constructor(
     @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('CompanyPanCardsRepository') protected companyPanCardsRepositoryGetter: Getter<CompanyPanCardsRepository>, @repository.getter('KycApplicationsRepository') protected kycApplicationsRepositoryGetter: Getter<KycApplicationsRepository>, @repository.getter('UsersRepository') protected usersRepositoryGetter: Getter<UsersRepository>, @repository.getter('CompanyEntityTypeRepository') protected companyEntityTypeRepositoryGetter: Getter<CompanyEntityTypeRepository>, @repository.getter('CompanySectorTypeRepository') protected companySectorTypeRepositoryGetter: Getter<CompanySectorTypeRepository>, @repository.getter('BusinessKycRepository') protected businessKycRepositoryGetter: Getter<BusinessKycRepository>, @repository.getter('BusinessKycProfileRepository') protected businessKycProfileRepositoryGetter: Getter<BusinessKycProfileRepository>, @repository.getter('BusinessKycAuditedFinancialsRepository') protected businessKycAuditedFinancialsRepositoryGetter: Getter<BusinessKycAuditedFinancialsRepository>, @repository.getter('BusinessKycGuarantorRepository') protected businessKycGuarantorRepositoryGetter: Getter<BusinessKycGuarantorRepository>, @repository.getter('BusinessKycCollateralAssetsRepository') protected businessKycCollateralAssetsRepositoryGetter: Getter<BusinessKycCollateralAssetsRepository>, @repository.getter('BusinessKycAgreementRepository') protected businessKycAgreementRepositoryGetter: Getter<BusinessKycAgreementRepository>,
   ) {
     super(CompanyProfiles, dataSource);
-    this.businessKycAgreement = this.createHasOneRepositoryFactoryFor('businessKycAgreement', businessKycAgreementRepositoryGetter);
-    this.registerInclusionResolver('businessKycAgreement', this.businessKycAgreement.inclusionResolver);
+    this.businessKycAgreements = this.createHasManyRepositoryFactoryFor('businessKycAgreements', businessKycAgreementRepositoryGetter,);
+    this.registerInclusionResolver('businessKycAgreements', this.businessKycAgreements.inclusionResolver);
     this.businessKycCollateralAssets = this.createHasManyRepositoryFactoryFor('businessKycCollateralAssets', businessKycCollateralAssetsRepositoryGetter,);
     this.registerInclusionResolver('businessKycCollateralAssets', this.businessKycCollateralAssets.inclusionResolver);
     this.businessKycGuarantors = this.createHasManyRepositoryFactoryFor('businessKycGuarantors', businessKycGuarantorRepositoryGetter,);

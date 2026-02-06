@@ -213,8 +213,8 @@ export class CompanyProfiles extends Entity {
   @hasMany(() => BusinessKycCollateralAssets)
   businessKycCollateralAssets: BusinessKycCollateralAssets[];
 
-  @hasOne(() => BusinessKycAgreement)
-  businessKycAgreement: BusinessKycAgreement;
+  @hasMany(() => BusinessKycAgreement)
+  businessKycAgreements: BusinessKycAgreement[];
 
   constructor(data?: Partial<CompanyProfiles>) {
     super(data);
