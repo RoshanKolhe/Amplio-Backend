@@ -539,12 +539,10 @@ export class BusinessKycTransactionsService {
     }
   }
 
-  async updateAgreement(
-    userId: string,
-    businessKycDocumentTypeId: string,
-    isAccepted: boolean,
-  ) {
-    const tx = await this.businessKycRepository.dataSource.beginTransaction();
+  async updateAgreement(userId: string, isAccepted: boolean, reason: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
 
     try {
       const {kyc, company} = await this.resolveCompanyAndKyc(userId);
@@ -553,7 +551,7 @@ export class BusinessKycTransactionsService {
         kyc.businessKycStatusMasterId!,
       );
 
-      if (currentStatus.value !== 'agreements') {
+      if (currentStatus.value !== 'agreement') {
         throw new HttpErrors.BadRequest(
           `Cannot update agreements from ${currentStatus.value}`,
         );
@@ -563,26 +561,42 @@ export class BusinessKycTransactionsService {
       await this.agreementService.createAgreements(kyc.id!, company.id, tx);
 
       // ✅ update agreement using businessKycId + businessKycDocumentTypeId
-      await this.agreementService.updateAcceptanceByDocumentType(
-        kyc.id!,
-        businessKycDocumentTypeId,
+      // await this.agreementService.updateAcceptanceByDocumentType(
+      //   kyc.id!,
+      //   businessKycDocumentTypeId,
+      //   isAccepted,
+      //   reason,
+      //   tx,
+      // );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nextAgreement: any =
+        await this.agreementService.fetchNextPendingAgreement(kyc.id!, tx);
+
+      if (!nextAgreement) {
+        throw new HttpErrors.BadRequest('All agreements already accepted');
+      }
+
+      await this.agreementService.updateAcceptanceById(
+        nextAgreement.id!,
         isAccepted,
+        reason,
         tx,
       );
 
-      // ✅ check completion
       const allAccepted = await this.agreementService.areAllAccepted(
         kyc.id!,
         tx,
       );
 
       await tx.commit();
+      const agreementName =
+        nextAgreement.businessKycDocumentType?.name ?? 'Agreement';
 
       return {
         success: true,
         message: allAccepted
-          ? 'All agreements accepted. Proceed to e-sign.'
-          : 'Agreement updated successfully',
+        ? `${agreementName} completed. All agreements accepted. Proceed to e-sign.`
+        : `${agreementName} agreement is complete.`,
         readyForEsign: allAccepted,
       };
     } catch (e) {
@@ -601,9 +615,9 @@ export class BusinessKycTransactionsService {
         kyc.businessKycStatusMasterId!,
       );
 
-      if (currentStatus.value !== 'agreements') {
+      if (currentStatus.value !== 'agreement') {
         throw new HttpErrors.BadRequest(
-          `Cannot complete agreements from ${currentStatus.value}`,
+          `Cannot complete agreement from ${currentStatus.value}`,
         );
       }
 

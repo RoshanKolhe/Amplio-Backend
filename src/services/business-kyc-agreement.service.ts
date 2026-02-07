@@ -1,7 +1,7 @@
 import {BindingScope, injectable} from '@loopback/core';
-import {Transaction} from 'loopback-datasource-juggler';
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
+import {Transaction} from 'loopback-datasource-juggler';
 
 import {
   BusinessKycAgreementRepository,
@@ -165,19 +165,47 @@ export class BusinessKycAgreementService {
     );
   }
 
-  async updateAcceptanceByDocumentType(
-    businessKycId: string,
-    businessKycDocumentTypeId: string,
+  // async updateAcceptanceByDocumentType(
+  //   businessKycId: string,
+  //   businessKycDocumentTypeId: string,
+  //   isAccepted: boolean,
+  //   reason: string,
+  //   tx: Transaction,
+  // ) {
+  //   const agreement = await this.agreementRepo.findOne(
+  //     {
+  //       where: {
+  //         businessKycId,
+  //         businessKycDocumentTypeId,
+  //       },
+  //     },
+  //     {transaction: tx},
+  //   );
+
+  //   if (!agreement) {
+  //     throw new HttpErrors.NotFound('Agreement not found');
+  //   }
+
+  //   // optional lock check
+  //   if (agreement.status === 1) {
+  //     throw new HttpErrors.BadRequest('Agreement already finalized');
+  //   }
+
+  //   await this.agreementRepo.updateById(
+  //     agreement.id,
+  //     {isAccepted, reason},
+  //     {transaction: tx},
+  //   );
+  // }
+  async updateAcceptanceById(
+    agreementId: string,
     isAccepted: boolean,
+    reason: string,
     tx: Transaction,
   ) {
-    const agreement = await this.agreementRepo.findOne(
-      {
-        where: {
-          businessKycId,
-          businessKycDocumentTypeId,
-        },
-      },
+    const agreement = await this.agreementRepo.findById(
+      agreementId,
+      undefined,
       {transaction: tx},
     );
 
@@ -185,17 +213,17 @@ export class BusinessKycAgreementService {
       throw new HttpErrors.NotFound('Agreement not found');
     }
 
-    // optional lock check
     if (agreement.status === 1) {
       throw new HttpErrors.BadRequest('Agreement already finalized');
     }
 
     await this.agreementRepo.updateById(
-      agreement.id,
-      {isAccepted},
+      agreementId,
+      {isAccepted, reason},
       {transaction: tx},
     );
   }
+
   async areAllAccepted(businessKycId: string, tx: Transaction) {
     const agreements = await this.agreementRepo.find(
       {where: {businessKycId}},
@@ -222,5 +250,27 @@ export class BusinessKycAgreementService {
     );
 
     return agreements.length === total.count;
+  }
+
+  async fetchNextPendingAgreement(businessKycId: string, tx: Transaction) {
+    return this.agreementRepo.findOne(
+      {
+        where: {
+          businessKycId,
+          isAccepted: false,
+          isActive: true,
+          isDeleted: false,
+        },
+        include: [
+          {
+            relation: 'businessKycDocumentType',
+            scope: {
+              fields: ['id', 'name', 'sequenceOrder'],
+            },
+          },
+        ],
+      },
+      {transaction: tx},
+    );
   }
 }

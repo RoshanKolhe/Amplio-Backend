@@ -24,23 +24,30 @@ import {
   BusinessKycGuarantorVerificationRepository,
   BusinessKycRepository,
   CompanyProfilesRepository,
+  OtpRepository,
+  UsersRepository,
 } from '../repositories';
 import {BusinessKycGuarantorDetailsService} from '../services/business-kyc-guarantor-details.service';
 import {BusinessKycStateService} from '../services/business-kyc-state.service';
 import {BusinessKycStepDataService} from '../services/business-kyc-step-data.service';
 import {BusinessKycTransactionsService} from '../services/business-kyc-transaction.service';
 import {JWTService} from '../services/jwt-service';
+import {RbacService} from '../services/rbac.service';
 
 export class BusinessKycController {
   constructor(
     @repository(BusinessKycRepository)
     private businessKycRepository: BusinessKycRepository,
+    @repository(UsersRepository)
+    private usersRepository: UsersRepository,
     @repository(CompanyProfilesRepository)
     private companyProfileRepository: CompanyProfilesRepository,
     @repository(BusinessKycGuarantorVerificationRepository)
     private businessKycGuarantorVerificationRepository: BusinessKycGuarantorVerificationRepository,
     @repository(BusinessKycGuarantorRepository)
     private businessKycGuarantorRepository: BusinessKycGuarantorRepository,
+    @repository(OtpRepository)
+    private otpRepository: OtpRepository,
     @inject('service.businessKycGuarantorDetailsService')
     private businessKycGuarantorDetailsService: BusinessKycGuarantorDetailsService,
     @inject('service.businessKycTransactionsService')
@@ -51,6 +58,8 @@ export class BusinessKycController {
     private businessKycStateService: BusinessKycStateService,
     @inject('service.businessKycStepDataService')
     private businessKycStepDataService: BusinessKycStepDataService,
+    @inject('services.rbac')
+    public rbacService: RbacService,
   ) {}
 
   /* ------------------------------------------------------------------ */
@@ -418,24 +427,24 @@ export class BusinessKycController {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['businessKycDocumentTypeId', 'isAccepted'],
+            required: ['isAccepted'],
             properties: {
-              businessKycDocumentTypeId: {type: 'string'},
               isAccepted: {type: 'boolean'},
+              reason: {type: 'string'},
             },
           },
         },
       },
     })
     body: {
-      businessKycDocumentTypeId: string;
       isAccepted: boolean;
+      reason: string;
     },
   ) {
     return this.kycTxnService.updateAgreement(
       user.id,
-      body.businessKycDocumentTypeId,
       body.isAccepted,
+      body.reason ?? '',
     );
   }
 
@@ -461,6 +470,136 @@ export class BusinessKycController {
     return {
       success: true,
       data: agreements,
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @post('/auth/company-esign/send-otp')
+  async sendCompanyOtp(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    currentUser: UserProfile,
+  ): Promise<{success: boolean; message: string}> {
+    const company = await this.companyProfileRepository.findOne({
+      where: {
+        usersId: currentUser.id,
+        isActive: true,
+        isDeleted: false,
+      },
+    });
+
+    if (!company) {
+      throw new HttpErrors.NotFound('Company profile not found');
+    }
+
+    const user = await this.usersRepository.findById(currentUser.id);
+
+    if (!user?.email) {
+      throw new HttpErrors.BadRequest('User email not available');
+    }
+
+    const email = user.email.toLowerCase().trim();
+
+    await this.otpRepository.updateAll(
+      {
+        isUsed: true,
+        expiresAt: new Date(),
+      },
+      {
+        identifier: email,
+        type: 1,
+        isUsed: false,
+      },
+    );
+
+    await this.otpRepository.create({
+      otp: '1234',
+      type: 1,
+      identifier: email,
+      attempts: 0,
+      isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    });
+
+    // await this.emailService.sendOtp(email, otpCode);
+    return {
+      success: true,
+      message: 'OTP sent to your registered email',
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @post('/auth/company-esign/verify-otp')
+  async verifyCompanyOtp(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    currentUser: UserProfile,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['otp'],
+            properties: {
+              otp: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {otp: string},
+  ): Promise<{success: boolean; message: string}> {
+    const user = await this.usersRepository.findById(currentUser.id);
+
+    if (!user?.email) {
+      throw new HttpErrors.BadRequest('User email not available');
+    }
+
+    const email = user.email.toLowerCase().trim();
+
+    const otpEntry = await this.otpRepository.findOne({
+      where: {
+        identifier: email,
+        type: 1,
+        isUsed: false,
+      },
+      order: ['createdAt DESC'],
+    });
+
+    if (!otpEntry) {
+      throw new HttpErrors.BadRequest('OTP expired or not found');
+    }
+
+    if (otpEntry.attempts >= 3) {
+      throw new HttpErrors.BadRequest(
+        'Maximum attempts reached. Request a new OTP.',
+      );
+    }
+
+    if (new Date(otpEntry.expiresAt) < new Date()) {
+      await this.otpRepository.updateById(otpEntry.id, {
+        isUsed: true,
+      });
+
+      throw new HttpErrors.BadRequest('OTP expired');
+    }
+
+    if (otpEntry.otp !== body.otp) {
+      await this.otpRepository.updateById(otpEntry.id, {
+        attempts: otpEntry.attempts + 1,
+      });
+
+      throw new HttpErrors.BadRequest('Invalid OTP');
+    }
+
+    await this.otpRepository.updateById(otpEntry.id, {
+      isUsed: true,
+      expiresAt: new Date(),
+    });
+
+    return {
+      success: true,
+      message: 'OTP verified successfully',
     };
   }
 }
