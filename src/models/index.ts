@@ -40,3 +40,5 @@ export * from './business-kyc-profile.model';
 export * from './business-kyc-audited-financials.model';
 export * from './business-kyc-guarantor-verification.model';
 export * from './business-kyc-agreement.model';
+export * from './business-kyc-document-type.model';
+export * from './document-roles.model';

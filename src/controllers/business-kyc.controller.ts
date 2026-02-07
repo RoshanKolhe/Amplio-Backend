@@ -53,8 +53,6 @@ export class BusinessKycController {
     private businessKycStepDataService: BusinessKycStepDataService,
   ) {}
 
-
-
   /* ------------------------------------------------------------------ */
   /* START KYC */
   /* ------------------------------------------------------------------ */
@@ -402,5 +400,67 @@ export class BusinessKycController {
     user: UserProfile,
   ) {
     return this.kycTxnService.submitReview(user.id);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* AGREEMENTS */
+  /* --------------------------------------------------- --------------- */
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @patch('/business-kyc/agreements')
+  async updateAgreement(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    user: UserProfile,
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['businessKycDocumentTypeId', 'isAccepted'],
+            properties: {
+              businessKycDocumentTypeId: {type: 'string'},
+              isAccepted: {type: 'boolean'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      businessKycDocumentTypeId: string;
+      isAccepted: boolean;
+    },
+  ) {
+    return this.kycTxnService.updateAgreement(
+      user.id,
+      body.businessKycDocumentTypeId,
+      body.isAccepted,
+    );
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @post('/business-kyc/agreements/complete-signing')
+  async completeAgreementSigning(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    user: UserProfile,
+  ) {
+    return this.kycTxnService.completeAgreementSigning(user.id);
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @get('/business-kyc/agreements')
+  async fetchAgreements(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    user: UserProfile,
+  ) {
+    const agreements = await this.kycTxnService.fetchAgreements(user.id);
+
+    return {
+      success: true,
+      data: agreements,
+    };
   }
 }

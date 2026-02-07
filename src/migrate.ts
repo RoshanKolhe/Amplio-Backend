@@ -46,7 +46,8 @@ export async function migrate(args: string[]) {
       'BusinessKycAuditedFinancials',
       'BusinessKycGuarantor',
       'BusinessKycGuarantorVerification',
-      'BusinessKycAgreement'
+      'BusinessKycAgreement',
+      'BusinessKycDocumentType'
     ]
   });
 

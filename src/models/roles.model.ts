@@ -82,6 +82,11 @@ export class Roles extends Entity {
   @hasMany(() => Users, {through: {model: () => UserRoles}})
   users: Users[];
 
+  @property({
+    type: 'string',
+  })
+  businessKycDocumentTypeId?: string;
+
   constructor(data?: Partial<Roles>) {
     super(data);
   }

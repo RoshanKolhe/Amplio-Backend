@@ -1,11 +1,12 @@
 import {Constructor, inject, Getter} from '@loopback/core';
 import {DefaultCrudRepository, repository, BelongsToAccessor} from '@loopback/repository';
 import {AmplioDataSource} from '../datasources';
-import {BusinessKycAgreement, BusinessKycAgreementRelations, BusinessKyc, CompanyProfiles, Media} from '../models';
+import {BusinessKycAgreement, BusinessKycAgreementRelations, BusinessKyc, CompanyProfiles, Media, BusinessKycDocumentType} from '../models';
 import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
 import {BusinessKycRepository} from './business-kyc.repository';
 import {CompanyProfilesRepository} from './company-profiles.repository';
 import {MediaRepository} from './media.repository';
+import {BusinessKycDocumentTypeRepository} from './business-kyc-document-type.repository';
 
 export class BusinessKycAgreementRepository extends TimeStampRepositoryMixin<
   BusinessKycAgreement,
@@ -25,10 +26,14 @@ export class BusinessKycAgreementRepository extends TimeStampRepositoryMixin<
 
   public readonly media: BelongsToAccessor<Media, typeof BusinessKycAgreement.prototype.id>;
 
+  public readonly businessKycDocumentType: BelongsToAccessor<BusinessKycDocumentType, typeof BusinessKycAgreement.prototype.id>;
+
   constructor(
-    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('BusinessKycRepository') protected businessKycRepositoryGetter: Getter<BusinessKycRepository>, @repository.getter('CompanyProfilesRepository') protected companyProfilesRepositoryGetter: Getter<CompanyProfilesRepository>, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>,
+    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('BusinessKycRepository') protected businessKycRepositoryGetter: Getter<BusinessKycRepository>, @repository.getter('CompanyProfilesRepository') protected companyProfilesRepositoryGetter: Getter<CompanyProfilesRepository>, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('BusinessKycDocumentTypeRepository') protected businessKycDocumentTypeRepositoryGetter: Getter<BusinessKycDocumentTypeRepository>,
   ) {
     super(BusinessKycAgreement, dataSource);
+    this.businessKycDocumentType = this.createBelongsToAccessorFor('businessKycDocumentType', businessKycDocumentTypeRepositoryGetter,);
+    this.registerInclusionResolver('businessKycDocumentType', this.businessKycDocumentType.inclusionResolver);
     this.media = this.createBelongsToAccessorFor('media', mediaRepositoryGetter,);
     this.registerInclusionResolver('media', this.media.inclusionResolver);
     this.companyProfiles = this.createBelongsToAccessorFor('companyProfiles', companyProfilesRepositoryGetter,);

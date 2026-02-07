@@ -7,17 +7,19 @@ import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import {get, HttpErrors, param, patch, requestBody} from '@loopback/rest';
 import {authorize} from '../authorization';
-import { } from '../models';
-import {BusinessKycRepository, CompanyProfilesRepository} from '../repositories';
+import {} from '../models';
+import {
+  BusinessKycRepository,
+  CompanyProfilesRepository,
+} from '../repositories';
 import {BusinessKycAuditedFinancialsService} from '../services/business-kyc-audited-financials.service';
 import {BusinessKycCollateralAssetsService} from '../services/business-kyc-collateral-assets.service';
 import {BusinessKycGuarantorDetailsService} from '../services/business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from '../services/business-kyc-profile-details.service';
-
+import {BusinessKycTransactionsService} from '../services/business-kyc-transaction.service';
 
 export class BusinessKycSuperAdminController {
   constructor(
-
     @repository(CompanyProfilesRepository)
     private companyProfilesRepository: CompanyProfilesRepository,
     @repository(BusinessKycRepository)
@@ -29,16 +31,17 @@ export class BusinessKycSuperAdminController {
     @inject('service.businessKycCollateralAssetsService.service')
     private businessKycCollateralAssetsService: BusinessKycCollateralAssetsService,
     @inject('service.businessKycGuarantorDetailsService')
-    private businessKycGuarantorDetailsService: BusinessKycGuarantorDetailsService
-  ) { }
+    private businessKycGuarantorDetailsService: BusinessKycGuarantorDetailsService,
+    @inject('service.businessKycTransactionsService')
+    private kycTxnService: BusinessKycTransactionsService,
+  ) {}
 
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
   @get('/company-profiles/{companyId}/business-profile')
   async fetchCompanyBusinessProfileDetails(
     @param.path.string('companyId') companyId: string,
-  ): Promise<{success: boolean; message: string; data: any}> {
-
+  ): Promise<{success: boolean; message: string; data: object}> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
         id: companyId,
@@ -67,16 +70,13 @@ export class BusinessKycSuperAdminController {
     }
 
     if (!businessKyc.id) {
-      throw new HttpErrors.InternalServerError(
-        'Business KYC ID is missing',
-      );
+      throw new HttpErrors.InternalServerError('Business KYC ID is missing');
     }
 
     const businessKycProfile =
       await this.businessKycProfileDetailsService.fetchBusinessKycProfileDetails(
         businessKyc.id,
       );
-
 
     return {
       success: true,
@@ -90,8 +90,7 @@ export class BusinessKycSuperAdminController {
   @get('/company-profiles/{companyId}/collateral-details')
   async fetchCompanyCollateralAssetsDetails(
     @param.path.string('companyId') companyId: string,
-  ): Promise<{success: boolean; message: string; data: any}> {
-
+  ): Promise<{success: boolean; message: string; data: object}> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
         id: companyId,
@@ -120,16 +119,13 @@ export class BusinessKycSuperAdminController {
     }
 
     if (!businessKyc.id) {
-      throw new HttpErrors.InternalServerError(
-        'Business KYC ID is missing',
-      );
+      throw new HttpErrors.InternalServerError('Business KYC ID is missing');
     }
 
     const collateralAssets =
       await this.businessKycCollateralAssetsService.fetchBusinessKycCollateralAssets(
         businessKyc.id,
       );
-
 
     return {
       success: true,
@@ -143,8 +139,7 @@ export class BusinessKycSuperAdminController {
   @get('/company-profiles/{companyId}/audited-financials')
   async fetchCompanyAuditedFinancialsDetails(
     @param.path.string('companyId') companyId: string,
-  ): Promise<{success: boolean; message: string; data: any}> {
-
+  ): Promise<{success: boolean; message: string; data: object}> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
         id: companyId,
@@ -173,16 +168,13 @@ export class BusinessKycSuperAdminController {
     }
 
     if (!businessKyc.id) {
-      throw new HttpErrors.InternalServerError(
-        'Business KYC ID is missing',
-      );
+      throw new HttpErrors.InternalServerError('Business KYC ID is missing');
     }
 
     const collateralAssets =
       await this.businessKycAuditedFinancialsService.fetchAuditedFinancials(
         businessKyc.id,
       );
-
 
     return {
       success: true,
@@ -196,8 +188,7 @@ export class BusinessKycSuperAdminController {
   @get('/company-profiles/{companyId}/guarantor-details')
   async fetchCompanyGuarantorDetailsDetails(
     @param.path.string('companyId') companyId: string,
-  ): Promise<{success: boolean; message: string; data: any}> {
-
+  ): Promise<{success: boolean; message: string; data: object}> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
         id: companyId,
@@ -226,9 +217,7 @@ export class BusinessKycSuperAdminController {
     }
 
     if (!businessKyc.id) {
-      throw new HttpErrors.InternalServerError(
-        'Business KYC ID is missing',
-      );
+      throw new HttpErrors.InternalServerError('Business KYC ID is missing');
     }
 
     const businessKycProfile =
@@ -236,14 +225,12 @@ export class BusinessKycSuperAdminController {
         businessKyc.id,
       );
 
-
     return {
       success: true,
       message: 'Guarantor details fetched successfully',
       data: businessKycProfile,
     };
   }
-
 
   // Business Kyc Approvel Apis //
 
@@ -272,11 +259,12 @@ export class BusinessKycSuperAdminController {
       reason?: string;
     },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.businessKycProfileDetailsService.updateBusinessProfileStatus(
-      body.id,
-      body.status,
-      body.reason ?? '',
-    );
+    const result =
+      await this.businessKycProfileDetailsService.updateBusinessProfileStatus(
+        body.id,
+        body.status,
+        body.reason ?? '',
+      );
 
     return result;
   }
@@ -284,39 +272,36 @@ export class BusinessKycSuperAdminController {
   // Audited Financial Remaining
 
   @authenticate('jwt')
-@authorize({roles: ['super_admin']})
-@patch('/company-profiles/audited-financial-verification')
-async companyAuditedFinancialVerification(
-  @requestBody({
-    content: {
-      'application/json': {
-        schema: {
-          type: 'object',
-          required: ['status', 'companyProfilesId'],
-          properties: {
-            status: {type: 'number'},        // 1 approve, 2 reject
-            companyProfilesId: {type: 'string'},
-            reason: {type: 'string'},
+  @authorize({roles: ['super_admin']})
+  @patch('/company-profiles/audited-financial-verification')
+  async companyAuditedFinancialVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status', 'companyProfilesId'],
+            properties: {
+              status: {type: 'number'}, // 1 approve, 2 reject
+              companyProfilesId: {type: 'string'},
+              reason: {type: 'string'},
+            },
           },
         },
       },
+    })
+    body: {
+      status: number;
+      companyProfilesId: string;
+      reason?: string;
     },
-  })
-  body: {
-    status: number;
-    companyProfilesId: string;
-    reason?: string;
-  },
-): Promise<{success: boolean; message: string}> {
-
-  return this.businessKycAuditedFinancialsService
-    .updateAuditedFinancialsStatusByCompany(
+  ): Promise<{success: boolean; message: string}> {
+    return this.businessKycAuditedFinancialsService.updateAuditedFinancialsStatusByCompany(
       body.companyProfilesId,
       body.status,
       body.reason ?? '',
     );
-}
-
+  }
 
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
@@ -343,11 +328,12 @@ async companyAuditedFinancialVerification(
       reason?: string;
     },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.businessKycGuarantorDetailsService.updateGuarantorDetailsStatus(
-      body.id,
-      body.status,
-      body.reason ?? '',
-    );
+    const result =
+      await this.businessKycGuarantorDetailsService.updateGuarantorDetailsStatus(
+        body.id,
+        body.status,
+        body.reason ?? '',
+      );
 
     return result;
   }
@@ -377,13 +363,35 @@ async companyAuditedFinancialVerification(
       reason?: string;
     },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.businessKycCollateralAssetsService.updateCollateralAssetsStatus(
-      body.id,
-      body.status,
-      body.reason ?? '',
-    );
+    const result =
+      await this.businessKycCollateralAssetsService.updateCollateralAssetsStatus(
+        body.id,
+        body.status,
+        body.reason ?? '',
+      );
 
     return result;
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/company-profiles/{companyId}/pending-verification')
+  async advanceWorkflow(
+    @param.path.string('companyId') companyId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    currentStatus: {
+      id: string;
+      status: string;
+      value: string;
+      sequenceOrder: number;
+    };
+  }> {
+    if (!companyId) {
+      throw new HttpErrors.BadRequest('companyId is required');
+    }
+
+    return this.kycTxnService.advanceWorkflow(companyId);
+  }
 }

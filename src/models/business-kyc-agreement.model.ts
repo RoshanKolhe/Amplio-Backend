@@ -2,12 +2,22 @@ import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {BusinessKyc} from './business-kyc.model';
 import {CompanyProfiles} from './company-profiles.model';
 import {Media} from './media.model';
+import {BusinessKycDocumentType} from './business-kyc-document-type.model';
 
 @model({
   settings: {
     postgresql: {
       table: 'business_kyc_agreement',
       schema: 'public',
+    },
+    indexes: {
+      uniqueAgreement: {
+        keys: {
+          businessKycId: 1,
+          businessKycDocumentTypeId: 1,
+        },
+        options: {unique: true},
+      },
     },
   },
 })
@@ -24,24 +34,31 @@ export class BusinessKycAgreement extends Entity {
     type: 'number',
     required: true,
     jsonSchema: {
-      enum: [0, 1, 2],
+      enum: [0, 1, 2], // 0: pending, 1: approved, 2: rejected
     },
+    default: 0,
   })
   status: number;
 
-  @property({
-    type: 'number',
-    required: true,
-    jsonSchema: {
-      enum: [0, 1],
-    },
-  })
-  mode: number;
+  // @property({
+  //   type: 'number',
+  //   required: true,
+  //   jsonSchema: {
+  //     enum: [0, 1],
+  //   },
+  // })
+  // mode: number;
 
   @property({
     type: 'string',
   })
   reason?: string;
+
+  @property({
+    type: 'boolean',
+    default: false,
+  })
+  isAccepted?: boolean;
 
   @property({
     type: 'date',
@@ -84,14 +101,17 @@ export class BusinessKycAgreement extends Entity {
   companyProfilesId: string;
 
   @belongsTo(() => Media)
-  mediaId: string;
+  mediaId?: string;
+
+  @belongsTo(() => BusinessKycDocumentType)
+  businessKycDocumentTypeId: string;
 
   constructor(data?: Partial<BusinessKycAgreement>) {
     super(data);
   }
 }
 
-export interface BusinessKycAgreementRelations { }
+export interface BusinessKycAgreementRelations {}
 
-export type BusinessKycAgreementWithRelations =
-  BusinessKycAgreement & BusinessKycAgreementRelations;
+export type BusinessKycAgreementWithRelations = BusinessKycAgreement &
+  BusinessKycAgreementRelations;

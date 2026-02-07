@@ -42,6 +42,7 @@ import {BusinessKycStateService} from './services/business-kyc-state.service';
 import {BusinessKycStepDataService} from './services/business-kyc-step-data.service';
 import {BusinessKycGuarantorDetailsService} from './services/business-kyc-guarantor-details.service';
 import {BusinessKycTransactionsService} from './services/business-kyc-transaction.service';
+import {BusinessKycAgreementService} from './services/business-kyc-agreement.service';
 
 export {ApplicationConfig};
 
@@ -129,6 +130,9 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.businessKycTransactionsService').toClass(
       BusinessKycTransactionsService,
     );
+    this.bind('service.businessKycAgreementService.service').toClass(
+      BusinessKycAgreementService
+    )
   }
 
   protected configureFileUpload(destination?: string) {

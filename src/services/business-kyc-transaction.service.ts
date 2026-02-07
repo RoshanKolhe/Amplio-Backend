@@ -19,6 +19,7 @@ import {BusinessKycAuditedFinancialsService} from './business-kyc-audited-financ
 import {BusinessKycCollateralAssetsService} from './business-kyc-collateral-assets.service';
 import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
+import {BusinessKycAgreementService} from './business-kyc-agreement.service';
 
 export class BusinessKycTransactionsService {
   constructor(
@@ -45,7 +46,10 @@ export class BusinessKycTransactionsService {
 
     @inject('service.businessKycCollateralAssetsService.service')
     private collateralService: BusinessKycCollateralAssetsService,
-  ) { }
+
+    @inject('service.businessKycAgreementService.service')
+    private agreementService: BusinessKycAgreementService,
+  ) {}
 
   /* ------------------------------------------------------------------ */
   /* 🔒 COMMON HELPERS */
@@ -319,7 +323,6 @@ export class BusinessKycTransactionsService {
           tx,
         );
 
-
       await tx.commit();
       return {guarantor, verificationUrl};
     } catch (e) {
@@ -414,7 +417,6 @@ export class BusinessKycTransactionsService {
     }
   }
 
-
   /* ------------------------------------------------------------------ */
   /* 4️⃣ COLLATERAL ASSETS */
   /* ------------------------------------------------------------------ */
@@ -490,6 +492,276 @@ export class BusinessKycTransactionsService {
     } catch (e) {
       await tx.rollback();
       throw e;
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 🔟 AGREEMENTS */
+  /* ------------------------------------------------------------------ */
+
+  async completeAgreementStep(userId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const {kyc, company} = await this.resolveCompanyAndKyc(userId);
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      if (currentStatus.value !== 'agreements') {
+        throw new HttpErrors.BadRequest(
+          `Cannot continue agreements from ${currentStatus.value}`,
+        );
+      }
+
+      // create agreements if not already created
+      await this.agreementService.createAgreements(kyc.id!, company.id, tx);
+
+      // validate + approve
+      await this.agreementService.finalizeAgreements(kyc.id!, tx);
+
+      // advance status
+      const nextStatus = await this.advanceStatusIfRequired(kyc.id!, tx);
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Agreements completed successfully',
+        currentStatus: nextStatus,
+      };
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  }
+
+  async updateAgreement(
+    userId: string,
+    businessKycDocumentTypeId: string,
+    isAccepted: boolean,
+  ) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction();
+
+    try {
+      const {kyc, company} = await this.resolveCompanyAndKyc(userId);
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      if (currentStatus.value !== 'agreements') {
+        throw new HttpErrors.BadRequest(
+          `Cannot update agreements from ${currentStatus.value}`,
+        );
+      }
+
+      // ensure agreements exist
+      await this.agreementService.createAgreements(kyc.id!, company.id, tx);
+
+      // ✅ update agreement using businessKycId + businessKycDocumentTypeId
+      await this.agreementService.updateAcceptanceByDocumentType(
+        kyc.id!,
+        businessKycDocumentTypeId,
+        isAccepted,
+        tx,
+      );
+
+      // ✅ check completion
+      const allAccepted = await this.agreementService.areAllAccepted(
+        kyc.id!,
+        tx,
+      );
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: allAccepted
+          ? 'All agreements accepted. Proceed to e-sign.'
+          : 'Agreement updated successfully',
+        readyForEsign: allAccepted,
+      };
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  }
+
+  async completeAgreementSigning(userId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction();
+
+    try {
+      const {kyc} = await this.resolveCompanyAndKyc(userId);
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      if (currentStatus.value !== 'agreements') {
+        throw new HttpErrors.BadRequest(
+          `Cannot complete agreements from ${currentStatus.value}`,
+        );
+      }
+
+      // 🔥 ensure all accepted
+      const allAccepted = await this.agreementService.areAllAccepted(
+        kyc.id!,
+        tx,
+      );
+
+      if (!allAccepted) {
+        throw new HttpErrors.BadRequest('Accept all agreements before signing');
+      }
+
+      // 🔥 ensure signed docs exist
+      const allSigned = await this.agreementService.areAllSigned(kyc.id!, tx);
+
+      if (!allSigned) {
+        throw new HttpErrors.BadRequest('Documents not signed properly');
+      }
+
+      // finalize
+      await this.agreementService.finalizeAgreements(kyc.id!, tx);
+
+      const nextStatus = await this.advanceStatusIfRequired(kyc.id!, tx);
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Agreements completed successfully',
+        currentStatus: nextStatus,
+      };
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  }
+
+  async fetchAgreements(userId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+    try {
+      const {kyc, company} = await this.resolveCompanyAndKyc(userId);
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      if (currentStatus.value !== 'agreement') {
+        throw new HttpErrors.BadRequest(
+          `Agreements not available in ${currentStatus.value} stage`,
+        );
+      }
+
+      // ✅ create agreements safely
+      await this.agreementService.createAgreements(kyc.id!, company.id, tx);
+
+      const agreements = await this.agreementService.fetchAgreements(
+        kyc.id!,
+        tx,
+      );
+
+      await tx.commit();
+
+      return agreements;
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
+  async advanceWorkflow(companyId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+    try {
+      const kyc = await this.businessKycRepository.findOne(
+        {
+          where: {
+            companyProfilesId: companyId, // ⭐ YOU MISSED THIS
+            isActive: true,
+            isDeleted: false,
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!kyc) {
+        throw new HttpErrors.NotFound('Business KYC not found');
+      }
+
+      await this.businessKycRepository.execute(
+        `SELECT id FROM business_kyc WHERE id = $1 FOR UPDATE`,
+        [kyc.id],
+        {transaction: tx},
+      );
+
+      if (!kyc.businessKycStatusMasterId) {
+        throw new HttpErrors.BadRequest('KYC status not initialized');
+      }
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId,
+      );
+
+      const currentStage = currentStatus.value?.trim().toLowerCase();
+
+      if (currentStage !== 'pending') {
+        throw new HttpErrors.BadRequest(
+          `Workflow can only advance from "pending". Current stage is "${currentStatus.value}".`,
+        );
+      }
+
+      const nextStatus = await this.statusService.fetchNextStatus(
+        currentStatus.sequenceOrder,
+      );
+
+      if (!nextStatus) {
+        throw new HttpErrors.BadRequest(
+          'Next workflow status is not configured.',
+        );
+      }
+
+      const nextStage = nextStatus.value?.trim().toLowerCase();
+
+      if (nextStage.includes('agreement')) {
+        await this.agreementService.createAgreements(
+          kyc.id!,
+          kyc.companyProfilesId,
+          tx,
+        );
+      }
+
+      await this.businessKycRepository.updateById(
+        kyc.id!,
+        {
+          businessKycStatusMasterId: nextStatus.id,
+          status: nextStatus.value,
+        },
+        {transaction: tx},
+      );
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: `Workflow moved to ${nextStatus.value}`,
+        currentStatus: {
+          id: nextStatus.id,
+          status: nextStatus.status,
+          value: nextStatus.value,
+          sequenceOrder: nextStatus.sequenceOrder,
+        },
+      };
+    } catch (err) {
+      await tx.rollback();
+      throw err;
     }
   }
 }
