@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {BusinessKycGuarantor} from '../models';
@@ -9,7 +10,6 @@ import {
   CompanyProfilesRepository,
 } from '../repositories';
 import {JWTService} from './jwt-service';
-import {inject} from '@loopback/core';
 
 export class BusinessKycGuarantorDetailsService {
   constructor(
@@ -27,7 +27,7 @@ export class BusinessKycGuarantorDetailsService {
 
     @inject('service.jwt.service')
     private jwtService: JWTService,
-  ) {}
+  ) { }
 
   /**
    * ✅ CREATE single guarantor
@@ -37,7 +37,7 @@ export class BusinessKycGuarantorDetailsService {
     userId: string,
     payload: Omit<
       BusinessKycGuarantor,
-      'id' | 'businessKycId' | 'companyProfilesId'
+      'id' | 'businessKycId' | 'companyProfilesId' | 'status'
     >,
     tx: any,
   ): Promise<BusinessKycGuarantor> {
