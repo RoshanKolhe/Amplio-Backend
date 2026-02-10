@@ -87,7 +87,7 @@ export class BusinessKycAgreementService {
           {
             relation: 'media', // ⭐ ADD THIS
             scope: {
-              fields: ['id', 'fileUrl', 'originalName'],
+              fields: ['id', 'fileUrl', 'fileName'],
             },
           },
         ],

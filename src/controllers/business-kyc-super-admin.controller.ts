@@ -7,7 +7,7 @@ import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import {get, HttpErrors, param, patch, requestBody} from '@loopback/rest';
 import {authorize} from '../authorization';
-import {} from '../models';
+import { } from '../models';
 import {
   BusinessKycRepository,
   CompanyProfilesRepository,
@@ -17,6 +17,7 @@ import {BusinessKycCollateralAssetsService} from '../services/business-kyc-colla
 import {BusinessKycGuarantorDetailsService} from '../services/business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from '../services/business-kyc-profile-details.service';
 import {BusinessKycTransactionsService} from '../services/business-kyc-transaction.service';
+import {BusinessKycAgreementService} from '../services/business-kyc-agreement.service';
 
 export class BusinessKycSuperAdminController {
   constructor(
@@ -34,7 +35,9 @@ export class BusinessKycSuperAdminController {
     private businessKycGuarantorDetailsService: BusinessKycGuarantorDetailsService,
     @inject('service.businessKycTransactionsService')
     private kycTxnService: BusinessKycTransactionsService,
-  ) {}
+    @inject('service.businessKycAgreementService.service')
+    private businessKycAgreementService: BusinessKycAgreementService,
+  ) { }
 
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
@@ -222,6 +225,56 @@ export class BusinessKycSuperAdminController {
 
     const businessKycProfile =
       await this.businessKycGuarantorDetailsService.getGuarantorsByBusinessKycId(
+        businessKyc.id,
+      );
+
+    return {
+      success: true,
+      message: 'Guarantor details fetched successfully',
+      data: businessKycProfile,
+    };
+  }
+
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/company-profiles/{companyId}/agreement-details')
+  async fetchCompanyAgreementDetails(
+    @param.path.string('companyId') companyId: string,
+  ): Promise<{success: boolean; message: string; data: object}> {
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        id: companyId,
+        isDeleted: false,
+      },
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company not found');
+    }
+
+    const businessKyc = await this.businessKycRepository.findOne({
+      where: {
+        companyProfilesId: companyProfile.id,
+        isActive: true,
+        isDeleted: false,
+      },
+    });
+
+    if (!businessKyc) {
+      return {
+        success: true,
+        message: 'No Business KYC found',
+        data: [],
+      };
+    }
+
+    if (!businessKyc.id) {
+      throw new HttpErrors.InternalServerError('Business KYC ID is missing');
+    }
+
+    const businessKycProfile =
+      await this.businessKycAgreementService.fetchAgreements(
         businessKyc.id,
       );
 

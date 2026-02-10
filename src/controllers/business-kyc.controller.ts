@@ -51,7 +51,7 @@ export class BusinessKycController {
     private businessKycStateService: BusinessKycStateService,
     @inject('service.businessKycStepDataService')
     private businessKycStepDataService: BusinessKycStepDataService,
-  ) {}
+  ) { }
 
   /* ------------------------------------------------------------------ */
   /* START KYC */
@@ -205,7 +205,7 @@ export class BusinessKycController {
     user: UserProfile,
 
     @requestBody()
-    body: Omit<BusinessKycGuarantor, 'id' | 'businessKycId' >,
+    body: Omit<BusinessKycGuarantor, 'id' | 'businessKycId'>,
   ) {
     return this.kycTxnService.addGuarantor(user.id, body);
   }
@@ -320,7 +320,7 @@ export class BusinessKycController {
       );
 
       await this.businessKycGuarantorRepository.updateById(guarantorId, {
-        status: 2,
+        verifiedAt: true,
       });
     }
 

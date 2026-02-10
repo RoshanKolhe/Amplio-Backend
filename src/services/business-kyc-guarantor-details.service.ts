@@ -131,7 +131,7 @@ export class BusinessKycGuarantorDetailsService {
         isActive: true,
         isDeleted: false,
       },
-      include: ['companyPan', 'companyAadhar'],
+      include: ['companyPan', 'companyAadhar', 'businessKycGuarantorVerification'],
     });
   }
 
