@@ -29,7 +29,6 @@ export class BusinessKycGuarantor extends Entity {
 
   @property({
     type: 'string',
-    required: true,
   })
   CIN: string;
 

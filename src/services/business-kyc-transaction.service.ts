@@ -690,92 +690,96 @@ export class BusinessKycTransactionsService {
     }
   }
 
-  async advanceWorkflow(companyId: string) {
-    const tx = await this.businessKycRepository.dataSource.beginTransaction({
-      isolationLevel: IsolationLevel.READ_COMMITTED,
-    });
-    try {
-      const kyc = await this.businessKycRepository.findOne(
-        {
-          where: {
-            companyProfilesId: companyId, // ⭐ YOU MISSED THIS
-            isActive: true,
-            isDeleted: false,
-          },
+async advanceWorkflow(companyId: string) {
+  const tx = await this.businessKycRepository.dataSource.beginTransaction({
+    isolationLevel: IsolationLevel.READ_COMMITTED,
+  });
+
+  try {
+    const kyc = await this.businessKycRepository.findOne(
+      {
+        where: {
+          companyProfilesId: companyId,
+          isActive: true,
+          isDeleted: false,
         },
-        {transaction: tx},
+      },
+      {transaction: tx},
+    );
+
+    if (!kyc) {
+      throw new HttpErrors.NotFound('Business KYC not found');
+    }
+
+    await this.businessKycRepository.execute(
+      `SELECT id FROM business_kyc WHERE id = $1 FOR UPDATE`,
+      [kyc.id],
+      {transaction: tx},
+    );
+
+    const currentStatus =
+      await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
       );
 
-      if (!kyc) {
-        throw new HttpErrors.NotFound('Business KYC not found');
-      }
-
-      await this.businessKycRepository.execute(
-        `SELECT id FROM business_kyc WHERE id = $1 FOR UPDATE`,
-        [kyc.id],
-        {transaction: tx},
+    if (currentStatus.value?.toLowerCase() !== 'pending') {
+      throw new HttpErrors.BadRequest(
+        `Workflow can only advance from "pending". Current stage is "${currentStatus.value}".`,
       );
+    }
 
-      if (!kyc.businessKycStatusMasterId) {
-        throw new HttpErrors.BadRequest('KYC status not initialized');
-      }
-
-      const currentStatus = await this.statusService.fetchApplicationStatusById(
-        kyc.businessKycStatusMasterId,
-      );
-
-      const currentStage = currentStatus.value?.trim().toLowerCase();
-
-      if (currentStage !== 'pending') {
-        throw new HttpErrors.BadRequest(
-          `Workflow can only advance from "pending". Current stage is "${currentStatus.value}".`,
-        );
-      }
-
-      const nextStatus = await this.statusService.fetchNextStatus(
+    const nextStatus =
+      await this.statusService.fetchNextStatus(
         currentStatus.sequenceOrder,
       );
 
-      if (!nextStatus) {
-        throw new HttpErrors.BadRequest(
-          'Next workflow status is not configured.',
-        );
-      }
+    if (!nextStatus) {
+      throw new HttpErrors.BadRequest(
+        'Next workflow status is not configured.',
+      );
+    }
 
-      const nextStage = nextStatus.value?.trim().toLowerCase();
+    let agreements: any[] = [];
 
-      if (nextStage.includes('agreement')) {
-        await this.agreementService.createAgreements(
-          kyc.id!,
-          kyc.companyProfilesId,
-          tx,
-        );
-      }
-
-      await this.businessKycRepository.updateById(
+    if (nextStatus.value?.toLowerCase().includes('agreement')) {
+      await this.agreementService.createAgreements(
         kyc.id!,
-        {
-          businessKycStatusMasterId: nextStatus.id,
-          status: nextStatus.value,
-        },
-        {transaction: tx},
+        kyc.companyProfilesId,
+        tx,
       );
 
-      await tx.commit();
-
-      return {
-        success: true,
-        message: `Workflow moved to ${nextStatus.value}`,
-        currentStatus: {
-          id: nextStatus.id,
-          status: nextStatus.status,
-          value: nextStatus.value,
-          sequenceOrder: nextStatus.sequenceOrder,
-        },
-      };
-    } catch (err) {
-      await tx.rollback();
-      throw err;
+      agreements = await this.agreementService.fetchAgreements(
+        kyc.id!,
+        tx,
+      );
     }
+
+    await this.businessKycRepository.updateById(
+      kyc.id!,
+      {
+        businessKycStatusMasterId: nextStatus.id,
+        status: nextStatus.value,
+      },
+      {transaction: tx},
+    );
+
+    await tx.commit();
+
+    return {
+      success: true,
+      message: `Workflow moved to ${nextStatus.value}`,
+      currentStatus: {
+        id: nextStatus.id,
+        status: nextStatus.status,
+        value: nextStatus.value,
+        sequenceOrder: nextStatus.sequenceOrder,
+      },
+      documents: agreements,
+    };
+  } catch (err) {
+    await tx.rollback();
+    throw err;
   }
+}
+
 }
