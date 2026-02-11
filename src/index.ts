@@ -1,5 +1,5 @@
 import * as dotenv from 'dotenv';
-import {ApplicationConfig, AmplioBackendApplication} from './application';
+import {AmplioBackendApplication, ApplicationConfig} from './application';
 export * from './application';
 dotenv.config();
 
