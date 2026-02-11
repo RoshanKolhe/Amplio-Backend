@@ -31,28 +31,30 @@ export class Roc extends Entity {
   filingDate: Date;
 
   @property({
-    type: 'string',
-    required: true
+    type: 'boolean',
+    default: false,
   })
-  chequeNo: string;
+  isAccepted: boolean;
 
   @property({
     type: 'string',
-    required: true
   })
-  bankName: string;
+  chequeNo?: string;
 
   @property({
     type: 'string',
-    required: true,
   })
-  amount: string;
+  bankName?: string;
+
+  @property({
+    type: 'string',
+  })
+  amount?: string;
 
   @property({
     type: 'date',
-    required: true,
   })
-  date: Date;
+  date?: Date;
 
   @property({
     type: 'number',
@@ -107,7 +109,7 @@ export class Roc extends Entity {
   chargeFilingId: string;
 
   @belongsTo(() => Media)
-  backupSecurityId: string;
+  backupSecurityId?: string;
 
   constructor(data?: Partial<Roc>) {
     super(data);

@@ -51,7 +51,7 @@ export class CompaniesController {
     private sessionService: SessionService,
     @inject('service.AddressDetails.service')
     private addressDetailsService: AddressDetailsService,
-  ) {}
+  ) { }
 
   // fetch KYC application status...
   async getKycApplicationStatus(applicationId: string): Promise<string[]> {
@@ -723,10 +723,14 @@ export class CompaniesController {
   ): Promise<{
     success: boolean;
     message: string;
-    data: {
-      count: number;
-      profiles: CompanyProfiles[];
-    };
+    data: CompanyProfiles[];
+    count: {
+      totalCount: number;
+      totalRejected: number;
+      totalPending: number;
+      totalVerified: number;
+      totalUnderReview: number;
+    }
   }> {
     let rootWhere = {
       ...filter?.where,
@@ -767,17 +771,33 @@ export class CompaniesController {
       ],
     });
 
-    const totalCount = (
-      await this.companyProfilesRepository.count(filter?.where)
-    ).count;
+
+    const countFilter = {
+      isDeleted: false,
+    }
+
+    const totalCount = (await this.companyProfilesRepository.count(filter?.where)).count;
+
+    const totalRejected = (await this.kycApplicationsRepository.count({...countFilter, status: 3, })).count;
+
+    const totalPending = (await this.kycApplicationsRepository.count({...countFilter, status: 0, })).count;
+
+    const totalUnderReview = (await this.kycApplicationsRepository.count({...countFilter, status: 1, })).count;
+
+    const totalVerified = (await this.kycApplicationsRepository.count({...countFilter, status: 2, })).count;
+
 
     return {
       success: true,
       message: 'Company Profiles',
-      data: {
-        count: totalCount,
-        profiles: company,
-      },
+      data: company,
+      count: {
+        totalCount: totalCount,
+        totalPending: totalPending,
+        totalRejected: totalRejected,
+        totalUnderReview: totalUnderReview,
+        totalVerified: totalVerified,
+      }
     };
   }
 

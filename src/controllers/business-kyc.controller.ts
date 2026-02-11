@@ -329,7 +329,7 @@ export class BusinessKycController {
       );
 
       await this.businessKycGuarantorRepository.updateById(guarantorId, {
-        verifiedAt: true,
+        isExecutionDone: true,
       });
     }
 

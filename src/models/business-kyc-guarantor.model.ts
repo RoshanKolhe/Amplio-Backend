@@ -103,6 +103,12 @@ export class BusinessKycGuarantor extends Entity {
   reason?: string; // if rejection is there
 
   @property({
+    type: 'boolean',
+    default: false,
+  })
+  isExecutionDone: boolean;
+
+  @property({
     type: 'date',
   })
   verifiedAt?: Date;
