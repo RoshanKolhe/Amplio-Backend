@@ -38,3 +38,4 @@ export * from './business-kyc-guarantor-verification.repository';
 export * from './business-kyc-agreement.repository';
 export * from './business-kyc-document-type.repository';
 export * from './document-roles.repository';
+export * from './roc.repository';
