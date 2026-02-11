@@ -128,6 +128,20 @@ export class BusinessKycStateService {
       });
     }
 
+    if (currentStatus.sequenceOrder >= 11) {
+      completedSteps.push({
+        code: 'roc',
+        label: 'ROC',
+      });
+    }
+
+    if (currentStatus.sequenceOrder >= 12) {
+      completedSteps.push({
+        code: 'dpn',
+        label: 'DPN',
+      });
+    }
+
     /* -------------------- 6️⃣ Active step (UI view) -------------------- */
     let activeStep: {code: string; label: string} | null = null;
 
@@ -162,6 +176,16 @@ export class BusinessKycStateService {
         code: 'agreement',
         label: 'Agreement',
       };
+    } else if (currentStatus.value === 'roc') {
+      activeStep = {
+        code: 'roc',
+        label: 'ROC',
+      };
+    } else if (currentStatus.value === 'dpn') {
+      activeStep = {
+        code: 'dpn',
+        label: 'DPN',
+      };
     } else {
       // fallback (business_profile or any future step)
       activeStep = {
@@ -178,6 +202,14 @@ export class BusinessKycStateService {
 
     if (currentStatus.value === 'agreement') {
       currentStage = 'AGREEMENTS';
+    }
+
+    if (currentStatus.value === 'roc') {
+      currentStage = 'ROC';
+    }
+
+    if (currentStatus.value === 'dpn') {
+      currentStage = 'DPN';
     }
 
     if (currentStatus.value === 'completed') {

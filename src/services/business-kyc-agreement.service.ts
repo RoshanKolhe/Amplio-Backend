@@ -97,38 +97,6 @@ export class BusinessKycAgreementService {
     );
   }
 
-  /* ------------------------------------------------ */
-  /* ACCEPT SINGLE AGREEMENT */
-  /* ------------------------------------------------ */
-
-  // async acceptAgreement(agreementId: string, tx: Transaction) {
-  //   const agreement = await this.agreementRepo.findById(
-  //     agreementId,
-  //     undefined,
-  //     {transaction: tx},
-  //   );
-
-  //   if (!agreement) {
-  //     throw new HttpErrors.NotFound('Agreement not found');
-  //   }
-
-  //   if (agreement.status === 1) {
-  //     throw new HttpErrors.BadRequest('Agreement already finalized');
-  //   }
-
-  //   if (agreement.isAccepted) return;
-
-  //   await this.agreementRepo.updateById(
-  //     agreementId,
-  //     {isAccepted: true},
-  //     {transaction: tx},
-  //   );
-  // }
-
-  /* ------------------------------------------------ */
-  /* VALIDATE + FINAL APPROVE ALL AGREEMENTS */
-  /* ------------------------------------------------ */
-
   async finalizeAgreements(businessKycId: string, tx: Transaction) {
     const agreements = await this.agreementRepo.find(
       {where: {businessKycId}},
@@ -165,38 +133,6 @@ export class BusinessKycAgreementService {
     );
   }
 
-  // async updateAcceptanceByDocumentType(
-  //   businessKycId: string,
-  //   businessKycDocumentTypeId: string,
-  //   isAccepted: boolean,
-  //   reason: string,
-  //   tx: Transaction,
-  // ) {
-  //   const agreement = await this.agreementRepo.findOne(
-  //     {
-  //       where: {
-  //         businessKycId,
-  //         businessKycDocumentTypeId,
-  //       },
-  //     },
-  //     {transaction: tx},
-  //   );
-
-  //   if (!agreement) {
-  //     throw new HttpErrors.NotFound('Agreement not found');
-  //   }
-
-  //   // optional lock check
-  //   if (agreement.status === 1) {
-  //     throw new HttpErrors.BadRequest('Agreement already finalized');
-  //   }
-
-  //   await this.agreementRepo.updateById(
-  //     agreement.id,
-  //     {isAccepted, reason},
-  //     {transaction: tx},
-  //   );
-  // }
   async updateAcceptanceById(
     agreementId: string,
     isAccepted: boolean,
@@ -253,24 +189,54 @@ export class BusinessKycAgreementService {
   }
 
   async fetchNextPendingAgreement(businessKycId: string, tx: Transaction) {
-    return this.agreementRepo.findOne(
+    // ✅ Step 1 — get workflow order
+    const docTypes = await this.docTypeRepo.find(
       {
-        where: {
-          businessKycId,
-          isAccepted: false,
-          isActive: true,
-          isDeleted: false,
-        },
-        include: [
-          {
-            relation: 'businessKycDocumentType',
-            scope: {
-              fields: ['id', 'name', 'sequenceOrder'],
-            },
-          },
-        ],
+        where: {isActive: true, isDeleted: false},
+        order: ['sequenceOrder ASC'],
       },
       {transaction: tx},
     );
+
+    if (!docTypes.length) {
+      throw new HttpErrors.BadRequest('No document types configured');
+    }
+
+    // ✅ Step 2 — find first pending agreement
+    for (const doc of docTypes) {
+      const agreement = await this.agreementRepo.findOne(
+        {
+          where: {
+            businessKycId,
+            businessKycDocumentTypeId: doc.id,
+            isAccepted: false,
+            isActive: true,
+            isDeleted: false,
+          },
+          include: [
+            {
+              relation: 'businessKycDocumentType',
+              scope: {
+                fields: ['id', 'name', 'sequenceOrder'],
+              },
+            },
+          ],
+        },
+        {transaction: tx},
+      );
+
+      if (agreement) {
+        return agreement;
+      }
+    }
+
+    // ✅ none left
+    return null;
+  }
+
+  async getAgreementById(agreementId: string, tx: Transaction) {
+    return this.agreementRepo.findById(agreementId, undefined, {
+      transaction: tx,
+    });
   }
 }
