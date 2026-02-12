@@ -22,6 +22,7 @@ import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-detai
 import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
 import {BusinessKycAgreementService} from './business-kyc-agreement.service';
 import {BusinessKycRocService} from './business-kyc-roc.service';
+import {BusinessKycDpnService} from './business-kyc-dpn.service';
 
 export class BusinessKycTransactionsService {
   constructor(
@@ -54,6 +55,9 @@ export class BusinessKycTransactionsService {
 
     @inject('service.businessKycRocService.service')
     private rocService: BusinessKycRocService,
+
+    @inject('service.businessKycDpnService.service')
+    private dpnService: BusinessKycDpnService,
   ) {}
 
   /* ------------------------------------------------------------------ */
@@ -651,12 +655,6 @@ export class BusinessKycTransactionsService {
         throw new HttpErrors.NotFound('Business KYC not found');
       }
 
-      await this.businessKycRepository.execute(
-        `SELECT id FROM business_kyc WHERE id = $1 FOR UPDATE`,
-        [kyc.id],
-        {transaction: tx},
-      );
-
       if (!kyc.businessKycStatusMasterId) {
         throw new HttpErrors.BadRequest('KYC status not initialized');
       }
@@ -797,7 +795,7 @@ export class BusinessKycTransactionsService {
 
   async acceptRoc(userId: string) {
     const tx = await this.businessKycRepository.dataSource.beginTransaction({
-      isloationLevel: IsolationLevel.READ_COMMITTED,
+      isolationLevel: IsolationLevel.READ_COMMITTED,
     });
     try {
       const {kyc} = await this.resolveCompanyAndKyc(userId, tx);
@@ -817,7 +815,55 @@ export class BusinessKycTransactionsService {
 
       await this.rocService.createAndUpdateRoc(kyc.id!, {isAccepted: true}, tx);
 
-      await this.forceMoveToNextStatusDpn(userId, tx);
+      // await this.forceMoveToNextStatusDpn(userId, tx);
+      if (!kyc.businessKycStatusMasterId) {
+        throw new HttpErrors.BadRequest('KYC status not initialized');
+      }
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId,
+      );
+
+      const currentStage = currentStatus.value?.trim().toLowerCase();
+
+      if (currentStage !== 'roc') {
+        throw new HttpErrors.BadRequest(
+          `Workflow can only move forward from "roc". Current stage is "${currentStatus.value}".`,
+        );
+      }
+
+      const nextStatus = await this.statusService.fetchNextStatus(
+        currentStatus.sequenceOrder,
+      );
+
+      if (!nextStatus) {
+        throw new HttpErrors.BadRequest(
+          'Next workflow status is not configured.',
+        );
+      }
+
+      /* -------------------------------- */
+      /* UPDATE STATUS */
+      /* -------------------------------- */
+
+      await this.businessKycRepository.updateById(
+        kyc.id!,
+        {
+          businessKycStatusMasterId: nextStatus.id,
+          status: nextStatus.value,
+        },
+        {transaction: tx},
+      );
+
+      /* -------------------------------- */
+      /* CREATE DPN IF ENTERING DPN STAGE */
+      /* -------------------------------- */
+
+      const nextStage = nextStatus.value?.trim().toLowerCase();
+
+      if (nextStage.includes('dpn')) {
+        await this.dpnService.createDpn(kyc.id!, kyc.companyProfilesId, tx);
+      }
 
       await tx.commit();
 
@@ -866,6 +912,140 @@ export class BusinessKycTransactionsService {
     return {
       success: true,
       message: `Moved from ${currentStatus.value} → ${nextStatus.value}`,
+    };
+  }
+  /* ------------------------------------------------------------------ */
+  /* 12 Dpn */
+  /* ------------------------------------------------------------------ */
+
+  async updateDpn(
+    userId: string,
+    dpnId: string,
+    isAccepted: boolean,
+    reason: string,
+  ) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const {kyc, company} = await this.resolveCompanyAndKyc(userId);
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      if (currentStatus.value !== 'dpn') {
+        throw new HttpErrors.BadRequest(
+          `Cannot update dpn from ${currentStatus.value}`,
+        );
+      }
+
+      // ensure agreements exist
+      await this.dpnService.createDpn(kyc.id!, company.id, tx);
+
+      const agreement = await this.dpnService.getDpnById(dpnId, tx);
+
+      if (!agreement) {
+        throw new HttpErrors.NotFound('Agreement not found');
+      }
+
+      await this.dpnService.updateAcceptanceById(
+        dpnId,
+        isAccepted,
+        reason,
+        tx,
+      );
+
+      const allAccepted = await this.dpnService.isDpnAccepted(kyc.id!, tx);
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Agreement updated succesfully',
+        readyForEsign: allAccepted,
+      };
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  }
+
+  async fetchDpn(userId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+    try {
+      const {kyc, company} = await this.resolveCompanyAndKyc(userId);
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      if (currentStatus.value !== 'dpn') {
+        throw new HttpErrors.BadRequest(
+          `Dpn not available in ${currentStatus.value} stage`,
+        );
+      }
+
+      // ✅ create agreements safely
+      await this.dpnService.createDpn(kyc.id!, company.id, tx);
+
+      const agreements = await this.dpnService.fetchDpn(kyc.id!, tx);
+
+      await tx.commit();
+
+      return agreements;
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
+  async verifyOtpAndFinalizeDpn(userId: string, tx: Transaction) {
+    const {kyc} = await this.resolveCompanyAndKyc(userId, tx);
+
+    await this.dpnService.finalizeDpn(kyc.id!, tx);
+
+    if (!kyc.businessKycStatusMasterId) {
+      throw new HttpErrors.BadRequest('KYC status not initialized');
+    }
+
+    const currentStatus = await this.statusService.fetchApplicationStatusById(
+      kyc.businessKycStatusMasterId,
+    );
+
+    const currentStage = currentStatus.value?.trim().toLowerCase();
+
+    if (currentStage !== 'dpn') {
+      throw new HttpErrors.BadRequest(
+        `Workflow can only move forward from "dpn". Current stage is "${currentStatus.value}".`,
+      );
+    }
+
+    const nextStatus = await this.statusService.fetchNextStatus(
+      currentStatus.sequenceOrder,
+    );
+
+    if (!nextStatus) {
+      throw new HttpErrors.BadRequest(
+        'Next workflow status is not configured.',
+      );
+    }
+
+    await this.businessKycRepository.updateById(
+      kyc.id!,
+      {
+        businessKycStatusMasterId: nextStatus.id,
+        status: nextStatus.value,
+      },
+      {transaction: tx},
+    );
+
+    return {
+      success: true,
+      message: `DPN finalized and moved from ${currentStatus.value} → ${nextStatus.value}`,
     };
   }
 }

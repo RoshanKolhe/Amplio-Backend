@@ -731,6 +731,163 @@ export class BusinessKycController {
     return this.kycTxnService.acceptRoc(user.id);
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @patch('/business-kyc/dpn')
+  async updateDpn(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    user: UserProfile,
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['dpnId', 'isAccepted'],
+            properties: {
+              dpnId: {type: 'string'},
+              isAccepted: {type: 'boolean'},
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      dpnId: string;
+      isAccepted: boolean;
+      reason: string;
+    },
+  ) {
+    return this.kycTxnService.updateDpn(
+      user.id,
+      body.dpnId,
+      body.isAccepted,
+      body.reason ?? '',
+    );
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @get('/business-kyc/dpn')
+  async fetchDpns(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    user: UserProfile,
+  ) {
+    const agreements = await this.kycTxnService.fetchDpn(user.id);
+
+    return {
+      success: true,
+      data: agreements,
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @post('/auth/company-esign/dpn/verify-otp')
+  async verifyCompanyDpnOtp(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    currentUser: UserProfile,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['otp'],
+            properties: {
+              otp: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {otp: string},
+  ): Promise<{success: boolean; message: string}> {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const user = await this.usersRepository.findById(
+        currentUser.id,
+        undefined,
+        {transaction: tx},
+      );
+
+      if (!user?.email) {
+        throw new HttpErrors.BadRequest('User email not available');
+      }
+
+      const email = user.email.toLowerCase().trim();
+
+      const otpEntry = await this.otpRepository.findOne(
+        {
+          where: {
+            identifier: email,
+            type: 1,
+            isUsed: false,
+          },
+          order: ['createdAt DESC'],
+        },
+        {transaction: tx},
+      );
+
+      if (!otpEntry) {
+        throw new HttpErrors.BadRequest('OTP expired or not found');
+      }
+
+      if (otpEntry.attempts >= 3) {
+        throw new HttpErrors.BadRequest(
+          'Maximum attempts reached. Request a new OTP.',
+        );
+      }
+
+      if (new Date(otpEntry.expiresAt) < new Date()) {
+        await this.otpRepository.updateById(
+          otpEntry.id,
+          {isUsed: true},
+          {transaction: tx},
+        );
+
+        throw new HttpErrors.BadRequest('OTP expired');
+      }
+
+      if (otpEntry.otp !== body.otp) {
+        await this.otpRepository.updateById(
+          otpEntry.id,
+          {attempts: otpEntry.attempts + 1},
+          {transaction: tx},
+        );
+
+        throw new HttpErrors.BadRequest('Invalid OTP');
+      }
+
+      await this.otpRepository.updateById(
+        otpEntry.id,
+        {
+          isUsed: true,
+          expiresAt: new Date(),
+        },
+        {transaction: tx},
+      );
+
+      await this.kycTxnService.verifyOtpAndFinalizeDpn(
+        currentUser.id,
+        tx,
+      );
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'OTP verified and agreements approved successfully',
+      };
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
   // @authenticate('jwt')
   // @authorize({roles: ['company']})
   // @post('/business-kyc/roc-next-status')

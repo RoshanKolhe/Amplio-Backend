@@ -142,6 +142,20 @@ export class BusinessKycStateService {
       });
     }
 
+    if (currentStatus.sequenceOrder >= 13) {
+      completedSteps.push({
+        code: 'business_kyc_pending',
+        label: 'Business Kyc Pending',
+      });
+    }
+
+    if (currentStatus.sequenceOrder >= 13) {
+      completedSteps.push({
+        code: 'business_kyc_pending',
+        label: 'Business Kyc Pending',
+      });
+    }
+
     /* -------------------- 6️⃣ Active step (UI view) -------------------- */
     let activeStep: {code: string; label: string} | null = null;
 
@@ -186,6 +200,11 @@ export class BusinessKycStateService {
         code: 'dpn',
         label: 'DPN',
       };
+    } else if (currentStatus.value === 'business_kyc_pending') {
+      activeStep = {
+        code: 'business_kyc_pending',
+        label: 'Business KYC Pending',
+      };
     } else {
       // fallback (business_profile or any future step)
       activeStep = {
@@ -210,6 +229,10 @@ export class BusinessKycStateService {
 
     if (currentStatus.value === 'dpn') {
       currentStage = 'DPN';
+    }
+
+    if (currentStatus.value === 'business_kyc_pending') {
+      currentStage = 'BUSINESS_KYC_PENDING';
     }
 
     if (currentStatus.value === 'completed') {
