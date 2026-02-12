@@ -51,12 +51,6 @@ export class BusinessKycDocumentType extends Entity {
   description: string;
 
   @property({
-    type: 'number',
-    required: true,
-  })
-  sequenceOrder: number;
-
-  @property({
     type: 'string',
     required: true,
     jsonSchema: {

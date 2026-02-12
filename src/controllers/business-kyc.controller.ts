@@ -413,7 +413,7 @@ export class BusinessKycController {
 
   /* ------------------------------------------------------------------ */
   /* AGREEMENTS */
-  /* --------------------------------------------------- --------------- */
+  /* ------------------------------------------------------------------- */
 
   @authenticate('jwt')
   @authorize({roles: ['company']})
@@ -521,80 +521,6 @@ export class BusinessKycController {
     };
   }
 
-  // @authenticate('jwt')
-  // @authorize({roles: ['company']})
-  // @post('/auth/company-esign/verify-otp')
-  // async verifyCompanyOtp(
-  //   @inject(AuthenticationBindings.CURRENT_USER)
-  //   currentUser: UserProfile,
-  //   @requestBody({
-  //     content: {
-  //       'application/json': {
-  //         schema: {
-  //           type: 'object',
-  //           required: ['otp'],
-  //           properties: {
-  //             otp: {type: 'string'},
-  //           },
-  //         },
-  //       },
-  //     },
-  //   })
-  //   body: {otp: string},
-  // ): Promise<{success: boolean; message: string}> {
-  //   const user = await this.usersRepository.findById(currentUser.id);
-
-  //   if (!user?.email) {
-  //     throw new HttpErrors.BadRequest('User email not available');
-  //   }
-
-  //   const email = user.email.toLowerCase().trim();
-
-  //   const otpEntry = await this.otpRepository.findOne({
-  //     where: {
-  //       identifier: email,
-  //       type: 1,
-  //       isUsed: false,
-  //     },
-  //     order: ['createdAt DESC'],
-  //   });
-
-  //   if (!otpEntry) {
-  //     throw new HttpErrors.BadRequest('OTP expired or not found');
-  //   }
-
-  //   if (otpEntry.attempts >= 3) {
-  //     throw new HttpErrors.BadRequest(
-  //       'Maximum attempts reached. Request a new OTP.',
-  //     );
-  //   }
-
-  //   if (new Date(otpEntry.expiresAt) < new Date()) {
-  //     await this.otpRepository.updateById(otpEntry.id, {
-  //       isUsed: true,
-  //     });
-
-  //     throw new HttpErrors.BadRequest('OTP expired');
-  //   }
-
-  //   if (otpEntry.otp !== body.otp) {
-  //     await this.otpRepository.updateById(otpEntry.id, {
-  //       attempts: otpEntry.attempts + 1,
-  //     });
-
-  //     throw new HttpErrors.BadRequest('Invalid OTP');
-  //   }
-
-  //   await this.otpRepository.updateById(otpEntry.id, {
-  //     isUsed: true,
-  //     expiresAt: new Date(),
-  //   });
-
-  //   return {
-  //     success: true,
-  //     message: 'OTP verified successfully',
-  //   };
-  // }
   @authenticate('jwt')
   @authorize({roles: ['company']})
   @post('/auth/company-esign/verify-otp')
@@ -684,7 +610,7 @@ export class BusinessKycController {
         {transaction: tx},
       );
 
-      await this.kycTxnService.verifyOtpFinalizeAndMoveStatus(
+      await this.kycTxnService.finalizeAgreementsAndMoveNext(
         currentUser.id,
         tx,
       );
@@ -701,15 +627,9 @@ export class BusinessKycController {
     }
   }
 
-  // @authenticate('jwt')
-  // @authorize({roles: ['company']})
-  // @post('/business-kyc/agreement-next-status')
-  // async forceNextStatusRoc(
-  //   @inject(AuthenticationBindings.CURRENT_USER)
-  //   user: UserProfile,
-  // ) {
-  //   return this.kycTxnService.forceMoveToNextStatusRoc(user.id);
-  // }
+  /* ------------------------------------------------------------------ */
+  /* ROC */
+  /* ------------------------------------------------------------------- */
 
   @authenticate('jwt')
   @authorize({roles: ['company']})
@@ -730,6 +650,25 @@ export class BusinessKycController {
   ) {
     return this.kycTxnService.acceptRoc(user.id);
   }
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @get('/business-kyc/roc')
+  async fetchRoc(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    user: UserProfile,
+  ) {
+    const roc = await this.kycTxnService.fetchRoc(user.id);
+
+    return {
+      success: true,
+      data: roc,
+    };
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* DPN */
+  /* ------------------------------------------------------------------- */
 
   @authenticate('jwt')
   @authorize({roles: ['company']})
@@ -871,10 +810,7 @@ export class BusinessKycController {
         {transaction: tx},
       );
 
-      await this.kycTxnService.verifyOtpAndFinalizeDpn(
-        currentUser.id,
-        tx,
-      );
+      await this.kycTxnService.verifyOtpAndFinalizeDpn(currentUser.id, tx);
 
       await tx.commit();
 
@@ -887,14 +823,4 @@ export class BusinessKycController {
       throw err;
     }
   }
-
-  // @authenticate('jwt')
-  // @authorize({roles: ['company']})
-  // @post('/business-kyc/roc-next-status')
-  // async forceNextStatusDpn(
-  //   @inject(AuthenticationBindings.CURRENT_USER)
-  //   user: UserProfile,
-  // ) {
-  //   return this.kycTxnService.forceMoveToNextStatusDpn(user.id);
-  // }
 }

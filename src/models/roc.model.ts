@@ -1,6 +1,8 @@
 import {Entity, model, property, belongsTo} from '@loopback/repository';
 import {Media} from './media.model';
 import {BusinessKyc} from './business-kyc.model';
+import {BusinessKycDocumentType} from './business-kyc-document-type.model';
+import {CompanyProfiles} from './company-profiles.model';
 
 @model({
   settings: {
@@ -44,26 +46,6 @@ export class Roc extends Entity {
   isNashActivate: boolean;
 
   @property({
-    type: 'string',
-  })
-  chequeNo?: string;
-
-  @property({
-    type: 'string',
-  })
-  bankName?: string;
-
-  @property({
-    type: 'string',
-  })
-  amount?: string;
-
-  @property({
-    type: 'date',
-  })
-  date?: Date;
-
-  @property({
     type: 'number',
     required: false,
     jsonSchema: {
@@ -73,9 +55,14 @@ export class Roc extends Entity {
   mode?: number;
 
   @property({
-    type: 'string',
+    type: 'number',
+    required: true,
+    jsonSchema: {
+      enum: [0, 1, 2], // 0: pending, 1: approved, 2: rejected
+    },
+    default: 0,
   })
-  reason?: string;
+  status: number;
 
   @property({
     type: 'date',
@@ -120,6 +107,12 @@ export class Roc extends Entity {
 
   @belongsTo(() => BusinessKyc)
   businessKycId: string;
+
+  @belongsTo(() => BusinessKycDocumentType)
+  businessKycDocumentTypeId: string;
+
+  @belongsTo(() => CompanyProfiles)
+  companyProfilesId: string;
 
   constructor(data?: Partial<Roc>) {
     super(data);

@@ -9,6 +9,12 @@ import {
   BusinessKycRepository,
 } from '../repositories';
 
+const AGREEMENT_WORKFLOW = [
+  'sanction_letter',
+  'platform_agreement',
+  'deed_of_hypothecation',
+];
+
 @injectable({scope: BindingScope.TRANSIENT})
 export class BusinessKycAgreementService {
   constructor(
@@ -41,23 +47,40 @@ export class BusinessKycAgreementService {
 
     const docTypes = await this.docTypeRepo.find(
       {
-        where: {isActive: true, isDeleted: false},
-        order: ['sequenceOrder ASC'],
+        where: {
+          value: {inq: AGREEMENT_WORKFLOW},
+          isActive: true,
+          isDeleted: false,
+        },
       },
       {transaction: tx},
     );
 
+    console.log('WORKFLOW:', AGREEMENT_WORKFLOW);
+    console.log('FOUND DOC TYPES:', docTypes);
     if (!docTypes.length) {
       throw new HttpErrors.BadRequest('No document types configured');
     }
 
-    const agreements = docTypes.map(d => ({
+    const orderedDocTypes = AGREEMENT_WORKFLOW.map(workflowName => {
+      const doc = docTypes.find(d => d.value === workflowName);
+
+      if (!doc) {
+        throw new HttpErrors.BadRequest(
+          `Document type missing: ${workflowName}`,
+        );
+      }
+      return doc;
+    });
+
+    const agreements = orderedDocTypes.map((d, index) => ({
       businessKycId,
       companyProfilesId: companyId,
       businessKycDocumentTypeId: d.id,
       mediaId: d.fileTemplateId,
-      status: 0, // pending
+      status: 0,
       isAccepted: false,
+      sequenceOrder: index + 1,
     }));
 
     await this.agreementRepo.createAll(agreements, {
@@ -91,7 +114,7 @@ export class BusinessKycAgreementService {
             },
           },
         ],
-        order: ['createdAt ASC'], // fallback ordering
+        order: ['sequenceOrder ASC'],
       },
       {transaction: tx},
     );
@@ -189,48 +212,28 @@ export class BusinessKycAgreementService {
   }
 
   async fetchNextPendingAgreement(businessKycId: string, tx: Transaction) {
-    // ✅ Step 1 — get workflow order
-    const docTypes = await this.docTypeRepo.find(
+    const agreement = await this.agreementRepo.findOne(
       {
-        where: {isActive: true, isDeleted: false},
+        where: {
+          businessKycId,
+          isAccepted: false,
+          isActive: true,
+          isDeleted: false,
+        },
         order: ['sequenceOrder ASC'],
+        include: [
+          {
+            relation: 'businessKycDocumentType',
+          },
+          {relation: 'media'},
+        ],
       },
       {transaction: tx},
     );
 
-    if (!docTypes.length) {
-      throw new HttpErrors.BadRequest('No document types configured');
+    if (agreement) {
+      return agreement;
     }
-
-    // ✅ Step 2 — find first pending agreement
-    for (const doc of docTypes) {
-      const agreement = await this.agreementRepo.findOne(
-        {
-          where: {
-            businessKycId,
-            businessKycDocumentTypeId: doc.id,
-            isAccepted: false,
-            isActive: true,
-            isDeleted: false,
-          },
-          include: [
-            {
-              relation: 'businessKycDocumentType',
-              scope: {
-                fields: ['id', 'name', 'sequenceOrder'],
-              },
-            },
-          ],
-        },
-        {transaction: tx},
-      );
-
-      if (agreement) {
-        return agreement;
-      }
-    }
-
-    // ✅ none left
     return null;
   }
 

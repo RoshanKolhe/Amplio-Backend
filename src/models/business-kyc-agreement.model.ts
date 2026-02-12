@@ -40,15 +40,6 @@ export class BusinessKycAgreement extends Entity {
   })
   status: number;
 
-  // @property({
-  //   type: 'number',
-  //   required: true,
-  //   jsonSchema: {
-  //     enum: [0, 1],
-  //   },
-  // })
-  // mode: number;
-
   @property({
     type: 'string',
   })
@@ -59,6 +50,12 @@ export class BusinessKycAgreement extends Entity {
     default: false,
   })
   isAccepted?: boolean;
+
+  @property({
+    type: 'number',
+    required: false,
+  })
+  sequenceOrder: number;
 
   @property({
     type: 'date',

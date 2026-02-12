@@ -3,7 +3,10 @@ import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {Transaction} from 'loopback-datasource-juggler';
 
-import {RocRepository} from '../repositories';
+import {
+  BusinessKycDocumentTypeRepository,
+  RocRepository,
+} from '../repositories';
 import {BusinessKycRepository} from '../repositories';
 import {Roc} from '../models';
 
@@ -12,6 +15,9 @@ export class BusinessKycRocService {
   constructor(
     @repository(RocRepository)
     private rocRepository: RocRepository,
+
+    @repository(BusinessKycDocumentTypeRepository)
+    private docTypeRepo: BusinessKycDocumentTypeRepository,
 
     @repository(BusinessKycRepository)
     private businessKycRepository: BusinessKycRepository,
@@ -67,6 +73,47 @@ export class BusinessKycRocService {
     };
   }
 
+  async createRoc(businessKycId: string, companyId: string, tx: Transaction) {
+    const existing = await this.rocRepository.findOne(
+      {where: {businessKycId}},
+      {transaction: tx},
+    );
+
+    if (existing) return existing; // idempotent
+
+    const docType = await this.docTypeRepo.findOne(
+      {
+        where: {
+          value: 'roc', // ⭐ your master value
+          isActive: true,
+          isDeleted: false,
+        },
+      },
+      {transaction: tx},
+    );
+
+    if (!docType) {
+      throw new HttpErrors.BadRequest('ROC document type is not configured');
+    }
+
+    if (!docType.fileTemplateId) {
+      throw new HttpErrors.BadRequest('ROC template file is missing');
+    }
+
+    return this.rocRepository.create(
+      {
+        businessKycId,
+        companyProfilesId: companyId,
+        businessKycDocumentTypeId: docType.id,
+        chargeFilingId: docType.fileTemplateId, // ⭐ template
+        status: 0,
+        isAccepted: false,
+        isNashActivate: false,
+      },
+      {transaction: tx},
+    );
+  }
+
   async fetchByKyc(businessKycId: string) {
     const roc = await this.rocRepository.findOne({
       where: {businessKycId},
@@ -82,6 +129,33 @@ export class BusinessKycRocService {
     }
 
     return roc;
+  }
+
+  async fetchRoc(businessKycId: string, tx?: Transaction) {
+    return this.rocRepository.find(
+      {
+        where: {
+          businessKycId,
+          isActive: true,
+          isDeleted: false,
+        },
+        include: [
+          {
+            relation: 'businessKycDocumentType',
+            scope: {
+              fields: ['id', 'name', 'description', 'sequenceOrder'],
+            },
+          },
+          {
+            relation: 'chargeFiling',
+            scope: {
+              fields: ['id', 'fileUrl', 'fileName'],
+            },
+          },
+        ],
+      },
+      {transaction: tx},
+    );
   }
 
   async findOrFailByKycId(businessKycId: string, tx?: Transaction) {

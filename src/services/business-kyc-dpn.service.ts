@@ -37,7 +37,7 @@ export class BusinessKycDpnService {
     const docType = await this.docTypeRepo.findOne(
       {
         where: {
-          sequenceOrder: 4,
+          value: 'demand_promissory_note',
           isActive: true,
           isDeleted: false,
         },
