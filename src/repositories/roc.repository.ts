@@ -1,9 +1,10 @@
 import {Constructor, inject, Getter} from '@loopback/core';
 import {DefaultCrudRepository, repository, BelongsToAccessor} from '@loopback/repository';
 import {AmplioDataSource} from '../datasources';
-import {Roc, RocRelations, Media} from '../models';
+import {Roc, RocRelations, Media, BusinessKyc} from '../models';
 import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
 import {MediaRepository} from './media.repository';
+import {BusinessKycRepository} from './business-kyc.repository';
 
 export class RocRepository extends TimeStampRepositoryMixin<
   Roc,
@@ -21,10 +22,14 @@ export class RocRepository extends TimeStampRepositoryMixin<
 
   public readonly backupSecurity: BelongsToAccessor<Media, typeof Roc.prototype.id>;
 
+  public readonly businessKyc: BelongsToAccessor<BusinessKyc, typeof Roc.prototype.id>;
+
   constructor(
-    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>,
+    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('BusinessKycRepository') protected businessKycRepositoryGetter: Getter<BusinessKycRepository>,
   ) {
     super(Roc, dataSource);
+    this.businessKyc = this.createBelongsToAccessorFor('businessKyc', businessKycRepositoryGetter,);
+    this.registerInclusionResolver('businessKyc', this.businessKyc.inclusionResolver);
     this.backupSecurity = this.createBelongsToAccessorFor('backupSecurity', mediaRepositoryGetter,);
     this.registerInclusionResolver('backupSecurity', this.backupSecurity.inclusionResolver);
     this.chargeFiling = this.createBelongsToAccessorFor('chargeFiling', mediaRepositoryGetter,);

@@ -11,6 +11,7 @@ import {BusinessKycAuditedFinancials} from './business-kyc-audited-financials.mo
 import {BusinessKycGuarantor} from './business-kyc-guarantor.model';
 import {BusinessKycCollateralAssets} from './business-kyc-collateral-assets.model';
 import {BusinessKycAgreement} from './business-kyc-agreement.model';
+import {BusinessKycDpn} from './business-kyc-dpn.model';
 
 @model({
   settings: {
@@ -215,6 +216,9 @@ export class CompanyProfiles extends Entity {
 
   @hasMany(() => BusinessKycAgreement)
   businessKycAgreements: BusinessKycAgreement[];
+
+  @hasOne(() => BusinessKycDpn)
+  businessKycDpn: BusinessKycDpn;
 
   constructor(data?: Partial<CompanyProfiles>) {
     super(data);

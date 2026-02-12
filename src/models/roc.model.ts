@@ -1,5 +1,6 @@
 import {Entity, model, property, belongsTo} from '@loopback/repository';
 import {Media} from './media.model';
+import {BusinessKyc} from './business-kyc.model';
 
 @model({
   settings: {
@@ -20,21 +21,27 @@ export class Roc extends Entity {
 
   @property({
     type: 'string',
-    required: true
+    required: false,
   })
-  serviceRequestNo: string;
+  serviceRequestNo?: string;
 
   @property({
     type: 'date',
-    required: true
+    required: false,
   })
-  filingDate: Date;
+  filingDate?: Date;
 
   @property({
     type: 'boolean',
     default: false,
   })
   isAccepted: boolean;
+
+  @property({
+    type: 'boolean',
+    default: false,
+  })
+  isNashActivate: boolean;
 
   @property({
     type: 'string',
@@ -58,12 +65,12 @@ export class Roc extends Entity {
 
   @property({
     type: 'number',
-    required: true,
+    required: false,
     jsonSchema: {
       enum: [0, 1],
     },
   })
-  mode: number;
+  mode?: number;
 
   @property({
     type: 'string',
@@ -106,10 +113,13 @@ export class Roc extends Entity {
   deletedAt?: Date;
 
   @belongsTo(() => Media)
-  chargeFilingId: string;
+  chargeFilingId?: string;
 
   @belongsTo(() => Media)
   backupSecurityId?: string;
+
+  @belongsTo(() => BusinessKyc)
+  businessKycId: string;
 
   constructor(data?: Partial<Roc>) {
     super(data);

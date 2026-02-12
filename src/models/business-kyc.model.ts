@@ -7,6 +7,8 @@ import {BusinessKycStatusMaster} from './business-kyc-status-master.model';
 import {CompanyProfiles} from './company-profiles.model';
 import {BusinessKycAuditedFinancials} from './business-kyc-audited-financials.model';
 import {BusinessKycAgreement} from './business-kyc-agreement.model';
+import {Roc} from './roc.model';
+import {BusinessKycDpn} from './business-kyc-dpn.model';
 
 @model({
   settings: {
@@ -90,6 +92,12 @@ export class BusinessKyc extends Entity {
 
   @hasOne(() => BusinessKycAgreement)
   businessKycAgreement: BusinessKycAgreement;
+
+  @hasOne(() => Roc)
+  roc: Roc;
+
+  @hasOne(() => BusinessKycDpn)
+  businessKycDpn: BusinessKycDpn;
   // @property({
   //   type: 'string',
   // })

@@ -713,11 +713,31 @@ export class BusinessKycController {
 
   @authenticate('jwt')
   @authorize({roles: ['company']})
-  @post('/business-kyc/roc-next-status')
-  async forceNextStatusDpn(
+  @patch('/business-kyc/roc/nash')
+  async activateNash(
     @inject(AuthenticationBindings.CURRENT_USER)
     user: UserProfile,
   ) {
-    return this.kycTxnService.forceMoveToNextStatusDpn(user.id);
+    return this.kycTxnService.activateNash(user.id);
   }
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @patch('/business-kyc/roc/accept')
+  async acceptRoc(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    user: UserProfile,
+  ) {
+    return this.kycTxnService.acceptRoc(user.id);
+  }
+
+  // @authenticate('jwt')
+  // @authorize({roles: ['company']})
+  // @post('/business-kyc/roc-next-status')
+  // async forceNextStatusDpn(
+  //   @inject(AuthenticationBindings.CURRENT_USER)
+  //   user: UserProfile,
+  // ) {
+  //   return this.kycTxnService.forceMoveToNextStatusDpn(user.id);
+  // }
 }

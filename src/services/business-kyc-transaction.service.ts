@@ -21,6 +21,7 @@ import {BusinessKycCollateralAssetsService} from './business-kyc-collateral-asse
 import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
 import {BusinessKycAgreementService} from './business-kyc-agreement.service';
+import {BusinessKycRocService} from './business-kyc-roc.service';
 
 export class BusinessKycTransactionsService {
   constructor(
@@ -50,6 +51,9 @@ export class BusinessKycTransactionsService {
 
     @inject('service.businessKycAgreementService.service')
     private agreementService: BusinessKycAgreementService,
+
+    @inject('service.businessKycRocService.service')
+    private rocService: BusinessKycRocService,
   ) {}
 
   /* ------------------------------------------------------------------ */
@@ -620,13 +624,7 @@ export class BusinessKycTransactionsService {
   }
 
   async verifyOtpAndFinalizeAgreements(userId: string, tx: Transaction) {
-    const {kyc} = await this.resolveCompanyAndKyc(userId);
-
-    await this.businessKycRepository.execute(
-      `SELECT id FROM business_kyc WHERE id = $1 FOR UPDATE`,
-      [kyc.id],
-      {transaction: tx},
-    );
+    const {kyc} = await this.resolveCompanyAndKyc(userId, tx);
 
     await this.agreementService.finalizeAgreements(kyc.id!, tx);
 
@@ -761,55 +759,113 @@ export class BusinessKycTransactionsService {
 
     await this.forceMoveToNextStatusRoc(userId, tx);
   }
-
-  async forceMoveToNextStatusDpn(userId: string) {
+  /* ------------------------------------------------------------------ */
+  /* 11 Roc */
+  /* ------------------------------------------------------------------ */
+  async activateNash(userId: string) {
     const tx = await this.businessKycRepository.dataSource.beginTransaction({
       isolationLevel: IsolationLevel.READ_COMMITTED,
     });
 
     try {
-      // ✅ SAME pattern as updateRoc
-      const {kyc} = await this.resolveCompanyAndKyc(userId);
+      const {kyc} = await this.resolveCompanyAndKyc(userId, tx);
 
-      const currentStatus = await this.statusService.fetchApplicationStatusById(
-        kyc.businessKycStatusMasterId!,
-      );
+      const roc = await this.rocService.findOrFailByKycId(kyc.id!, tx);
 
-      const currentStage = currentStatus.value?.trim().toLowerCase();
-
-      // ✅ allow ONLY from roc
-      if (currentStage !== 'roc') {
-        throw new HttpErrors.BadRequest(
-          `Workflow can only move forward from "roc". Current stage is "${currentStatus.value}".`,
-        );
+      if (roc?.isNashActivate) {
+        await tx.rollback();
+        return {message: 'Nash already activated'};
       }
 
-      const nextStatus = await this.statusService.fetchNextStatus(
-        currentStatus.sequenceOrder,
-      );
-
-      if (!nextStatus) {
-        throw new HttpErrors.BadRequest('No next status configured');
-      }
-
-      await this.businessKycRepository.updateById(
+      await this.rocService.createAndUpdateRoc(
         kyc.id!,
-        {
-          businessKycStatusMasterId: nextStatus.id,
-          status: nextStatus.value,
-        },
-        {transaction: tx},
+        {isNashActivate: true},
+        tx,
       );
 
       await tx.commit();
 
       return {
         success: true,
-        message: `Moved from ${currentStatus.value} → ${nextStatus.value}`,
+        message: 'Nash activated successfully',
       };
     } catch (err) {
       await tx.rollback();
       throw err;
     }
+  }
+
+  async acceptRoc(userId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isloationLevel: IsolationLevel.READ_COMMITTED,
+    });
+    try {
+      const {kyc} = await this.resolveCompanyAndKyc(userId, tx);
+
+      const roc = await this.rocService.findOrFailByKycId(kyc.id!, tx);
+
+      if (!roc?.isNashActivate) {
+        throw new HttpErrors.BadRequest(
+          'Please activate Nash before accepting ROC.',
+        );
+      }
+
+      if (roc.isAccepted) {
+        await tx.rollback();
+        return {message: 'ROC already accepted'};
+      }
+
+      await this.rocService.createAndUpdateRoc(kyc.id!, {isAccepted: true}, tx);
+
+      await this.forceMoveToNextStatusDpn(userId, tx);
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'ROC accepted and moved to next stage',
+      };
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
+  async forceMoveToNextStatusDpn(userId: string, tx: Transaction) {
+    const {kyc} = await this.resolveCompanyAndKyc(userId, tx);
+
+    const currentStatus = await this.statusService.fetchApplicationStatusById(
+      kyc.businessKycStatusMasterId!,
+    );
+
+    const currentStage = currentStatus.value?.trim().toLowerCase();
+
+    if (currentStage !== 'roc') {
+      throw new HttpErrors.BadRequest(
+        `Workflow can only move forward from "roc". Current stage is "${currentStatus.value}".`,
+      );
+    }
+
+    const nextStatus = await this.statusService.fetchNextStatus(
+      currentStatus.sequenceOrder,
+    );
+
+    if (!nextStatus) {
+      throw new HttpErrors.BadRequest('No next status configured');
+    }
+
+    await this.businessKycRepository.updateById(
+      kyc.id!,
+      {
+        businessKycStatusMasterId: nextStatus.id,
+        status: nextStatus.value,
+      },
+      {transaction: tx},
+    );
+
+    return {
+      success: true,
+      message: `Moved from ${currentStatus.value} → ${nextStatus.value}`,
+    };
   }
 }
