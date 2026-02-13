@@ -140,7 +140,7 @@ export class AmplioBackendApplication extends BootMixin(
     );
     this.bind('service.businessKycDpnService.service').toClass(
       BusinessKycDpnService
-    )
+    );
   }
 
   protected configureFileUpload(destination?: string) {

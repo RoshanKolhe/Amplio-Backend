@@ -16,13 +16,15 @@ import {
 } from '../repositories';
 
 import {BusinessKycStatusService} from './businees-kyc-status.service';
+import {BusinessKycAgreementService} from './business-kyc-agreement.service';
 import {BusinessKycAuditedFinancialsService} from './business-kyc-audited-financials.service';
 import {BusinessKycCollateralAssetsService} from './business-kyc-collateral-assets.service';
+import {BusinessKycDpnService} from './business-kyc-dpn.service';
 import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
-import {BusinessKycAgreementService} from './business-kyc-agreement.service';
 import {BusinessKycRocService} from './business-kyc-roc.service';
-import {BusinessKycDpnService} from './business-kyc-dpn.service';
+import generateGuarantorVerificationEmailTemplate from '../template/email-verification-template';
+import {EmailService} from './email.service';
 
 export class BusinessKycTransactionsService {
   constructor(
@@ -58,7 +60,10 @@ export class BusinessKycTransactionsService {
 
     @inject('service.businessKycDpnService.service')
     private dpnService: BusinessKycDpnService,
-  ) {}
+
+     @inject('services.email.send')
+    public emailService: EmailService,
+  ) { }
 
   /* ------------------------------------------------------------------ */
   /* 🔒 COMMON HELPERS */
@@ -160,6 +165,84 @@ export class BusinessKycTransactionsService {
     };
   }
 
+  async approveKyc(companyId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const kyc = await this.businessKycRepository.findOne(
+        {
+          where: {
+            companyProfilesId: companyId,
+            isActive: true,
+            isDeleted: false,
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!kyc) {
+        throw new HttpErrors.NotFound('Business KYC not found');
+      }
+
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        kyc.businessKycStatusMasterId!,
+      );
+
+      const currentStage = currentStatus.value?.trim().toLowerCase();
+
+      if (currentStage !== 'business_kyc_pending') {
+        throw new HttpErrors.BadRequest(
+          `KYC can only be approved from business kyc pending stage. Current stage is "${currentStatus.value}".`,
+        );
+      }
+
+      await this.companyProfileRepository.updateById(
+        companyId,
+        {
+          isBusinessKycComplete: true,
+        },
+        {transaction: tx},
+      );
+
+      // const nextStatus = await this.statusService.fetchNextStatus(
+      //   currentStatus.sequenceOrder,
+      // );
+
+      // if (nextStatus) {
+      //   await this.businessKycRepository.updateById(
+      //     kyc.id!,
+      //     {
+      //       businessKycStatusMasterId: nextStatus.id,
+      //       status: nextStatus.value,
+      //     },
+      //     {transaction: tx},
+      //   );
+      // }
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'KYC Approved Successfully',
+        isBusinessKycComplete: true,
+        // currentStatus: nextStatus
+        //   ? {
+        //       id: nextStatus.id,
+        //       status: nextStatus.status,
+        //       value: nextStatus.value,
+        //       sequenceOrder: nextStatus.sequenceOrder,
+        //     }
+        //   : undefined,
+      };
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
   /* ------------------------------------------------------------------ */
   /* 1️⃣ PROFILE DETAILS */
   /* ------------------------------------------------------------------ */
@@ -247,7 +330,7 @@ export class BusinessKycTransactionsService {
         auditedFinancials,
         tx,
       );
-      
+
       const submittedCategory = auditedFinancials[0].category;
 
       // Get current status
@@ -322,7 +405,20 @@ export class BusinessKycTransactionsService {
           tx,
         );
 
+      const template = generateGuarantorVerificationEmailTemplate({
+        guarantorName: guarantor.fullName,
+        verificationLink: verificationUrl,
+        businessName: guarantor.guarantorCompanyName,
+      });
+
+      await this.emailService.sendMail({
+        to: guarantor.email,
+        subject: template.subject,
+        html: template.html,
+      });
+
       await tx.commit();
+
       return {guarantor, verificationUrl};
     } catch (e) {
       await tx.rollback();

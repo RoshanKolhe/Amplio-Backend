@@ -12,12 +12,14 @@ import {
   BusinessKycRepository,
   CompanyProfilesRepository,
 } from '../repositories';
+import {BusinessKycAgreementService} from '../services/business-kyc-agreement.service';
 import {BusinessKycAuditedFinancialsService} from '../services/business-kyc-audited-financials.service';
 import {BusinessKycCollateralAssetsService} from '../services/business-kyc-collateral-assets.service';
 import {BusinessKycGuarantorDetailsService} from '../services/business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from '../services/business-kyc-profile-details.service';
 import {BusinessKycTransactionsService} from '../services/business-kyc-transaction.service';
-import {BusinessKycAgreementService} from '../services/business-kyc-agreement.service';
+import {BusinessKycDpnService} from '../services/business-kyc-dpn.service';
+import {BusinessKycRocService} from '../services/business-kyc-roc.service';
 
 export class BusinessKycSuperAdminController {
   constructor(
@@ -37,6 +39,11 @@ export class BusinessKycSuperAdminController {
     private kycTxnService: BusinessKycTransactionsService,
     @inject('service.businessKycAgreementService.service')
     private businessKycAgreementService: BusinessKycAgreementService,
+    @inject('service.businessKycDpnService.service')
+    private businessKycDpnService: BusinessKycDpnService,
+        @inject('service.businessKycRocService.service')
+    private businessKycRocService: BusinessKycRocService,
+
   ) { }
 
   @authenticate('jwt')
@@ -285,6 +292,105 @@ export class BusinessKycSuperAdminController {
     };
   }
 
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/company-profiles/{companyId}/dpn-details')
+  async fetchCompanyDpnDetails(
+    @param.path.string('companyId') companyId: string,
+  ): Promise<{success: boolean; message: string; data: object}> {
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        id: companyId,
+        isDeleted: false,
+      },
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company not found');
+    }
+
+    const businessKyc = await this.businessKycRepository.findOne({
+      where: {
+        companyProfilesId: companyProfile.id,
+        isActive: true,
+        isDeleted: false,
+      },
+    });
+
+    if (!businessKyc) {
+      return {
+        success: true,
+        message: 'No Business KYC found',
+        data: [],
+      };
+    }
+
+    if (!businessKyc.id) {
+      throw new HttpErrors.InternalServerError('Business KYC ID is missing');
+    }
+
+    const businessKycProfile =
+      await this.businessKycDpnService.fetchDpn(
+        businessKyc.id,
+      );
+
+    return {
+      success: true,
+      message: 'DPN details fetched successfully',
+      data: businessKycProfile,
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/company-profiles/{companyId}/roc-details')
+  async fetchCompanyRocDetails(
+    @param.path.string('companyId') companyId: string,
+  ): Promise<{success: boolean; message: string; data: object}> {
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        id: companyId,
+        isDeleted: false,
+      },
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company not found');
+    }
+
+    const businessKyc = await this.businessKycRepository.findOne({
+      where: {
+        companyProfilesId: companyProfile.id,
+        isActive: true,
+        isDeleted: false,
+      },
+    });
+
+    if (!businessKyc) {
+      return {
+        success: true,
+        message: 'No Business KYC found',
+        data: [],
+      };
+    }
+
+    if (!businessKyc.id) {
+      throw new HttpErrors.InternalServerError('Business KYC ID is missing');
+    }
+
+    const businessKycProfile =
+      await this.businessKycRocService.fetchRoc(
+        businessKyc.id,
+      );
+
+    return {
+      success: true,
+      message: 'Roc details fetched successfully',
+      data: businessKycProfile,
+    };
+  }
+
   // Business Kyc Approvel Apis //
 
   @authenticate('jwt')
@@ -447,4 +553,19 @@ export class BusinessKycSuperAdminController {
 
     return this.kycTxnService.advanceWorkflow(companyId);
   }
+
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/company-profiles/{companyId}/final-kyc-verification')
+  async finalKycVerification(
+    @param.path.string('companyId') companyId: string,
+  ) {
+    if (!companyId) {
+      throw new HttpErrors.BadRequest('companyId is required');
+    }
+
+    return this.kycTxnService.approveKyc(companyId);
+  }
+
 }

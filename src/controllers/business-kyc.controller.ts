@@ -27,6 +27,7 @@ import {
   OtpRepository,
   UsersRepository,
 } from '../repositories';
+import {BusinessKycAuditedFinancialsService} from '../services/business-kyc-audited-financials.service';
 import {BusinessKycGuarantorDetailsService} from '../services/business-kyc-guarantor-details.service';
 import {BusinessKycStateService} from '../services/business-kyc-state.service';
 import {BusinessKycStepDataService} from '../services/business-kyc-step-data.service';
@@ -58,9 +59,11 @@ export class BusinessKycController {
     private businessKycStateService: BusinessKycStateService,
     @inject('service.businessKycStepDataService')
     private businessKycStepDataService: BusinessKycStepDataService,
+    @inject('service.businessKycAuditedFinancialsService.service')
+    private businessKycAuditedFinancialsService: BusinessKycAuditedFinancialsService,
     @inject('services.rbac')
     public rbacService: RbacService,
-  ) {}
+  ) { }
 
   /* ------------------------------------------------------------------ */
   /* START KYC */
@@ -281,6 +284,48 @@ export class BusinessKycController {
     return {
       success: true,
       data: guarantors,
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @get('/business-kyc/financials-details')
+  async getFinancialsDetails(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    currentUser: UserProfile,
+  ) {
+    const companyProfile = await this.companyProfileRepository.findOne({
+      where: {
+        usersId: currentUser.id,
+        isActive: true,
+        isDeleted: false,
+      },
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company profile not found');
+    }
+
+    const kyc = await this.businessKycRepository.findOne({
+      where: {
+        companyProfilesId: companyProfile.id,
+        isActive: true,
+        isDeleted: false,
+      },
+    });
+
+    if (!kyc) {
+      throw new HttpErrors.NotFound('Business KYC not started');
+    }
+
+    const financials =
+      await this.businessKycAuditedFinancialsService.fetchAuditedFinancials(
+        kyc.id!,
+      );
+
+    return {
+      success: true,
+      data: financials,
     };
   }
 

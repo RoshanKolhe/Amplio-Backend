@@ -1,7 +1,7 @@
 const SITE_SETTINGS = {
   email: {
     type: 'smtp',
-    host: 'smtp.hostinger.com',
+    host: 'smtp.gmail.com',
     secure: true,
     port: 465,
     tls: {

@@ -3,12 +3,12 @@ import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {Transaction} from 'loopback-datasource-juggler';
 
+import {Roc} from '../models';
 import {
   BusinessKycDocumentTypeRepository,
+  BusinessKycRepository,
   RocRepository,
 } from '../repositories';
-import {BusinessKycRepository} from '../repositories';
-import {Roc} from '../models';
 
 @injectable()
 export class BusinessKycRocService {
@@ -21,7 +21,7 @@ export class BusinessKycRocService {
 
     @repository(BusinessKycRepository)
     private businessKycRepository: BusinessKycRepository,
-  ) {}
+  ) { }
   async createAndUpdateRoc(
     businessKycId: string,
     payload: Partial<Roc>,
@@ -106,7 +106,7 @@ export class BusinessKycRocService {
         companyProfilesId: companyId,
         businessKycDocumentTypeId: docType.id,
         chargeFilingId: docType.fileTemplateId, // ⭐ template
-        status: 0,
+        status: 1,
         isAccepted: false,
         isNashActivate: false,
       },

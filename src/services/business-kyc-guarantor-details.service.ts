@@ -2,7 +2,7 @@
 import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
-import {BusinessKycGuarantor} from '../models';
+import {BusinessKycGuarantor, BusinessKycGuarantorVerification} from '../models';
 import {
   BusinessKycGuarantorRepository,
   BusinessKycGuarantorVerificationRepository,
@@ -122,18 +122,57 @@ export class BusinessKycGuarantorDetailsService {
   /**
    * ✅ GET all guarantors for a business KYC
    */
+  private getVerificationStatus(
+    verification?: BusinessKycGuarantorVerification,
+  ) {
+
+    if (!verification) return 0;
+
+    const now = new Date();
+
+    if (verification.isVerified) {
+      return 1; // Verified
+    }
+
+    if (verification.expiresAt && verification.expiresAt < now) {
+      return 2; // Expired
+    }
+
+    return 0; // Pending
+  }
+
+
+
   async getGuarantorsByBusinessKycId(
     businessKycId: string,
-  ): Promise<BusinessKycGuarantor[]> {
-    return this.businessKycGuarantorRepository.find({
+  ): Promise<any[]> {
+
+    const guarantors = await this.businessKycGuarantorRepository.find({
       where: {
         businessKycId,
         isActive: true,
         isDeleted: false,
       },
-      include: ['companyPan', 'companyAadhar', 'businessKycGuarantorVerification'],
+      include: [
+        'companyPan',
+        'companyAadhar',
+        'businessKycGuarantorVerification',
+      ],
+    });
+
+    return guarantors.map(g => {
+      const verification = g.businessKycGuarantorVerification;
+
+      const verificationStatus =
+        this.getVerificationStatus(verification);
+
+      return {
+        ...g,
+        verificationStatus,
+      };
     });
   }
+
 
   async countGuarantors(businessKycId: string, tx: any): Promise<number> {
     return this.businessKycGuarantorRepository
