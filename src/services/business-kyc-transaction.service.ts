@@ -11,6 +11,7 @@ import {
 
 import {
   BusinessKycGuarantorRepository,
+  BusinessKycGuarantorVerificationRepository,
   BusinessKycRepository,
   CompanyProfilesRepository,
 } from '../repositories';
@@ -33,6 +34,9 @@ export class BusinessKycTransactionsService {
 
     @repository(BusinessKycGuarantorRepository)
     private businessKycGuarantorRepository: BusinessKycGuarantorRepository,
+
+    @repository(BusinessKycGuarantorVerificationRepository)
+    private businessKycGuarantorVerificationRepository: BusinessKycGuarantorVerificationRepository,
 
     @repository(CompanyProfilesRepository)
     private companyProfileRepository: CompanyProfilesRepository,
@@ -61,7 +65,7 @@ export class BusinessKycTransactionsService {
     @inject('service.businessKycDpnService.service')
     private dpnService: BusinessKycDpnService,
 
-     @inject('services.email.send')
+    @inject('services.email.send')
     public emailService: EmailService,
   ) { }
 
@@ -425,6 +429,77 @@ export class BusinessKycTransactionsService {
       throw e;
     }
   }
+
+  async resendGuarantorVerification(guarantorId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const guarantor =
+        await this.businessKycGuarantorRepository.findById(guarantorId);
+
+      if (!guarantor) {
+        throw new HttpErrors.NotFound('Guarantor not found');
+      }
+
+      if (guarantor.isExecutionDone === true) {
+        throw new HttpErrors.BadRequest(
+          'Guarantor already verified. Cannot resend link.',
+        );
+      }
+
+      const verification =
+        await this.businessKycGuarantorVerificationRepository.findOne(
+          {
+            where: {
+              businessKycGuarantorId: guarantorId,
+              isDeleted: false,
+            },
+          },
+          {transaction: tx},
+        );
+
+      if (
+        verification?.expiresAt &&
+        verification.expiresAt > new Date()
+      ) {
+        throw new HttpErrors.BadRequest(
+          'Verification link is still active',
+        );
+      }
+
+      const verificationUrl =
+        await this.guarantorService.createGuarantorVerificationLink(
+          guarantorId,
+          tx,
+        );
+
+      const template = generateGuarantorVerificationEmailTemplate({
+        guarantorName: guarantor.fullName,
+        verificationLink: verificationUrl,
+        businessName: guarantor.guarantorCompanyName,
+      });
+
+      await this.emailService.sendMail({
+        to: guarantor.email,
+        subject: template.subject,
+        html: template.html,
+      });
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Verification link resent successfully',
+        verificationUrl,
+      };
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  }
+
 
   async updateGuarantor(
     userId: string,

@@ -191,16 +191,40 @@ export class BusinessKycGuarantorDetailsService {
     guarantorId: string,
     tx: any,
   ): Promise<string> {
-    const verification =
-      await this.businessKycGuarantorVerificationRepository.create(
-        {
+
+    let verification =
+      await this.businessKycGuarantorVerificationRepository.findOne({
+        where: {
           businessKycGuarantorId: guarantorId,
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          isDeleted: false,
+        },
+      });
+
+    const newExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    if (!verification) {
+      verification =
+        await this.businessKycGuarantorVerificationRepository.create(
+          {
+            businessKycGuarantorId: guarantorId,
+            expiresAt: newExpiry,
+            isVerified: false,
+            isUsed: false,
+          },
+          {transaction: tx},
+        );
+    } else {
+      await this.businessKycGuarantorVerificationRepository.updateById(
+        verification.id,
+        {
+          expiresAt: newExpiry,
           isVerified: false,
           isUsed: false,
+          updatedAt: new Date(),
         },
         {transaction: tx},
       );
+    }
 
     const token = await this.jwtService.generateGuarantorVerificationToken({
       guarantorId,
@@ -208,7 +232,8 @@ export class BusinessKycGuarantorDetailsService {
     });
 
     const siteUrl = process.env.REACT_APP_SITE_URL;
-    const verificationUrl = `${siteUrl}/kyc/invoiceFinancing/verify?token=${token}`;
+    const verificationUrl =
+      `${siteUrl}/kyc/invoiceFinancing/verify?token=${token}`;
 
     await this.businessKycGuarantorVerificationRepository.updateById(
       verification.id,
@@ -218,6 +243,10 @@ export class BusinessKycGuarantorDetailsService {
 
     return verificationUrl;
   }
+
+
+
+
 
   async updateGuarantorDetailsStatus(
     id: string,

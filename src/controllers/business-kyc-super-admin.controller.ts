@@ -498,6 +498,16 @@ export class BusinessKycSuperAdminController {
   }
 
   @authenticate('jwt')
+@authorize({roles: ['super_admin']})
+@patch('/business-kyc/guarantor-execution/{guarantorId}/resend')
+async resendGuarantorVerification(
+  @param.path.string('guarantorId') guarantorId: string,
+) {
+  return this.kycTxnService.resendGuarantorVerification(guarantorId);
+}
+
+
+  @authenticate('jwt')
   @authorize({roles: ['super_admin']})
   @patch('/company-profiles/collateral-assets-verification')
   async comapnyCollateralAssetsVerification(
