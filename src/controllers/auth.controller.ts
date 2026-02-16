@@ -247,7 +247,7 @@ export class AuthController {
       fields: {isBusinessKycComplete: true},
     });
 
-    const userData = _.omit(user, ['password', 'fullName']);
+    const userData = _.omit(user, ['password']);
 
     return {
       ...userData,
