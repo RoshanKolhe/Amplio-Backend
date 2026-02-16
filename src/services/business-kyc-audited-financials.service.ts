@@ -191,11 +191,8 @@ export class BusinessKycAuditedFinancialsService {
 
     const existingMap = new Map<string, BusinessKycAuditedFinancials>();
     for (const row of existingRecords) {
-      const key = this.buildPeriodKey(
-        row.periodStartYear,
-        row.periodEndYear,
-        row.month,
-      );
+      const key = this.buildPeriodKey(row);
+
       existingMap.set(key, row);
     }
     console.log('existingMap', existingMap);
@@ -204,11 +201,7 @@ export class BusinessKycAuditedFinancialsService {
     console.log('record', records);
 
     const operations = records.map(record => {
-      const key = this.buildPeriodKey(
-        record.periodStartYear,
-        record.periodEndYear,
-        record.month,
-      );
+      const key = this.buildPeriodKey(record);
 
       const existing = existingMap.get(key);
       console.log('existing', existing);
@@ -295,12 +288,16 @@ export class BusinessKycAuditedFinancialsService {
   }
 
   private buildPeriodKey(
-    startYear?: number,
-    endYear?: number,
-    month?: string,
-  ): string {
-    return `${startYear}-${endYear}-${month ?? 'NA'}`;
+    record: Partial<BusinessKycAuditedFinancials>,
+  ) {
+
+    if (record.type === 'month_wise') {
+      return `${record.baseFinancialStartYear}-${record.baseFinancialEndYear}-${record.month}`;
+    }
+
+    return `${record.baseFinancialStartYear}-${record.baseFinancialEndYear}-${record.periodStartYear}-${record.periodEndYear}`;
   }
+
 
   // fetch audited financials...
   async fetchAuditedFinancials(businessKycId: string): Promise<{
