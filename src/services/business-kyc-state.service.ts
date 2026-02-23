@@ -19,7 +19,7 @@ export class BusinessKycStateService {
 
     @inject('services.BusinessKycStatusService')
     private statusService: BusinessKycStatusService,
-  ) {}
+  ) { }
 
   async fetchStateByUser(currentUser: UserProfile) {
     /* -------------------- 1️⃣ Verify company -------------------- */
@@ -69,6 +69,7 @@ export class BusinessKycStateService {
       'gst_3b',
     ];
 
+
     /* -------------------- 5️⃣ Completed steps (UI view) -------------------- */
     const completedSteps: Array<{code: string; label: string}> = [];
 
@@ -88,8 +89,16 @@ export class BusinessKycStateService {
       });
     }
 
-    // 3️⃣ Collateral Assets
+    // Financial Details
     if (currentStatus.sequenceOrder > 6) {
+      completedSteps.push({
+        code: 'financial_details',
+        label: 'Company Financials',
+      });
+    }
+
+    // 3️⃣ Collateral Assets
+    if (currentStatus.sequenceOrder > 7) {
       completedSteps.push({
         code: 'collateral_assets',
         label: 'Collateral Assets',
@@ -97,7 +106,7 @@ export class BusinessKycStateService {
     }
 
     // 4️⃣ Guarantor Details
-    if (currentStatus.sequenceOrder > 7) {
+    if (currentStatus.sequenceOrder > 8) {
       completedSteps.push({
         code: 'guarantor_details',
         label: 'Guarantor Details',
@@ -105,7 +114,7 @@ export class BusinessKycStateService {
     }
 
     // 5️⃣ Review and submit
-    if (currentStatus.sequenceOrder > 8) {
+    if (currentStatus.sequenceOrder > 9) {
       completedSteps.push({
         code: 'review_and_submit',
         label: 'Review and Submit',
@@ -113,7 +122,7 @@ export class BusinessKycStateService {
     }
 
     // 6️⃣ Pending
-    if (currentStatus.sequenceOrder > 9) {
+    if (currentStatus.sequenceOrder > 10) {
       completedSteps.push({
         code: 'pending',
         label: 'Pending',
@@ -121,35 +130,35 @@ export class BusinessKycStateService {
     }
 
     // 7️⃣ Agreement (FINAL)
-    if (currentStatus.sequenceOrder >= 10) {
+    if (currentStatus.sequenceOrder >= 11) {
       completedSteps.push({
         code: 'agreement',
         label: 'Agreement',
       });
     }
 
-    if (currentStatus.sequenceOrder >= 11) {
+    if (currentStatus.sequenceOrder >= 12) {
       completedSteps.push({
         code: 'roc',
         label: 'ROC',
       });
     }
 
-    if (currentStatus.sequenceOrder >= 12) {
+    if (currentStatus.sequenceOrder >= 13) {
       completedSteps.push({
         code: 'dpn',
         label: 'DPN',
       });
     }
 
-    if (currentStatus.sequenceOrder >= 13) {
+    if (currentStatus.sequenceOrder >= 14) {
       completedSteps.push({
         code: 'business_kyc_pending',
         label: 'Business Kyc Pending',
       });
     }
 
-    if (currentStatus.sequenceOrder >= 13) {
+    if (currentStatus.sequenceOrder >= 14) {
       completedSteps.push({
         code: 'business_kyc_pending',
         label: 'Business Kyc Pending',
@@ -164,6 +173,11 @@ export class BusinessKycStateService {
       activeStep = {
         code: 'audited_financials',
         label: 'Audited Financials',
+      };
+    } else if (currentStatus.value === 'financial_details') {
+      activeStep = {
+        code: 'financial_details',
+        label: 'Company Financials',
       };
     } else if (currentStatus.value === 'collateral_assets') {
       activeStep = {

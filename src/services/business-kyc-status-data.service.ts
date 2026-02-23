@@ -4,6 +4,7 @@ import {BusinessKycAuditedFinancialsService} from './business-kyc-audited-financ
 import {BusinessKycCollateralAssetsService} from './business-kyc-collateral-assets.service';
 import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
+import {BusinessKycFinancialsService} from './business-kyc-financials.service';
 
 export class BusinessKycStatusDataService {
   constructor(
@@ -15,6 +16,8 @@ export class BusinessKycStatusDataService {
     private businessKycAuditedFinancialsService: BusinessKycAuditedFinancialsService,
     @inject('service.businessKycCollateralAssetsService.service')
     private businessKycCollateralAssetsService: BusinessKycCollateralAssetsService,
+    @inject('service.businessKycFinancialsService.service')
+    private businessKycFinancialsService: BusinessKycFinancialsService
   ) { }
 
   async fetchDataWithStatus(businessKycId: string, status: string) {
@@ -31,6 +34,11 @@ export class BusinessKycStatusDataService {
           businessKycId,
         );
 
+
+      case 'financial_details':
+        return this.businessKycFinancialsService.fetchFullFinancialSection(
+          businessKycId,
+        );
       case 'collateral_assets':
         return this.businessKycCollateralAssetsService.fetchBusinessKycCollateralAssets(
           businessKycId,

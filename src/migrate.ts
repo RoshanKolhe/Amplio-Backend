@@ -49,7 +49,8 @@ export async function migrate(args: string[]) {
       'BusinessKycAgreement',
       'BusinessKycDocumentType',
       'Roc',
-      'BusinessKycDpn'
+      'BusinessKycDpn',
+      'BusinessKycFinancial'
     ]
   });
 

@@ -40,3 +40,4 @@ export * from './business-kyc-document-type.repository';
 export * from './document-roles.repository';
 export * from './roc.repository';
 export * from './business-kyc-dpn.repository';
+export * from './business-kyc-financial.repository';

@@ -153,6 +153,7 @@ export class RbacService {
       companyName: company?.companyName,
       email: user.email,
       phone: user.phone,
+      isFirstTime: user.isFirstTime ?? false,
       isActive: user.isActive,
       roles,
       permissions
@@ -201,3 +202,4 @@ export class RbacService {
     }
   }
 }
+

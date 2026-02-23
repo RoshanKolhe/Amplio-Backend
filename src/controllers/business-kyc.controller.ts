@@ -868,4 +868,47 @@ export class BusinessKycController {
       throw err;
     }
   }
+
+
+  // FINANCIALS DETAILS //
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @patch('/business-kyc/financial-section')
+  async updateFinancialSection(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    user: UserProfile,
+
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            properties: {
+              auditedFinancials: {type: 'array'},
+              borrowingDetails: {type: 'object'},
+              fundPosition: {type: 'object'},
+              capitalDetails: {type: 'object'},
+            },
+          },
+        },
+      },
+    })
+    body: any,
+  ) {
+    return this.kycTxnService.updateFinancialSection(user.id, body);
+  }
+
+
+  @authenticate('jwt')
+  @authorize({roles: ['company']})
+  @get('/business-kyc/financial-ratios')
+  async getFinancialRatios(
+    @inject(AuthenticationBindings.CURRENT_USER)
+    user: UserProfile,
+  ) {
+    return this.kycTxnService.fetchFinancialRatios(user.id);
+  }
+
 }

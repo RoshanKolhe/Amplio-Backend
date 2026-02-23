@@ -94,6 +94,7 @@ export class JWTService implements TokenService {
         phoneNumber: decrypted.phoneNumber,
         roles: decrypted.roles ?? [],
         permissions: decrypted.permissions ?? [],
+        isFirstTime: decrypted.isFirstTime ?? false,
       };
 
       return userProfile;

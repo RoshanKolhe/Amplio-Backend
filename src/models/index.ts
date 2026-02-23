@@ -44,3 +44,4 @@ export * from './business-kyc-document-type.model';
 export * from './document-roles.model';
 export * from './roc.model';
 export * from './business-kyc-dpn.model';
+export * from './business-kyc-financial.model';

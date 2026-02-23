@@ -227,7 +227,11 @@ export class AuthController {
 
     const hashedPassword = await this.hasher.hashPassword(body.newPassword);
 
-    await this.usersRepository.updateById(user.id, {password: hashedPassword});
+    const shouldResetFirstTime = (currentUser.roles ?? []).includes('company');
+    await this.usersRepository.updateById(user.id, {
+      password: hashedPassword,
+      ...(shouldResetFirstTime ? {isFirstTime: false} : {}),
+    });
 
     return {
       success: true,
@@ -868,7 +872,10 @@ export class AuthController {
 
     const hashedPassword = await this.hasher.hashPassword(body.newPassword);
 
-    await this.usersRepository.updateById(user.id, {password: hashedPassword});
+    await this.usersRepository.updateById(user.id, {
+      password: hashedPassword,
+      ...(body.role === 'company' ? {isFirstTime: false} : {}),
+    });
 
     return {
       success: true,
@@ -1057,6 +1064,7 @@ export class AuthController {
             phone: registrationSession.phoneNumber,
             email: registrationSession.email,
             password: hashedPassword,
+            isFirstTime: true,
             isActive: true,
             isDeleted: false,
           },
@@ -1296,11 +1304,13 @@ export class AuthController {
       roles: string[];
       permissions: string[];
       phone: string;
+      isFirstTime: boolean;
     } = {
       [securityId]: user.id!,
       id: user.id!,
       email: user.email,
       phone: user.phone,
+      isFirstTime: user.isFirstTime ?? false,
       roles,
       permissions,
     };

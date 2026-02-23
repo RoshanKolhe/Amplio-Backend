@@ -169,6 +169,7 @@ export class CompaniesController {
   ): Promise<{success: boolean; message: string; data: any}> {
     const steppersAllowed = [
       'company_documents',
+      'company_address_details',
       'company_bank_details',
       'company_authorized_signatories',
     ];
@@ -215,6 +216,20 @@ export class CompaniesController {
       };
     }
 
+    if (stepperId === 'company_address_details') {
+      const addressResponse = await this.addressDetailsService.fetchUserAddressDetails(
+        companyProfile.usersId,
+        'company',
+        companyProfile.id,
+      );
+
+      return {
+        success: true,
+        message: 'Address details',
+        data: addressResponse,
+      };
+    }
+
     if (stepperId === 'company_bank_details') {
       const bankDetailsResponse =
         await this.bankDetailsService.fetchUserBankAccounts(
@@ -228,6 +243,8 @@ export class CompaniesController {
         data: bankDetailsResponse.accounts,
       };
     }
+
+
 
     if (stepperId === 'company_authorized_signatories') {
       const signatoriesResponse =
@@ -419,6 +436,117 @@ export class CompaniesController {
     );
 
     return {...result, currentProgress};
+  }
+
+  // for company but without login just for KYC
+  @post('/company-profiles/kyc-address-details')
+  async uploadCompanyKycAddressDetails(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'registeredAddress'],
+            properties: {
+              usersId: {type: 'string'},
+              registeredAddress: getModelSchemaRef(AddressDetails, {
+                partial: true,
+              }),
+              correspondenceAddress: getModelSchemaRef(AddressDetails, {
+                partial: true,
+              }),
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      registeredAddress: Partial<AddressDetails>;
+      correspondenceAddress?: Partial<AddressDetails>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    registeredAddress: AddressDetails | null;
+    correspondenceAddress: AddressDetails | null;
+    currentProgress: string[];
+  }> {
+    const company = await this.companyProfilesRepository.findOne({
+      where: {usersId: body.usersId, isDeleted: false},
+    });
+
+    if (!company) throw new HttpErrors.NotFound('Company not found');
+
+    const addressDetailsArray: Partial<AddressDetails>[] = [
+      {
+        ...body.registeredAddress,
+        addressType: 'registered',
+        mode: 1,
+        status: 0,
+        usersId: body.usersId,
+        identifierId: company.id,
+        roleValue: 'company',
+      },
+    ];
+
+    if (body.correspondenceAddress) {
+      addressDetailsArray.push({
+        ...body.correspondenceAddress,
+        addressType: 'correspondence',
+        mode: 1,
+        status: 0,
+        usersId: body.usersId,
+        identifierId: company.id,
+        roleValue: 'company',
+      });
+    }
+
+    const response =
+      await this.addressDetailsService.createOrUpdateAddressDetails(
+        addressDetailsArray,
+      );
+
+    const currentProgress = await this.updateKycProgress(
+      company.kycApplicationsId,
+      'company_address_details',
+    );
+
+    return {...response, currentProgress};
+  }
+
+  // for company but without login just for KYC
+  @get('/company-profiles/kyc-address-details/{usersId}')
+  async fetchCompanyKycAddressDetails(
+    @param.path.string('usersId') usersId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    registeredAddress: AddressDetails | null;
+    correspondenceAddress: AddressDetails | null;
+    currentProgress: string[];
+  }> {
+    const company = await this.companyProfilesRepository.findOne({
+      where: {usersId, isDeleted: false},
+    });
+
+    if (!company) throw new HttpErrors.NotFound('Company not found');
+
+    const currentProgress = await this.getKycApplicationStatus(
+      company.kycApplicationsId,
+    );
+
+    if (!currentProgress.includes('company_address_details')) {
+      throw new HttpErrors.BadRequest('Please complete the steps');
+    }
+
+    const response = await this.addressDetailsService.fetchUserAddressDetails(
+      usersId,
+      'company',
+      company.id,
+    );
+
+    return {...response, currentProgress};
   }
 
   // for company but without login just for KYC
@@ -769,6 +897,8 @@ export class CompaniesController {
           scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
         },
       ],
+      order: filter?.order ?? ['createdAt DESC'],
+
     });
 
 

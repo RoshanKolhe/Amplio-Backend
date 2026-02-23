@@ -9,6 +9,7 @@ import {BusinessKycAuditedFinancials} from './business-kyc-audited-financials.mo
 import {BusinessKycAgreement} from './business-kyc-agreement.model';
 import {Roc} from './roc.model';
 import {BusinessKycDpn} from './business-kyc-dpn.model';
+import {BusinessKycFinancial} from './business-kyc-financial.model';
 
 @model({
   settings: {
@@ -98,6 +99,9 @@ export class BusinessKyc extends Entity {
 
   @hasOne(() => BusinessKycDpn)
   businessKycDpn: BusinessKycDpn;
+
+  @hasOne(() => BusinessKycFinancial)
+  businessKycFinancial: BusinessKycFinancial;
   // @property({
   //   type: 'string',
   // })

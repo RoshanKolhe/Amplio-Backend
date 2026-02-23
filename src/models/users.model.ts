@@ -61,6 +61,12 @@ export class Users extends Entity {
     type: 'boolean',
     default: true,
   })
+  isFirstTime?: boolean;
+
+  @property({
+    type: 'boolean',
+    default: true,
+  })
   isActive?: boolean;
 
   @property({

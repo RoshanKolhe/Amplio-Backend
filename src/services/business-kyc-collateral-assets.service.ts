@@ -19,7 +19,7 @@ export class BusinessKycCollateralAssetsService {
   async createOrUpdateCollateralAssets(
     businessKycId: string,
     companyProfilesId: string,
-    borrowingDetails: Omit<BusinessKycCollateralAssets, 'id'>[],
+    collateralDetails: Omit<BusinessKycCollateralAssets, 'id'>[],
     tx: any,
   ): Promise<{
     collateralAssets: BusinessKycCollateralAssets[];
@@ -45,12 +45,12 @@ export class BusinessKycCollateralAssetsService {
       .businessKycCollateralAssets(businessKycId)
       .delete(undefined, {transaction: tx});
 
-    for (const borrowing of borrowingDetails) {
+    for (const collateral of collateralDetails) {
       await this.businessKycRepository
         .businessKycCollateralAssets(businessKycId)
         .create(
           {
-            ...borrowing,
+            ...collateral,
             companyProfilesId,
             status: 0,
             mode: 1,

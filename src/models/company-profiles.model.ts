@@ -13,6 +13,7 @@ import {BusinessKycCollateralAssets} from './business-kyc-collateral-assets.mode
 import {BusinessKycAgreement} from './business-kyc-agreement.model';
 import {BusinessKycDpn} from './business-kyc-dpn.model';
 import {Roc} from './roc.model';
+import {BusinessKycFinancial} from './business-kyc-financial.model';
 
 @model({
   settings: {
@@ -223,6 +224,9 @@ export class CompanyProfiles extends Entity {
 
   @hasOne(() => Roc)
   roc: Roc;
+
+  @hasOne(() => BusinessKycFinancial)
+  businessKycFinancial: BusinessKycFinancial;
 
   constructor(data?: Partial<CompanyProfiles>) {
     super(data);
