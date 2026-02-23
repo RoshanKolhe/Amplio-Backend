@@ -7,7 +7,7 @@ import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import {get, HttpErrors, param, patch, requestBody} from '@loopback/rest';
 import {authorize} from '../authorization';
-import { } from '../models';
+import {AddressDetails} from '../models';
 import {
   BusinessKycRepository,
   CompanyProfilesRepository,
@@ -20,6 +20,7 @@ import {BusinessKycProfileDetailsService} from '../services/business-kyc-profile
 import {BusinessKycTransactionsService} from '../services/business-kyc-transaction.service';
 import {BusinessKycDpnService} from '../services/business-kyc-dpn.service';
 import {BusinessKycRocService} from '../services/business-kyc-roc.service';
+import {AddressDetailsService} from '../services/address-details.service';
 
 export class BusinessKycSuperAdminController {
   constructor(
@@ -41,8 +42,10 @@ export class BusinessKycSuperAdminController {
     private businessKycAgreementService: BusinessKycAgreementService,
     @inject('service.businessKycDpnService.service')
     private businessKycDpnService: BusinessKycDpnService,
-        @inject('service.businessKycRocService.service')
+    @inject('service.businessKycRocService.service')
     private businessKycRocService: BusinessKycRocService,
+    @inject('service.AddressDetails.service')
+    private addressDetailsService: AddressDetailsService,
 
   ) { }
 
@@ -389,6 +392,91 @@ export class BusinessKycSuperAdminController {
       message: 'Roc details fetched successfully',
       data: businessKycProfile,
     };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/company-profiles/{companyId}/business-address-details')
+  async fetchCompanyAddressDetails(
+    @param.path.string('companyId') companyId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    registeredAddress: AddressDetails | null;
+    correspondenceAddress: AddressDetails | null;
+  }> {
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        id: companyId,
+        isDeleted: false,
+      },
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company not found');
+    }
+
+    return this.addressDetailsService.fetchUserAddressDetails(
+      companyProfile.usersId,
+      'company',
+      companyProfile.id,
+    );
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/company-profiles/business-address-verification')
+  async companyAddressVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['companyId', 'status'],
+            properties: {
+              companyId: {type: 'string'},
+              status: {type: 'number'}, // 1 approve, 2 reject
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      companyId: string;
+      status: number;
+      reason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        id: body.companyId,
+        isDeleted: false,
+      },
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company not found');
+    }
+
+    if (body.status === 1) {
+      return this.addressDetailsService.approveUserAddressDetails(
+        companyProfile.usersId,
+        'company',
+        companyProfile.id,
+      );
+    }
+
+    if (body.status === 2) {
+      return this.addressDetailsService.rejectUserAddressDetails(
+        companyProfile.usersId,
+        'company',
+        companyProfile.id,
+        body.reason ?? '',
+      );
+    }
+
+    throw new HttpErrors.BadRequest('Invalid status value');
   }
 
   // Business Kyc Approvel Apis //
