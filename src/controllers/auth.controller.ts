@@ -897,7 +897,7 @@ export class AuthController {
               'companyName',
               'CIN',
               'GSTIN',
-              'udyamRegistrationNumber',
+              // 'udyamRegistrationNumber',
               'dateOfIncorporation',
               'cityOfIncorporation',
               'stateOfIncorporation',

@@ -126,7 +126,7 @@ export class CompanyProfiles extends Entity {
 
   @property({
     type: 'string',
-    required: true,
+    // required: true,
     jsonSchema: {
       pattern: '^UDYAM-[A-Z]{2}-[0-9]{2}-[0-9]{7}$',
       errorMessage: {
