@@ -16,6 +16,7 @@ import {
   AddressDetails,
   AuthorizeSignatories,
   BankDetails,
+  CompanyKycDocument,
   CompanyProfiles,
   UserUploadedDocuments,
 } from '../models';
@@ -27,6 +28,7 @@ import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
 import {KycService} from '../services/kyc.service';
 import {MediaService} from '../services/media.service';
+import {CompanyKycDocumentService} from '../services/company-kyc-document.service';
 import {SessionService} from '../services/session.service';
 import {AuthorizeSignatoriesService} from '../services/signatories.service';
 import {UserUploadedDocumentsService} from '../services/user-documents.service';
@@ -39,6 +41,8 @@ export class CompaniesController {
     private kycApplicationsRepository: KycApplicationsRepository,
     @inject('service.media.service')
     private mediaService: MediaService,
+    @inject('service.companyKycDocumentService.service')
+    private companyKycDocumentService: CompanyKycDocumentService,
     @inject('service.userUploadedDocuments.service')
     private userUploadDocumentsService: UserUploadedDocumentsService,
     @inject('service.bankDetails.service')
@@ -164,9 +168,18 @@ export class CompaniesController {
   async getCompanyProfileKycData(
     @param.path.string('stepperId') stepperId: string,
     @param.path.string('usersId') usersId: string,
-    @param.query.string('route') route?: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ): Promise<{success: boolean; message: string; data: any}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: any;
+    companyEntityType?: {
+      id: string;
+      label: string;
+      value: string;
+    } | null;
+  }> {
     const steppersAllowed = [
       'company_documents',
       'company_address_details',
@@ -180,8 +193,25 @@ export class CompaniesController {
 
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
-        and: [{usersId: usersId}, {isDeleted: false}],
+        and: [
+          {isDeleted: false},
+          {
+            or: [{usersId: usersId}, {id: usersId}],
+          },
+        ],
       },
+      include: [
+        {
+          relation: 'companyEntityType',
+          scope: {
+            fields: {
+              id: true,
+              label: true,
+              value: true,
+            },
+          },
+        },
+      ],
     });
 
     if (!companyProfile) {
@@ -192,27 +222,35 @@ export class CompaniesController {
       companyProfile.kycApplicationsId,
     );
 
-    if (!currentProgress.includes(stepperId)) {
+    // company_documents must be fetchable before completion so frontend can render required docs.
+    if (
+      stepperId !== 'company_documents' &&
+      !currentProgress.includes(stepperId)
+    ) {
       throw new HttpErrors.BadRequest('Please complete the steps');
     }
 
     if (stepperId === 'company_documents') {
-      if (!route) {
-        throw new HttpErrors.NotFound('Params are missing');
-      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const companyProfileWithRelations = companyProfile as any;
+      const companyEntityType = companyProfileWithRelations.companyEntityType
+        ? {
+            id: companyProfileWithRelations.companyEntityType.id,
+            label: companyProfileWithRelations.companyEntityType.label,
+            value: companyProfileWithRelations.companyEntityType.value,
+          }
+        : null;
 
       const documentsResponse =
-        await this.userUploadDocumentsService.fetchDocuments(
-          companyProfile.usersId,
-          companyProfile.id,
-          'company',
-          route,
+        await this.companyKycDocumentService.fetchForKycStepper(
+          usersId,
         );
 
       return {
         success: true,
         message: 'Documents Data',
         data: documentsResponse.documents,
+        companyEntityType,
       };
     }
 
@@ -283,10 +321,13 @@ export class CompaniesController {
                 type: 'array',
                 items: {
                   type: 'object',
-                  required: ['documentsId', 'documentsFileId'],
+                  required: ['documentsFileId'],
                   properties: {
+                    companyKycDocumentRequirementsId: {type: 'string'},
                     documentsId: {type: 'string'},
                     documentsFileId: {type: 'string'},
+                    mode: {type: 'number', enum: [0, 1]},
+                    status: {type: 'number', enum: [0, 1, 2]},
                   },
                 },
               },
@@ -297,12 +338,18 @@ export class CompaniesController {
     })
     body: {
       usersId: string;
-      documents: {documentsId: string; documentsFileId: string}[];
+      documents: {
+        companyKycDocumentRequirementsId?: string;
+        documentsId?: string; // backward compatible alias
+        documentsFileId: string;
+        mode?: number;
+        status?: number;
+      }[];
     },
   ): Promise<{
     success: boolean;
     message: string;
-    uploadedDocuments: UserUploadedDocuments[];
+    uploadedDocuments: CompanyKycDocument[];
     currentProgress: string[];
   }> {
     const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
@@ -318,20 +365,30 @@ export class CompaniesController {
       if (!company) throw new HttpErrors.NotFound('Company not found');
 
       const newDocs = body.documents.map(
-        doc =>
-          new UserUploadedDocuments({
-            ...doc,
-            roleValue: 'company',
-            identifierId: company.id,
-            usersId: body.usersId,
-            status: 0,
-            mode: 1,
-            isActive: true,
-            isDeleted: false,
-          }),
+        doc => ({
+          usersId: body.usersId,
+          companyKycDocumentRequirementsId:
+            doc.companyKycDocumentRequirementsId ?? doc.documentsId ?? '',
+          documentsFileId: doc.documentsFileId,
+          mode: doc.mode ?? 1,
+          status: doc.status ?? 0,
+          isActive: true,
+          isDeleted: false,
+        }),
       );
 
-      const result = await this.userUploadDocumentsService.uploadNewDocuments(
+      const invalidPayload = newDocs.find(
+        doc => !doc.companyKycDocumentRequirementsId,
+      );
+
+      if (invalidPayload) {
+        throw new HttpErrors.BadRequest(
+          'companyKycDocumentRequirementsId is required for each document',
+        );
+      }
+
+      const result = await this.companyKycDocumentService.uploadDocumentsForKyc(
+        body.usersId,
         newDocs,
         tx,
       );
@@ -1838,39 +1895,39 @@ export class CompaniesController {
   }
 
   // super admin company documents approval API
-  @authenticate('jwt')
-  @authorize({roles: ['super_admin']})
-  @patch('/company-profiles/document-verification')
-  async documentVerification(
-    @requestBody({
-      content: {
-        'application/json': {
-          schema: {
-            type: 'object',
-            required: ['status', 'documentId'],
-            properties: {
-              status: {type: 'number'},
-              documentId: {type: 'string'},
-              reason: {type: 'string'},
-            },
-          },
-        },
-      },
-    })
-    body: {
-      status: number;
-      documentId: string;
-      reason?: string;
-    },
-  ): Promise<{success: boolean; message: string}> {
-    const result = await this.userUploadDocumentsService.updateDocumentStatus(
-      body.documentId,
-      body.status,
-      body.reason ?? '',
-    );
+  // @authenticate('jwt')
+  // @authorize({roles: ['super_admin']})
+  // @patch('/company-profiles/document-verification')
+  // async documentVerification(
+  //   @requestBody({
+  //     content: {
+  //       'application/json': {
+  //         schema: {
+  //           type: 'object',
+  //           required: ['status', 'documentId'],
+  //           properties: {
+  //             status: {type: 'number'},
+  //             documentId: {type: 'string'},
+  //             reason: {type: 'string'},
+  //           },
+  //         },
+  //       },
+  //     },
+  //   })
+  //   body: {
+  //     status: number;
+  //     documentId: string;
+  //     reason?: string;
+  //   },
+  // ): Promise<{success: boolean; message: string}> {
+  //   const result = await this.userUploadDocumentsService.updateDocumentStatus(
+  //     body.documentId,
+  //     body.status,
+  //     body.reason ?? '',
+  //   );
 
-    return result;
-  }
+  //   return result;
+  // }
 
   // super admin company bank account approval API
   @authenticate('jwt')

@@ -10,6 +10,8 @@ export * from './media.repository';
 export * from './company-pan-cards.repository';
 export * from './kyc-applications.repository';
 export * from './company-entity-type.repository';
+export * from './company-kyc-document.repository';
+export * from './company-kyc-document-requirements.repository';
 export * from './company-sector-type.repository';
 export * from './trustee-profiles.repository';
 export * from './trustee-pan-cards.repository';

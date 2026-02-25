@@ -50,7 +50,9 @@ export async function migrate(args: string[]) {
       'BusinessKycDocumentType',
       'Roc',
       'BusinessKycDpn',
-      'BusinessKycFinancial'
+      'BusinessKycFinancial',
+      'CompanyKycDocument',
+      'CompanyKycDocumentRequirements'
     ]
   });
 

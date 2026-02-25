@@ -7,6 +7,7 @@ import {
   AddressDetails,
   AuthorizeSignatories,
   BankDetails,
+  CompanyKycDocument,
   UserUploadedDocuments,
 } from '../models';
 import {
@@ -18,6 +19,7 @@ import {BankDetailsService} from '../services/bank-details.service';
 import {AddressDetailsService} from '../services/address-details.service';
 import {AuthorizeSignatoriesService} from '../services/signatories.service';
 import {UserUploadedDocumentsService} from '../services/user-documents.service';
+import {CompanyKycDocumentService} from '../services/company-kyc-document.service';
 
 export class AdminProfilesController {
   constructor(
@@ -27,6 +29,8 @@ export class AdminProfilesController {
     private companyProfilesRepository: CompanyProfilesRepository,
     @repository(InvestorProfileRepository)
     private investorProfileRepository: InvestorProfileRepository,
+    @inject('service.companyKycDocumentService.service')
+    private companyKycDocumentService: CompanyKycDocumentService,
     @inject('service.userUploadedDocuments.service')
     private userUploadDocumentsService: UserUploadedDocumentsService,
     @inject('service.bankDetails.service')
@@ -509,7 +513,7 @@ export class AdminProfilesController {
   ): Promise<{
     success: boolean;
     message: string;
-    documents: UserUploadedDocuments[];
+    documents: CompanyKycDocument[];
   }> {
     const companyProfile = await this.companyProfilesRepository.findOne({
       where: {
@@ -521,18 +525,7 @@ export class AdminProfilesController {
       throw new HttpErrors.NotFound('Company not found');
     }
 
-    const documentsResponse =
-      await this.userUploadDocumentsService.fetchDocumentsWithUser(
-        companyProfile.usersId,
-        companyProfile.id,
-        'company',
-      );
-
-    return {
-      success: true,
-      message: 'Documents data',
-      documents: documentsResponse.documents,
-    };
+    return this.companyKycDocumentService.fetchByUser(companyProfile.usersId);
   }
 
   // fetch document...
@@ -624,7 +617,7 @@ export class AdminProfilesController {
       reason?: string;
     },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.userUploadDocumentsService.updateDocumentStatus(
+    const result = await this.companyKycDocumentService.updateStatus(
       body.documentId,
       body.status,
       body.reason ?? '',
