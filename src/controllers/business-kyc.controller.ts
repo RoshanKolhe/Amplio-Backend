@@ -886,10 +886,34 @@ export class BusinessKycController {
           schema: {
             type: 'object',
             properties: {
-              auditedFinancials: {type: 'array'},
+              auditedFinancials: {
+                type: 'object',
+                properties: {
+                  baseDate: {type: 'string'},
+                  financialStatements: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        periodStartYear: {type: 'number'},
+                        periodEndYear: {type: 'number'},
+                        amount: {
+                          anyOf: [
+                            {type: 'number'},
+                            {type: 'string'},
+                          ],
+                        },
+                      },
+                      required: ['periodStartYear', 'periodEndYear', 'amount'],
+                    },
+                  },
+                },
+              },
               borrowingDetails: {type: 'object'},
               fundPosition: {type: 'object'},
               capitalDetails: {type: 'object'},
+              profitabilityDetails: {type: 'object'},
+              financialRatios: {type: 'object'},
             },
           },
         },

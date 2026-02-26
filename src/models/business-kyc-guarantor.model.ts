@@ -76,7 +76,6 @@ export class BusinessKycGuarantor extends Entity {
 
   @property({
     type: 'string',
-    required: true,
   })
   adharNumber: string;
   @property({
@@ -156,6 +155,21 @@ export class BusinessKycGuarantor extends Entity {
 
   @hasOne(() => BusinessKycGuarantorVerification)
   businessKycGuarantorVerification: BusinessKycGuarantorVerification;
+
+  @belongsTo(() => Media)
+  boardResolutonId: string;
+
+  @belongsTo(() => Media)
+  gstCertificateId: string;
+
+  @belongsTo(() => Media)
+  financialStatementId: string;
+
+  @belongsTo(() => Media)
+  addressProofId: string;
+
+  @belongsTo(() => Media)
+  itrId: string;
 
   constructor(data?: Partial<BusinessKycGuarantor>) {
     super(data);

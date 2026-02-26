@@ -22,11 +22,11 @@ import {BusinessKycAgreementService} from './business-kyc-agreement.service';
 import {BusinessKycAuditedFinancialsService} from './business-kyc-audited-financials.service';
 import {BusinessKycCollateralAssetsService} from './business-kyc-collateral-assets.service';
 import {BusinessKycDpnService} from './business-kyc-dpn.service';
+import {BusinessKycFinancialsService} from './business-kyc-financials.service';
 import {BusinessKycGuarantorDetailsService} from './business-kyc-guarantor-details.service';
 import {BusinessKycProfileDetailsService} from './business-kyc-profile-details.service';
 import {BusinessKycRocService} from './business-kyc-roc.service';
 import {EmailService} from './email.service';
-import {BusinessKycFinancialsService} from './business-kyc-financials.service';
 
 export class BusinessKycTransactionsService {
   constructor(
@@ -1264,136 +1264,165 @@ export class BusinessKycTransactionsService {
 
 
   /* ------------------------------------------------------------------ */
-/* 2 FINANCIAL SECTION */
-/* ------------------------------------------------------------------ */
+  /* 2 FINANCIAL SECTION */
+  /* ------------------------------------------------------------------ */
 
-async updateFinancialSection(
-  userId: string,
-  payload: {
-    auditedFinancials?: any[];
-    borrowingDetails?: any;
-    fundPosition?: any;
-    capitalDetails?: any;
-  },
-) {
-  const tx = await this.businessKycRepository.dataSource.beginTransaction({
-    isolationLevel: IsolationLevel.READ_COMMITTED,
-  });
+  async updateFinancialSection(
+    userId: string,
+    payload: {
+      auditedFinancials?: {
+        baseDate: string | Date;
+        financialStatements: Array<{
+          periodStartYear: number;
+          periodEndYear: number;
+          amount: number | string;
+        }>;
+      };
+      borrowingDetails?: any;
+      fundPosition?: any;
+      capitalDetails?: any;
+      profitabilityDetails?: any;
+      financialRatios?: any;
+    },
+  ) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
 
-  try {
-    const {kyc, company} = await this.resolveCompanyAndKyc(userId);
+    try {
+      const {kyc, company} = await this.resolveCompanyAndKyc(userId);
 
-    let result: any = {};
+      let result: any = {};
 
-    if (payload.auditedFinancials) {
-      result.auditedFinancials =
-        await this.financialService.createOrUpdateCompanyAuditedFinancials(
+      if (payload.auditedFinancials) {
+        result.auditedFinancials =
+          await this.financialService.createOrUpdateCompanyAuditedFinancials(
+            kyc.id!,
+            company.id,
+            payload.auditedFinancials,
+            tx,
+          );
+      }
+
+      if (payload.borrowingDetails) {
+        result.borrowingDetails =
+          await this.financialService.createOrUpdateBorrowingDetails(
+            kyc.id!,
+            company.id,
+            payload.borrowingDetails,
+            tx,
+          );
+      }
+
+      if (payload.fundPosition) {
+        result.fundPosition =
+          await this.financialService.createOrUpdateFundPosition(
+            kyc.id!,
+            company.id,
+            payload.fundPosition,
+            tx,
+          );
+      }
+
+      if (payload.capitalDetails) {
+        result.capitalDetails =
+          await this.financialService.createOrUpdateCapitalDetails(
+            kyc.id!,
+            company.id,
+            payload.capitalDetails,
+            tx,
+          );
+      }
+
+      if (payload.profitabilityDetails) {
+        result.profitabilityDetails =
+          await this.financialService.createOrUpdateProfitabilityDetails(
+            kyc.id!,
+            company.id,
+            payload.profitabilityDetails,
+            tx,
+          );
+      }
+
+      if (payload.financialRatios) {
+        result.financialRatios =
+          await this.financialService.createOrUpdateFinancialsRatios(
+            kyc.id!,
+            company.id,
+            payload.financialRatios,
+            tx,
+          );
+      }
+
+      const isComplete =
+        await this.financialService.isFinancialSectionComplete(kyc.id!);
+
+      const currentStatus =
+        await this.statusService.fetchApplicationStatusById(
+          kyc.businessKycStatusMasterId!,
+        );
+
+      if (isComplete && currentStatus.value === 'financial_details') {
+        const nextStatus = await this.statusService.fetchNextStatus(
+          currentStatus.sequenceOrder,
+        );
+
+        await this.businessKycRepository.updateById(
+          kyc.id!,
+          {
+            businessKycStatusMasterId: nextStatus.id,
+            status: nextStatus.value,
+          },
+          {transaction: tx},
+        );
+
+        await tx.commit();
+
+        return {
+          ...result,
+          currentStatus: {
+            id: nextStatus.id,
+            label: nextStatus.status,
+            code: nextStatus.value,
+          },
+        };
+      }
+
+      await tx.commit();
+      return result;
+
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* FETCH FINANCIAL RATIOS DETAILS */
+  /* ------------------------------------------------------------------ */
+
+  async fetchFinancialRatios(userId: string) {
+    const tx = await this.businessKycRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const {kyc, company} = await this.resolveCompanyAndKyc(userId, tx);
+
+      const result =
+        await this.financialService.fetchFinancialRatiosAndProfitabilityDetails(
           kyc.id!,
           company.id,
-          payload.auditedFinancials,
-          tx,
         );
-    }
-
-    if (payload.borrowingDetails) {
-      result.borrowingDetails =
-        await this.financialService.createOrUpdateBorrowingDetails(
-          kyc.id!,
-          company.id,
-          payload.borrowingDetails,
-          tx,
-        );
-    }
-
-    if (payload.fundPosition) {
-      result.fundPosition =
-        await this.financialService.createOrUpdateFundPosition(
-          kyc.id!,
-          company.id,
-          payload.fundPosition,
-          tx,
-        );
-    }
-
-    if (payload.capitalDetails) {
-      result.capitalDetails =
-        await this.financialService.createOrUpdateCapitalDetails(
-          kyc.id!,
-          company.id,
-          payload.capitalDetails,
-          tx,
-        );
-    }
-
-    const isComplete =
-      await this.financialService.isFinancialSectionComplete(kyc.id!);
-
-    const currentStatus =
-      await this.statusService.fetchApplicationStatusById(
-        kyc.businessKycStatusMasterId!,
-      );
-
-    if (isComplete && currentStatus.value === 'financial_details') {
-      const nextStatus = await this.statusService.fetchNextStatus(
-        currentStatus.sequenceOrder,
-      );
-
-      await this.businessKycRepository.updateById(
-        kyc.id!,
-        {
-          businessKycStatusMasterId: nextStatus.id,
-          status: nextStatus.value,
-        },
-        {transaction: tx},
-      );
 
       await tx.commit();
 
-      return {
-        ...result,
-        currentStatus: {
-          id: nextStatus.id,
-          label: nextStatus.status,
-          code: nextStatus.value,
-        },
-      };
+      return result;
+
+    } catch (err) {
+      await tx.rollback();
+      throw err;
     }
-
-    await tx.commit();
-    return result;
-
-  } catch (e) {
-    await tx.rollback();
-    throw e;
   }
-}
-
-/* ------------------------------------------------------------------ */
-/* FETCH FINANCIAL RATIOS AND BORROWING DETAILS */
-/* ------------------------------------------------------------------ */
-
-async fetchFinancialRatios(userId: string) {
-  const tx = await this.businessKycRepository.dataSource.beginTransaction({
-    isolationLevel: IsolationLevel.READ_COMMITTED,
-  });
-
-  try {
-    const {kyc, company} = await this.resolveCompanyAndKyc(userId, tx);
-
-    const result =
-      await this.financialService.fetchFinancialRatiosAndProfitabilityDetails(
-        kyc.id!,
-        company.id,
-      );
-
-    await tx.commit();
-
-    return result;
-
-  } catch (err) {
-    await tx.rollback();
-    throw err;
-  }
-}
 
 }

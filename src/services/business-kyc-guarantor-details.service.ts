@@ -157,6 +157,11 @@ export class BusinessKycGuarantorDetailsService {
         'companyPan',
         'companyAadhar',
         'businessKycGuarantorVerification',
+        'boardResoluton',
+        'gstCertificate',
+        'financialStatement',
+        'addressProof',
+        'itr'
       ],
     });
 

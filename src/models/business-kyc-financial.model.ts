@@ -21,44 +21,72 @@ export class BusinessKycFinancial extends Entity {
   id?: string;
 
   @property({
-    type: 'array',
-    postgresql: {dataType: 'jsonb'},
-    itemType: 'object',
-    jsonSchema: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          year: {type: 'string'},
-          amount: {type: 'number'},
-        },
-      },
-    },
-  })
-  auditedFinancials?: {
-    year: string;
-    amount?: number;
-  }[];
-
-  @property({
     type: 'object',
     postgresql: {dataType: 'jsonb'},
     jsonSchema: {
       type: 'object',
       properties: {
-        cashBalance: {type: 'string'},
-        cashBalanceDate: {type: 'string', format: 'date-time'},
-        bankBalance: {type: 'string'},
-        bankBalanceDate: {type: 'string', format: 'date-time'},
+        baseDate: {type: 'string'},
+        financialStatements: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              periodStartYear: {type: 'number'},
+              periodEndYear: {type: 'number'},
+              amount: {
+                anyOf: [
+                  {type: 'number'},
+                  {type: 'string'},
+                ],
+              },
+            },
+            required: ['periodStartYear', 'periodEndYear', 'amount'],
+          },
+        },
       },
     },
   })
-  fundPosition?: {
-    cashBalance: string;
-    cashBalanceDate: string | Date;
-    bankBalance: string;
-    bankBalanceDate: string | Date;
+  auditedFinancials?: {
+    baseDate: string | Date;
+    financialStatements: Array<{
+      periodStartYear: number;
+      periodEndYear: number;
+      amount: number | string;
+    }>;
   };
+
+  @property({
+     type: 'object',
+     postgresql: {dataType: 'jsonb'},
+     jsonSchema: {
+       type: 'object',
+       properties: {
+         cashAndBankBalance: {type: 'string'},
+         cashAndBankBalanceDate: {type: 'string', format: 'date-time'},
+         inventoryAmount: {type: 'string'},
+         prepaidExpensesAmount: {type: 'string'},
+         otherCurrentAssetsAmount: {type: 'string'},
+         currentAssets: {type: 'string'},
+         quickAssets: {type: 'string'},
+         totalAssets: {type: 'string'},
+         currentLiabilitiesAmount: {type: 'string'},
+         currentAssetsAndLiabilitiesDate: {type: 'string', format: 'date-time'}
+       },
+     },
+   })
+   fundPosition?: {
+     cashAndBankBalance: string;
+     cashAndBankBalanceDate: string | Date;
+     inventoryAmount: string;
+     prepaidExpensesAmount: string;
+     otherCurrentAssetsAmount: string;
+     currentAssets: string;
+     quickAssets: string;
+     totalAssets: string;
+     currentLiabilitiesAmount: string;
+     currentAssetsAndLiabilitiesDate: string | Date;
+   };
 
   @property({
     type: 'object',
@@ -114,11 +142,13 @@ export class BusinessKycFinancial extends Entity {
       type: 'object',
       properties: {
         netProfit: {type: 'number'},
+        // EBIDTA: {type: 'number'},
       },
     },
   })
   profitabilityDetails?: {
     netProfit: number;
+    // EBIDTA: number;
   };
 
   @property({
@@ -132,8 +162,8 @@ export class BusinessKycFinancial extends Entity {
         netWorth: {type: 'number'},
         quickRatio: {type: 'number'},
         returnOnEquity: {type: 'number'},
-        debtServiceCoverageRatio: {type: 'number'},
-        returnOnAsset: {type: 'number'},
+        // debtServiceCoverageRatio: {type: 'number'},
+        returnOnAssets: {type: 'number'},
       },
     },
   })
@@ -143,8 +173,8 @@ export class BusinessKycFinancial extends Entity {
     netWorth: number;
     quickRatio: number;
     returnOnEquity: number;
-    debtServiceCoverageRatio: number;
-    returnOnAsset: number;
+    // debtServiceCoverageRatio: number;
+    returnOnAssets: number;
   };
 
   @property({

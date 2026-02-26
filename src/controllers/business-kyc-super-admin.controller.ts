@@ -21,6 +21,7 @@ import {BusinessKycTransactionsService} from '../services/business-kyc-transacti
 import {BusinessKycDpnService} from '../services/business-kyc-dpn.service';
 import {BusinessKycRocService} from '../services/business-kyc-roc.service';
 import {AddressDetailsService} from '../services/address-details.service';
+import {BusinessKycFinancialsService} from '../services/business-kyc-financials.service';
 
 export class BusinessKycSuperAdminController {
   constructor(
@@ -46,6 +47,8 @@ export class BusinessKycSuperAdminController {
     private businessKycRocService: BusinessKycRocService,
     @inject('service.AddressDetails.service')
     private addressDetailsService: AddressDetailsService,
+    @inject('service.businessKycFinancialsService.service')
+    private businessKycFinancialsService: BusinessKycFinancialsService
 
   ) { }
 
@@ -193,6 +196,56 @@ export class BusinessKycSuperAdminController {
       success: true,
       message: 'Audited financial fetched successfully',
       data: collateralAssets,
+    };
+  }
+
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/company-profiles/{companyId}/financials-details')
+  async fetchCompanyFinancialsDetails(
+    @param.path.string('companyId') companyId: string,
+  ): Promise<{success: boolean; message: string; data: object}> {
+    const companyProfile = await this.companyProfilesRepository.findOne({
+      where: {
+        id: companyId,
+        isDeleted: false,
+      },
+    });
+
+    if (!companyProfile) {
+      throw new HttpErrors.NotFound('Company not found');
+    }
+
+    const businessKyc = await this.businessKycRepository.findOne({
+      where: {
+        companyProfilesId: companyProfile.id,
+        isActive: true,
+        isDeleted: false,
+      },
+    });
+
+    if (!businessKyc) {
+      return {
+        success: true,
+        message: 'No Business KYC found',
+        data: [],
+      };
+    }
+
+    if (!businessKyc.id) {
+      throw new HttpErrors.InternalServerError('Business KYC ID is missing');
+    }
+
+    const financialsDetails =
+      await this.businessKycFinancialsService.fetchFullFinancialSection(
+        businessKyc.id,
+      );
+
+    return {
+      success: true,
+      message: 'financial fetched successfully',
+      data: financialsDetails,
     };
   }
 
@@ -550,6 +603,39 @@ export class BusinessKycSuperAdminController {
     );
   }
 
+
+    @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/company-profiles/financial-details-verification')
+  async companyFinancialVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status', 'companyProfilesId'],
+            properties: {
+              status: {type: 'number'}, // 1 approve, 2 reject
+              companyProfilesId: {type: 'string'},
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      status: number;
+      companyProfilesId: string;
+      reason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    return this.businessKycFinancialsService.updateFinancialsStatusByCompany(
+      body.companyProfilesId,
+      body.status,
+      body.reason ?? '',
+    );
+  }
+
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
   @patch('/company-profiles/guarantor-profile-verification')
@@ -586,13 +672,13 @@ export class BusinessKycSuperAdminController {
   }
 
   @authenticate('jwt')
-@authorize({roles: ['super_admin']})
-@patch('/business-kyc/guarantor-execution/{guarantorId}/resend')
-async resendGuarantorVerification(
-  @param.path.string('guarantorId') guarantorId: string,
-) {
-  return this.kycTxnService.resendGuarantorVerification(guarantorId);
-}
+  @authorize({roles: ['super_admin']})
+  @patch('/business-kyc/guarantor-execution/{guarantorId}/resend')
+  async resendGuarantorVerification(
+    @param.path.string('guarantorId') guarantorId: string,
+  ) {
+    return this.kycTxnService.resendGuarantorVerification(guarantorId);
+  }
 
 
   @authenticate('jwt')

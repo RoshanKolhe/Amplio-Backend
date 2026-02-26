@@ -29,8 +29,28 @@ export class BusinessKycGuarantorRepository extends TimeStampRepositoryMixin<
   public readonly companyPan: BelongsToAccessor<Media, typeof BusinessKycGuarantor.prototype.id>;
   public readonly businessKycGuarantorVerification: HasOneRepositoryFactory<BusinessKycGuarantorVerification, typeof BusinessKycGuarantor.prototype.id>;
 
+  public readonly boardResoluton: BelongsToAccessor<Media, typeof BusinessKycGuarantor.prototype.id>;
+
+  public readonly gstCertificate: BelongsToAccessor<Media, typeof BusinessKycGuarantor.prototype.id>;
+
+  public readonly financialStatement: BelongsToAccessor<Media, typeof BusinessKycGuarantor.prototype.id>;
+
+  public readonly addressProof: BelongsToAccessor<Media, typeof BusinessKycGuarantor.prototype.id>;
+
+  public readonly itr: BelongsToAccessor<Media, typeof BusinessKycGuarantor.prototype.id>;
+
   constructor(@inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('BusinessKycRepository') protected businessKycRepositoryGetter: Getter<BusinessKycRepository>, @repository.getter('CompanyProfilesRepository') protected companyProfilesRepositoryGetter: Getter<CompanyProfilesRepository>, @repository.getter('BusinessKycGuarantorVerificationRepository') protected businessKycGuarantorVerificationRepositoryGetter: Getter<BusinessKycGuarantorVerificationRepository>, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>) {
     super(BusinessKycGuarantor, dataSource);
+    this.itr = this.createBelongsToAccessorFor('itr', mediaRepositoryGetter,);
+    this.registerInclusionResolver('itr', this.itr.inclusionResolver);
+    this.addressProof = this.createBelongsToAccessorFor('addressProof', mediaRepositoryGetter,);
+    this.registerInclusionResolver('addressProof', this.addressProof.inclusionResolver);
+    this.financialStatement = this.createBelongsToAccessorFor('financialStatement', mediaRepositoryGetter,);
+    this.registerInclusionResolver('financialStatement', this.financialStatement.inclusionResolver);
+    this.gstCertificate = this.createBelongsToAccessorFor('gstCertificate', mediaRepositoryGetter,);
+    this.registerInclusionResolver('gstCertificate', this.gstCertificate.inclusionResolver);
+    this.boardResoluton = this.createBelongsToAccessorFor('boardResoluton', mediaRepositoryGetter,);
+    this.registerInclusionResolver('boardResoluton', this.boardResoluton.inclusionResolver);
     this.companyPan = this.createBelongsToAccessorFor('companyPan', mediaRepositoryGetter,);
     this.registerInclusionResolver('companyPan', this.companyPan.inclusionResolver);
     this.companyAadhar = this.createBelongsToAccessorFor('companyAadhar', mediaRepositoryGetter,);
