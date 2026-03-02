@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {inject} from '@loopback/core';
 import {IsolationLevel, repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
@@ -1292,7 +1293,7 @@ export class BusinessKycTransactionsService {
     try {
       const {kyc, company} = await this.resolveCompanyAndKyc(userId);
 
-      let result: any = {};
+      const result: any = {};
 
       if (payload.auditedFinancials) {
         result.auditedFinancials =

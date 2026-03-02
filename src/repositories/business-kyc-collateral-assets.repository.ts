@@ -11,7 +11,9 @@ import {
   ChargeTypes,
   OwnershipTypes,
   BusinessKyc,
-  CompanyProfiles, Media} from '../models';
+  CompanyProfiles,
+  Media,
+} from '../models';
 import {CollateralTypesRepository} from './collateral-types.repository';
 import {ChargeTypesRepository} from './charge-types.repository';
 import {OwnershipTypesRepository} from './ownership-types.repository';
@@ -59,7 +61,14 @@ export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMi
     typeof BusinessKycCollateralAssets.prototype.id
   >;
 
-  public readonly securityDocument: BelongsToAccessor<Media, typeof BusinessKycCollateralAssets.prototype.id>;
+  public readonly securityDocument: BelongsToAccessor<
+    Media,
+    typeof BusinessKycCollateralAssets.prototype.id
+  >;
+  public readonly valuerCertificate: BelongsToAccessor<
+    Media,
+    typeof BusinessKycCollateralAssets.prototype.id
+  >;
 
   constructor(
     @inject('datasources.amplio') dataSource: AmplioDataSource,
@@ -72,11 +81,28 @@ export class BusinessKycCollateralAssetsRepository extends TimeStampRepositoryMi
     @repository.getter('BusinessKycRepository')
     protected businessKycRepositoryGetter: Getter<BusinessKycRepository>,
     @repository.getter('CompanyProfilesRepository')
-    protected companyProfilesRepositoryGetter: Getter<CompanyProfilesRepository>, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>,
+    protected companyProfilesRepositoryGetter: Getter<CompanyProfilesRepository>,
+    @repository.getter('MediaRepository')
+    protected mediaRepositoryGetter: Getter<MediaRepository>,
   ) {
     super(BusinessKycCollateralAssets, dataSource);
-    this.securityDocument = this.createBelongsToAccessorFor('securityDocument', mediaRepositoryGetter,);
-    this.registerInclusionResolver('securityDocument', this.securityDocument.inclusionResolver);
+    this.securityDocument = this.createBelongsToAccessorFor(
+      'securityDocument',
+      mediaRepositoryGetter,
+    );
+    this.registerInclusionResolver(
+      'securityDocument',
+      this.securityDocument.inclusionResolver,
+    );
+    this.valuerCertificate = this.createBelongsToAccessorFor(
+      'valuerCertificate',
+      mediaRepositoryGetter,
+    );
+
+    this.registerInclusionResolver(
+      'valuerCertificate',
+      this.valuerCertificate.inclusionResolver,
+    );
     this.companyProfiles = this.createBelongsToAccessorFor(
       'companyProfiles',
       companyProfilesRepositoryGetter,

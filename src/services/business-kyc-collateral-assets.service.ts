@@ -13,7 +13,7 @@ export class BusinessKycCollateralAssetsService {
     private businessKycRepository: BusinessKycRepository,
     @repository(BusinessKycCollateralAssetsRepository)
     private collateralAssetsRepository: BusinessKycCollateralAssetsRepository,
-  ) { }
+  ) {}
 
   // create or update collateral assets...
   async createOrUpdateCollateralAssets(
@@ -95,60 +95,68 @@ export class BusinessKycCollateralAssetsService {
   async fetchBusinessKycCollateralAssets(
     businessKycId: string,
   ): Promise<BusinessKycCollateralAssets[]> {
-    const collateralAssets =
-      await this.collateralAssetsRepository.find({
-        where: {
-          businessKycId,
-          isActive: true,
-          isDeleted: false,
+    const collateralAssets = await this.collateralAssetsRepository.find({
+      where: {
+        businessKycId,
+        isActive: true,
+        isDeleted: false,
+      },
+      include: [
+        {
+          relation: 'collateralTypes',
+          scope: {
+            fields: {
+              id: true,
+              label: true,
+              value: true,
+            },
+          },
         },
-        include: [
-          {
-            relation: 'collateralTypes',
-            scope: {
-              fields: {
-                id: true,
-                label: true,
-                value: true,
-              },
+        {
+          relation: 'chargeTypes',
+          scope: {
+            fields: {
+              id: true,
+              label: true,
+              value: true,
             },
           },
-          {
-            relation: 'chargeTypes',
-            scope: {
-              fields: {
-                id: true,
-                label: true,
-                value: true,
-              },
+        },
+        {
+          relation: 'ownershipTypes',
+          scope: {
+            fields: {
+              id: true,
+              label: true,
+              value: true,
             },
           },
-          {
-            relation: 'ownershipTypes',
-            scope: {
-              fields: {
-                id: true,
-                label: true,
-                value: true,
-              },
+        },
+        {
+          relation: 'securityDocument',
+          scope: {
+            fields: {
+              id: true,
+              fileOriginalName: true,
+              fileUrl: true,
             },
           },
-          {
-            relation: 'securityDocument',
-            scope: {
-              fields: {
-                id: true,
-                fileOriginalName: true,
-                fileUrl: true,
-              },
+        },
+        {
+          relation: 'valuerCertificate',
+          scope: {
+            fields: {
+              id: true,
+              fileOriginalName: true,
+              fileUrl: true,
             },
           },
-        ],
-      });
+        },
+      ],
+    });
 
     return collateralAssets;
   }
-
 
   // Approve collateral assets....
   async approveCollateralAssets(
@@ -185,42 +193,53 @@ export class BusinessKycCollateralAssetsService {
     };
   }
 
-
-    async updateCollateralAssetsStatus(id: string, status: number, reason: string): Promise<{success: boolean; message: string}> {
+  async updateCollateralAssetsStatus(
+    id: string,
+    status: number,
+    reason: string,
+  ): Promise<{success: boolean; message: string}> {
     const existingProfile = await this.collateralAssetsRepository.findById(id);
 
     if (!existingProfile) {
       throw new HttpErrors.NotFound('No collateral assets found');
     }
 
-    const statusOptions = [0, 1, 2];
+    const statusOptions = [0, 1, 2]; // 0 => under review 1 => approved 2 => rejected
 
     if (!statusOptions.includes(status)) {
       throw new HttpErrors.BadRequest('Invalid status');
     }
 
     if (status === 1) {
-      await this.collateralAssetsRepository.updateById(existingProfile.id, {status: 1, verifiedAt: new Date()});
+      await this.collateralAssetsRepository.updateById(existingProfile.id, {
+        status: 1,
+        verifiedAt: new Date(),
+      });
       return {
         success: true,
-        message: 'collateral assets Approved'
-      }
+        message: 'collateral assets Approved',
+      };
     }
 
     if (status === 2) {
-      await this.collateralAssetsRepository.updateById(existingProfile.id, {status: 2, reason: reason});
+      await this.collateralAssetsRepository.updateById(existingProfile.id, {
+        status: 2,
+        reason: reason,
+      });
       return {
         success: true,
-        message: 'Collateral Assets Rejected'
-      }
+        message: 'Collateral Assets Rejected',
+      };
     }
 
-    if (status === 3) {
-      await this.collateralAssetsRepository.updateById(existingProfile.id, {status: 0});
+    if (status === 0) {
+      await this.collateralAssetsRepository.updateById(existingProfile.id, {
+        status: 0,
+      });
       return {
         success: true,
-        message: 'Collateral Assets status is in under review'
-      }
+        message: 'Collateral Assets status is in under review',
+      };
     }
 
     throw new HttpErrors.BadRequest('invalid status');

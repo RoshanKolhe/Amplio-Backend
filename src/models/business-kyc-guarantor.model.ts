@@ -23,9 +23,9 @@ export class BusinessKycGuarantor extends Entity {
 
   @property({
     type: 'string',
-    required: true,
+    required: false,
   })
-  guarantorCompanyName: string;
+  guarantorCompanyName?: string;
 
   @property({
     type: 'string',
@@ -73,6 +73,12 @@ export class BusinessKycGuarantor extends Entity {
     required: true,
   })
   panNumber: string;
+
+  @property({
+    type: 'date',
+    required: false,
+  })
+  dateOfBirth?: Date;
 
   @property({
     type: 'string',

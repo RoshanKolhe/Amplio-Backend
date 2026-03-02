@@ -10,7 +10,12 @@ import {Users} from './users.model';
     },
     indexes: {
       uniqueAuthorizeSignatory: {
-        keys: {usersId: 1, roleValue: 1, identifierId: 1, submittedPanNumber: 1},
+        keys: {
+          usersId: 1,
+          roleValue: 1,
+          identifierId: 1,
+          submittedPanNumber: 1,
+        },
         options: {unique: true},
       },
     },
@@ -27,19 +32,19 @@ export class AuthorizeSignatories extends Entity {
 
   @property({
     type: 'string',
-    required: true
+    required: true,
   })
   fullName: string;
 
   @property({
     type: 'string',
-    required: true
+    required: true,
   })
   email: string;
 
   @property({
     type: 'string',
-    required: true
+    required: true,
   })
   phone: string;
 
@@ -47,13 +52,24 @@ export class AuthorizeSignatories extends Entity {
   @property({
     type: 'string',
     required: true,
-    jsonSchema: {enum: ['dropdown', 'custom']}
+    jsonSchema: {enum: ['dropdown', 'custom']},
   })
   designationType: string;
 
   @property({
     type: 'string',
-    required: true
+    required: true,
+    jsonSchema: {
+      enum: [
+        'director',
+        'authorized_signatory',
+        'cfo',
+        'ceo',
+        'proprietor',
+        'partner',
+        'other',
+      ],
+    },
   })
   designationValue: string;
 
@@ -62,14 +78,14 @@ export class AuthorizeSignatories extends Entity {
     type: 'string',
     required: true,
     jsonSchema: {
-      pattern: '^[A-Z]{5}[0-9]{4}[A-Z]$'
-    }
+      pattern: '^[A-Z]{5}[0-9]{4}[A-Z]$',
+    },
   })
   submittedPanNumber: string;
 
   @property({
     type: 'string',
-    required: true
+    required: true,
   })
   submittedPanFullName?: string;
 
@@ -77,8 +93,8 @@ export class AuthorizeSignatories extends Entity {
     type: 'string',
     required: true,
     jsonSchema: {
-      pattern: '^\\d{4}-\\d{2}-\\d{2}$'
-    }
+      pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+    },
   })
   submittedDateOfBirth: string;
 
@@ -96,8 +112,8 @@ export class AuthorizeSignatories extends Entity {
   @property({
     type: 'string',
     jsonSchema: {
-      pattern: '^\\d{4}-\\d{2}-\\d{2}$'
-    }
+      pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+    },
   })
   extractedDateOfBirth?: string;
 
@@ -112,14 +128,14 @@ export class AuthorizeSignatories extends Entity {
 
   @property({
     type: 'string',
-    required: true
+    required: true,
   })
   roleValue: string;
 
   @property({
     type: 'string',
     required: true,
-    postgresql: {dataType: 'uuid'}
+    postgresql: {dataType: 'uuid'},
   })
   identifierId: string;
 
@@ -188,4 +204,5 @@ export interface AuthorizeSignatoriesRelations {
   // describe navigational properties here
 }
 
-export type AuthorizeSignatoriesWithRelations = AuthorizeSignatories & AuthorizeSignatoriesRelations;
+export type AuthorizeSignatoriesWithRelations = AuthorizeSignatories &
+  AuthorizeSignatoriesRelations;

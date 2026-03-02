@@ -64,6 +64,21 @@ export class BusinessKycCollateralAssets extends Entity {
   })
   remark?: string;
 
+  @property({
+    type: 'number',
+    required: false,
+  })
+  forcedSaleValue?: number;
+
+  @property({
+    type: 'string',
+    required: false,
+  })
+  valuerName?: string;
+
+  @belongsTo(() => Media)
+  valuerCertificateId?: string;
+
   @belongsTo(() => CollateralTypes)
   collateralTypesId: string;
 
