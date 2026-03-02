@@ -267,6 +267,15 @@ export class BusinessKycAuditedFinancialsService {
   ): void {
     switch (category) {
       case 'financial_statements':
+
+        if (records.some(r => !r.auditedType)) {
+          throw new HttpErrors.BadRequest(
+            'auditedType is required for financial statements',
+          );
+        }
+
+        break;
+
       case 'income_tax_returns':
       case 'gstr_9':
         if (records.some(r => r.type !== 'year_wise')) {

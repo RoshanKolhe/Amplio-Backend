@@ -85,7 +85,6 @@ export class BusinessKycAuditedFinancials extends Entity {
 
   @property({
     type: 'string',
-    required: true,
     jsonSchema: {
       enum: ['audited', 'provisional'],
     },
@@ -103,7 +102,7 @@ export class BusinessKycAuditedFinancials extends Entity {
     defaultFn: 'now',
   })
   reportDate: Date;
-  
+
   @property({
     type: 'number',
     required: true,

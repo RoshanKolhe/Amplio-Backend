@@ -235,10 +235,10 @@ export class CompaniesController {
       const companyProfileWithRelations = companyProfile as any;
       const companyEntityType = companyProfileWithRelations.companyEntityType
         ? {
-            id: companyProfileWithRelations.companyEntityType.id,
-            label: companyProfileWithRelations.companyEntityType.label,
-            value: companyProfileWithRelations.companyEntityType.value,
-          }
+          id: companyProfileWithRelations.companyEntityType.id,
+          label: companyProfileWithRelations.companyEntityType.label,
+          value: companyProfileWithRelations.companyEntityType.value,
+        }
         : null;
 
       const documentsResponse =
@@ -898,6 +898,26 @@ export class CompaniesController {
     };
   }
 
+
+
+  // Helper function for getting the kyc count from companies
+
+  private async countByStatus(status: number) {
+    const kycIds = (
+      await this.kycApplicationsRepository.find({
+        where: {isDeleted: false, status},
+        fields: {id: true},
+      })
+    ).map(k => k.id);
+
+    return (
+      await this.companyProfilesRepository.count({
+        isDeleted: false,
+        kycApplicationsId: {inq: kycIds},
+      })
+    ).count;
+  }
+
   // Get company profiles...
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
@@ -959,21 +979,15 @@ export class CompaniesController {
     });
 
 
-    const countFilter = {
-      isDeleted: false,
-    }
+    // const countFilter = {
+    //   isDeleted: false,
+    // }
 
     const totalCount = (await this.companyProfilesRepository.count(filter?.where)).count;
-
-    const totalRejected = (await this.kycApplicationsRepository.count({...countFilter, status: 3, })).count;
-
-    const totalPending = (await this.kycApplicationsRepository.count({...countFilter, status: 0, })).count;
-
-    const totalUnderReview = (await this.kycApplicationsRepository.count({...countFilter, status: 1, })).count;
-
-    const totalVerified = (await this.kycApplicationsRepository.count({...countFilter, status: 2, })).count;
-
-
+    const totalPending = await this.countByStatus(0);
+    const totalUnderReview = await this.countByStatus(1);
+    const totalVerified = await this.countByStatus(2);
+    const totalRejected = await this.countByStatus(3);
     return {
       success: true,
       message: 'Company Profiles',
