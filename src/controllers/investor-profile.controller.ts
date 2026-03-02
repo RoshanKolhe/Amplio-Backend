@@ -277,6 +277,24 @@ export class InvestorProfileController {
     }
   }
 
+
+
+  private async countInvestorByStatus(status: number) {
+    const kycIds = (
+      await this.kycApplicationsRepository.find({
+        where: {isDeleted: false, status},
+        fields: {id: true},
+      })
+    ).map(k => k.id);
+
+    return (
+      await this.investorProfileRepository.count({
+        isDeleted: false,
+        kycApplicationsId: {inq: kycIds},
+      })
+    ).count;
+  }
+
   // Get investor profiles...
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
@@ -287,9 +305,13 @@ export class InvestorProfileController {
   ): Promise<{
     success: boolean;
     message: string;
-    data: {
-      count: number;
-      profiles: InvestorProfile[];
+    data: InvestorProfile[];
+    count: {
+      totalCount: number;
+      totalRejected: number;
+      totalPending: number;
+      totalVerified: number;
+      totalUnderReview: number;
     }
   }> {
     let rootWhere = {
@@ -318,12 +340,21 @@ export class InvestorProfileController {
 
     const totalCount = (await this.investorProfileRepository.count(filter?.where)).count;
 
+    const totalPending = await this.countInvestorByStatus(0);
+    const totalUnderReview = await this.countInvestorByStatus(1);
+    const totalVerified = await this.countInvestorByStatus(2);
+    const totalRejected = await this.countInvestorByStatus(3);
+
     return {
       success: true,
       message: 'Company Profiles',
-      data: {
-        count: totalCount,
-        profiles: investors
+      data: investors,
+      count: {
+        totalCount: totalCount,
+        totalPending: totalPending,
+        totalRejected: totalRejected,
+        totalUnderReview: totalUnderReview,
+        totalVerified: totalVerified,
       }
     }
   }

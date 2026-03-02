@@ -48,7 +48,7 @@ export class TrusteeProfilesController {
     private kycService: KycService,
     @inject('service.AddressDetails.service')
     private addressDetailsService: AddressDetailsService,
-  ) {}
+  ) { }
 
   // trustee flow will be like => Basic info, documents, bank details, authorize signatories, bank account details, agreement, verification.
 
@@ -710,6 +710,23 @@ export class TrusteeProfilesController {
     };
   }
 
+
+  private async countTrusteeByStatus(status: number) {
+    const kycIds = (
+      await this.kycApplicationsRepository.find({
+        where: {isDeleted: false, status},
+        fields: {id: true},
+      })
+    ).map(k => k.id);
+
+    return (
+      await this.trusteeProfilesRepository.count({
+        isDeleted: false,
+        kycApplicationsId: {inq: kycIds},
+      })
+    ).count;
+  }
+
   // Get trustee profiles...
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
@@ -720,10 +737,14 @@ export class TrusteeProfilesController {
   ): Promise<{
     success: boolean;
     message: string;
-    data: {
-      count: number;
-      profiles: TrusteeProfiles[];
-    };
+    data: TrusteeProfiles[];
+    count: {
+      totalCount: number;
+      totalRejected: number;
+      totalPending: number;
+      totalVerified: number;
+      totalUnderReview: number;
+    }
   }> {
     let rootWhere = {
       ...filter?.where,
@@ -763,16 +784,27 @@ export class TrusteeProfilesController {
       ],
     });
 
-    const totalCount = (await this.trusteeProfilesRepository.count(rootWhere))
-      .count;
+    const totalCount = (
+      await this.trusteeProfilesRepository.count(filter?.where)
+    ).count;
+
+    const totalPending = await this.countTrusteeByStatus(0);
+    const totalUnderReview = await this.countTrusteeByStatus(1);
+    const totalVerified = await this.countTrusteeByStatus(2);
+    const totalRejected = await this.countTrusteeByStatus(3);
+
 
     return {
       success: true,
       message: 'Trustee Profiles',
-      data: {
-        count: totalCount,
-        profiles: trustees,
-      },
+      data: trustees,
+      count: {
+        totalCount: totalCount,
+        totalPending: totalPending,
+        totalRejected: totalRejected,
+        totalUnderReview: totalUnderReview,
+        totalVerified: totalVerified,
+      }
     };
   }
 
