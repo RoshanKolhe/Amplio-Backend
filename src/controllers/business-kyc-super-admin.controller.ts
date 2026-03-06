@@ -52,6 +52,104 @@ export class BusinessKycSuperAdminController {
 
   ) { }
 
+  private async ensureAllKybSectionsApproved(companyId: string): Promise<void> {
+    const businessKyc = await this.businessKycRepository.findOne({
+      where: {
+        companyProfilesId: companyId,
+        isActive: true,
+        isDeleted: false,
+      },
+    });
+
+    if (!businessKyc) {
+      throw new HttpErrors.NotFound('Business KYC not found');
+    }
+
+    if (!businessKyc.id) {
+      throw new HttpErrors.InternalServerError('Business KYC ID is missing');
+    }
+
+    const notApprovedSections: string[] = [];
+
+    try {
+      const businessProfile =
+        await this.businessKycProfileDetailsService.fetchBusinessKycProfileDetails(
+          businessKyc.id,
+        );
+      if (!businessProfile.length || businessProfile.some(item => item.status !== 1)) {
+        notApprovedSections.push('business profile');
+      }
+    } catch {
+      notApprovedSections.push('business profile');
+    }
+
+    try {
+      const auditedFinancials =
+        await this.businessKycAuditedFinancialsService.fetchAuditedFinancials(
+          businessKyc.id,
+        );
+      const allAuditedFinancialRows = [
+        ...auditedFinancials.financialStatements,
+        ...auditedFinancials.incomeTaxReturns,
+        ...auditedFinancials.gstr9,
+        ...auditedFinancials.gst3b,
+      ];
+      if (
+        !allAuditedFinancialRows.length ||
+        allAuditedFinancialRows.some(item => item.status !== 1)
+      ) {
+        notApprovedSections.push('audited financials');
+      }
+    } catch {
+      notApprovedSections.push('audited financials');
+    }
+
+    try {
+      const financialDetails =
+        await this.businessKycFinancialsService.fetchFullFinancialSection(
+          businessKyc.id,
+        );
+      if (financialDetails.status !== 1) {
+        notApprovedSections.push('financial details');
+      }
+    } catch {
+      notApprovedSections.push('financial details');
+    }
+
+    try {
+      const collateralAssets =
+        await this.businessKycCollateralAssetsService.fetchBusinessKycCollateralAssets(
+          businessKyc.id,
+        );
+      if (
+        !collateralAssets.length ||
+        collateralAssets.some(item => item.status !== 1)
+      ) {
+        notApprovedSections.push('collateral');
+      }
+    } catch {
+      notApprovedSections.push('collateral');
+    }
+
+    try {
+      const guarantors =
+        await this.businessKycGuarantorDetailsService.getGuarantorsByBusinessKycId(
+          businessKyc.id,
+        );
+      if (!guarantors.length || guarantors.some(item => item.status !== 1)) {
+        notApprovedSections.push('guarantor');
+      }
+    } catch {
+      notApprovedSections.push('guarantor');
+    }
+
+    if (notApprovedSections.length) {
+      throw new HttpErrors.BadRequest(
+        `Cannot move forward from pending. These KYB sections are not approved: ${notApprovedSections.join(', ')}`,
+      );
+    }
+  }
+
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
   @get('/company-profiles/{companyId}/business-profile')
@@ -661,6 +759,7 @@ export class BusinessKycSuperAdminController {
       reason?: string;
     },
   ): Promise<{success: boolean; message: string}> {
+
     const result =
       await this.businessKycGuarantorDetailsService.updateGuarantorDetailsStatus(
         body.id,
@@ -734,6 +833,8 @@ export class BusinessKycSuperAdminController {
     if (!companyId) {
       throw new HttpErrors.BadRequest('companyId is required');
     }
+
+    await this.ensureAllKybSectionsApproved(companyId);
 
     return this.kycTxnService.advanceWorkflow(companyId);
   }

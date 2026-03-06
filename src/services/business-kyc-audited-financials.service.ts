@@ -309,79 +309,79 @@ export class BusinessKycAuditedFinancialsService {
 
 
   // fetch audited financials...
-  async fetchAuditedFinancials(businessKycId: string): Promise<{
+  async fetchAuditedFinancials(businessKycId: string, tx?: any): Promise<{
     financialStatements: BusinessKycAuditedFinancials[];
     incomeTaxReturns: BusinessKycAuditedFinancials[];
     gstr9: BusinessKycAuditedFinancials[];
     gst3b: BusinessKycAuditedFinancials[];
   }> {
-    const financialStatements = await this.auditedRepo.find({
-      where: {
-        and: [
-          {businessKycId: businessKycId},
-          {category: 'financial_statements'},
-          {isActive: true},
-          {isDeleted: false},
-        ],
+    const txOptions = tx ? {transaction: tx} : undefined;
+    const include = [
+      {
+        relation: 'file',
+        scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
       },
-      include: [
-        {
-          relation: 'file',
-          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
-        },
-      ],
-    });
+    ];
 
-    const incomeTaxReturns = await this.auditedRepo.find({
-      where: {
-        and: [
-          {businessKycId: businessKycId},
-          {category: 'income_tax_returns'},
-          {isActive: true},
-          {isDeleted: false},
-        ],
-      },
-      include: [
-        {
-          relation: 'file',
-          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+    const financialStatements = await this.auditedRepo.find(
+      {
+        where: {
+          and: [
+            {businessKycId: businessKycId},
+            {category: 'financial_statements'},
+            {isActive: true},
+            {isDeleted: false},
+          ],
         },
-      ],
-    });
+        include,
+      },
+      txOptions,
+    );
 
-    const gstr9 = await this.auditedRepo.find({
-      where: {
-        and: [
-          {businessKycId: businessKycId},
-          {category: 'gstr_9'},
-          {isActive: true},
-          {isDeleted: false},
-        ],
-      },
-      include: [
-        {
-          relation: 'file',
-          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+    const incomeTaxReturns = await this.auditedRepo.find(
+      {
+        where: {
+          and: [
+            {businessKycId: businessKycId},
+            {category: 'income_tax_returns'},
+            {isActive: true},
+            {isDeleted: false},
+          ],
         },
-      ],
-    });
+        include,
+      },
+      txOptions,
+    );
 
-    const gst3b = await this.auditedRepo.find({
-      where: {
-        and: [
-          {businessKycId: businessKycId},
-          {category: 'gst_3b'},
-          {isActive: true},
-          {isDeleted: false},
-        ],
-      },
-      include: [
-        {
-          relation: 'file',
-          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+    const gstr9 = await this.auditedRepo.find(
+      {
+        where: {
+          and: [
+            {businessKycId: businessKycId},
+            {category: 'gstr_9'},
+            {isActive: true},
+            {isDeleted: false},
+          ],
         },
-      ],
-    });
+        include,
+      },
+      txOptions,
+    );
+
+    const gst3b = await this.auditedRepo.find(
+      {
+        where: {
+          and: [
+            {businessKycId: businessKycId},
+            {category: 'gst_3b'},
+            {isActive: true},
+            {isDeleted: false},
+          ],
+        },
+        include,
+      },
+      txOptions,
+    );
 
     return {
       financialStatements,

@@ -250,14 +250,12 @@ export class BusinessKycGuarantorDetailsService {
   }
 
 
-
-
-
   async updateGuarantorDetailsStatus(
     id: string,
     status: number,
     reason: string,
   ): Promise<{success: boolean; message: string}> {
+
     const existingProfile =
       await this.businessKycGuarantorRepository.findById(id);
 
@@ -265,7 +263,16 @@ export class BusinessKycGuarantorDetailsService {
       throw new HttpErrors.NotFound('No guarantor details found');
     }
 
-    const statusOptions = [0, 1, 2];
+    const verification =
+      await this.businessKycGuarantorVerificationRepository.findOne({
+        where: {businessKycGuarantorId: id},
+      });
+
+    if (!verification?.isVerified || !verification?.isUsed) {
+      throw new HttpErrors.BadRequest('Guarantor execution required');
+    }
+
+    const statusOptions = [0, 1, 2, 3];
 
     if (!statusOptions.includes(status)) {
       throw new HttpErrors.BadRequest('Invalid status');
@@ -276,6 +283,7 @@ export class BusinessKycGuarantorDetailsService {
         status: 1,
         verifiedAt: new Date(),
       });
+
       return {
         success: true,
         message: 'Guarantor Details Approved',
@@ -287,6 +295,7 @@ export class BusinessKycGuarantorDetailsService {
         status: 2,
         reason: reason,
       });
+
       return {
         success: true,
         message: 'Guarantor Details Rejected',
@@ -297,12 +306,13 @@ export class BusinessKycGuarantorDetailsService {
       await this.businessKycGuarantorRepository.updateById(existingProfile.id, {
         status: 0,
       });
+
       return {
         success: true,
         message: 'Guarantor Details status is in under review',
       };
     }
 
-    throw new HttpErrors.BadRequest('invalid status');
+    throw new HttpErrors.BadRequest('Invalid status');
   }
 }

@@ -340,19 +340,34 @@ export class BusinessKycTransactionsService {
         tx,
       );
 
-      const submittedCategory = auditedFinancials[0].category;
+      const auditedStepToRecords: Record<string, keyof Awaited<ReturnType<BusinessKycAuditedFinancialsService['fetchAuditedFinancials']>>> = {
+        financial_statements: 'financialStatements',
+        income_tax_returns: 'incomeTaxReturns',
+        gstr_9: 'gstr9',
+        gst_3b: 'gst3b',
+      };
 
-      // Get current status
-      const currentStatus = await this.statusService.fetchApplicationStatusById(
+      let activeStatus = await this.statusService.fetchApplicationStatusById(
         kyc.businessKycStatusMasterId!,
       );
+      let movedStatus = false;
 
-      // Only advance if the submitted category matches the current status
-      // This prevents skipping ahead
-      if (currentStatus.value === submittedCategory) {
-        // Advance to next status
+      // Allow random category saves and move ahead only when current required audited step already has data.
+      while (Object.prototype.hasOwnProperty.call(auditedStepToRecords, activeStatus.value)) {
+        const auditedData = await this.auditedService.fetchAuditedFinancials(
+          kyc.id!,
+          tx,
+        );
+
+        const currentStepRecords =
+          auditedData[auditedStepToRecords[activeStatus.value]];
+
+        if (!currentStepRecords?.length) {
+          break;
+        }
+
         const nextStatus = await this.statusService.fetchNextStatus(
-          currentStatus.sequenceOrder,
+          activeStatus.sequenceOrder,
         );
 
         await this.businessKycRepository.updateById(
@@ -364,19 +379,23 @@ export class BusinessKycTransactionsService {
           {transaction: tx},
         );
 
-        await tx.commit();
+        activeStatus = nextStatus;
+        movedStatus = true;
+      }
 
+      await tx.commit();
+
+      if (movedStatus) {
         return {
           auditedFinancials: result.auditedFinancials,
           currentStatus: {
-            id: nextStatus.id,
-            label: nextStatus.status,
-            code: nextStatus.value,
+            id: activeStatus.id,
+            label: activeStatus.status,
+            code: activeStatus.value,
           },
         };
       }
 
-      await tx.commit();
       return {auditedFinancials: result.auditedFinancials};
     } catch (e) {
       await tx.rollback();

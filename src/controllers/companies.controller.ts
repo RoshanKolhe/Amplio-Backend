@@ -408,6 +408,55 @@ export class CompaniesController {
   }
 
   // for company but without login just for KYC
+  @patch('/company-profiles/kyc-upload-documents')
+  async patchCompanyKYCDocuments(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'documents'],
+            properties: {
+              usersId: {type: 'string'},
+              documents: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['documentsFileId'],
+                  properties: {
+                    companyKycDocumentRequirementsId: {type: 'string'},
+                    documentsId: {type: 'string'},
+                    documentsFileId: {type: 'string'},
+                    mode: {type: 'number', enum: [0, 1]},
+                    status: {type: 'number', enum: [0, 1, 2]},
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      documents: {
+        companyKycDocumentRequirementsId?: string;
+        documentsId?: string;
+        documentsFileId: string;
+        mode?: number;
+        status?: number;
+      }[];
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    uploadedDocuments: CompanyKycDocument[];
+    currentProgress: string[];
+  }> {
+    return this.uploadCompanyKYCDocuments(body);
+  }
+
+  // for company but without login just for KYC
   @post('/company-profiles/kyc-bank-details')
   async uploadCompanyBankDetailsUpload(
     @requestBody({
@@ -496,6 +545,73 @@ export class CompaniesController {
   }
 
   // for company but without login just for KYC
+  @patch('/company-profiles/kyc-bank-details')
+  async patchCompanyKycBankDetails(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'bankDetails'],
+            properties: {
+              usersId: {type: 'string'},
+              bankDetails: {
+                type: 'object',
+                required: [
+                  'bankName',
+                  'bankShortCode',
+                  'ifscCode',
+                  'branchName',
+                  'bankAddress',
+                  'accountType',
+                  'accountHolderName',
+                  'accountNumber',
+                  'bankAccountProofType',
+                  'bankAccountProofId',
+                ],
+                properties: {
+                  bankName: {type: 'string'},
+                  bankShortCode: {type: 'string'},
+                  ifscCode: {type: 'string'},
+                  branchName: {type: 'string'},
+                  bankAddress: {type: 'string'},
+                  accountType: {type: 'number'},
+                  accountHolderName: {type: 'string'},
+                  accountNumber: {type: 'string'},
+                  bankAccountProofType: {type: 'number'},
+                  bankAccountProofId: {type: 'string'},
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      bankDetails: {
+        bankName: string;
+        bankShortCode: string;
+        ifscCode: string;
+        branchName: string;
+        bankAddress: string;
+        accountType: number;
+        accountHolderName: string;
+        accountNumber: string;
+        bankAccountProofType: number;
+        bankAccountProofId: string;
+      };
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    account: BankDetails;
+    currentProgress: string[];
+  }> {
+    return this.uploadCompanyBankDetailsUpload(body);
+  }
+
+  // for company but without login just for KYC
   @post('/company-profiles/kyc-address-details')
   async uploadCompanyKycAddressDetails(
     @requestBody({
@@ -570,6 +686,43 @@ export class CompaniesController {
     );
 
     return {...response, currentProgress};
+  }
+
+  // for company but without login just for KYC
+  @patch('/company-profiles/kyc-address-details')
+  async patchCompanyKycAddressDetails(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'registeredAddress'],
+            properties: {
+              usersId: {type: 'string'},
+              registeredAddress: getModelSchemaRef(AddressDetails, {
+                partial: true,
+              }),
+              correspondenceAddress: getModelSchemaRef(AddressDetails, {
+                partial: true,
+              }),
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      registeredAddress: Partial<AddressDetails>;
+      correspondenceAddress?: Partial<AddressDetails>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    registeredAddress: AddressDetails | null;
+    correspondenceAddress: AddressDetails | null;
+    currentProgress: string[];
+  }> {
+    return this.uploadCompanyKycAddressDetails(body);
   }
 
   // for company but without login just for KYC
@@ -736,6 +889,89 @@ export class CompaniesController {
   }
 
   // for company but without login just for KYC
+  @patch('/company-profiles/kyc-authorize-signatories')
+  async patchAuthorizeSignatoriesForKyc(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'signatories'],
+            properties: {
+              usersId: {type: 'string'},
+              signatories: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: [
+                    'fullName',
+                    'email',
+                    'phone',
+                    'submittedPanFullName',
+                    'submittedPanNumber',
+                    'submittedDateOfBirth',
+                    'panCardFileId',
+                    'boardResolutionFileId',
+                    'designationType',
+                    'designationValue',
+                  ],
+                  properties: {
+                    fullName: {type: 'string'},
+                    email: {type: 'string'},
+                    phone: {type: 'string'},
+                    extractedPanFullName: {type: 'string'},
+                    extractedPanNumber: {type: 'string'},
+                    extractedDateOfBirth: {type: 'string'},
+                    submittedPanFullName: {type: 'string'},
+                    submittedPanNumber: {type: 'string'},
+                    submittedDateOfBirth: {type: 'string'},
+                    panCardFileId: {type: 'string'},
+                    boardResolutionFileId: {type: 'string'},
+                    designationType: {type: 'string'},
+                    designationValue: {type: 'string'},
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      signatories: Array<{
+        fullName: string;
+        email: string;
+        phone: string;
+        extractedPanFullName?: string;
+        extractedPanNumber?: string;
+        extractedDateOfBirth?: string;
+        submittedPanFullName: string;
+        submittedPanNumber: string;
+        submittedDateOfBirth: string;
+        panCardFileId: string;
+        boardResolutionFileId: string;
+        designationType: string;
+        designationValue: string;
+      }>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    createdAuthorizeSignatories: AuthorizeSignatories[];
+    erroredAuthrizeSignatories: Array<{
+      fullName: string;
+      email: string;
+      phone: string;
+      submittedPanNumber: string;
+      message: string;
+    }>;
+    currentProgress: string[];
+  }> {
+    return this.uploadAuthorizeSignatories(body);
+  }
+
+  // for company but without login just for KYC
   @post('/company-profiles/kyc-authorize-signatory')
   async uploadAuthorizeSignatoryForKyc(
     @requestBody({
@@ -844,8 +1080,85 @@ export class CompaniesController {
     }
   }
 
+  // for company but without login just for KYC
+  @patch('/company-profiles/kyc-authorize-signatory')
+  async patchAuthorizeSignatoryForKyc(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'signatoryId', 'signatory'],
+            properties: {
+              usersId: {type: 'string'},
+              signatoryId: {type: 'string'},
+              signatory: {
+                type: 'object',
+                properties: {
+                  fullName: {type: 'string'},
+                  email: {type: 'string'},
+                  phone: {type: 'string'},
+                  extractedPanFullName: {type: 'string'},
+                  extractedPanNumber: {type: 'string'},
+                  extractedDateOfBirth: {type: 'string'},
+                  submittedPanFullName: {type: 'string'},
+                  submittedPanNumber: {type: 'string'},
+                  submittedDateOfBirth: {type: 'string'},
+                  panCardFileId: {type: 'string'},
+                  boardResolutionFileId: {type: 'string'},
+                  designationType: {type: 'string'},
+                  designationValue: {type: 'string'},
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      signatoryId: string;
+      signatory: Partial<AuthorizeSignatories>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatory: AuthorizeSignatories | null;
+    currentProgress: string[];
+  }> {
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
+
+    try {
+      const company = await this.companyProfilesRepository.findOne(
+        {where: {usersId: body.usersId, isDeleted: false}},
+        {transaction: tx},
+      );
+
+      if (!company) throw new HttpErrors.NotFound('Company not found');
+
+      const result = await this.authorizeSignatoriesService.updateSignatoryInfo(
+        body.signatoryId,
+        body.signatory,
+        tx,
+      );
+
+      const currentProgress = await this.updateKycProgress(
+        company.kycApplicationsId,
+        'company_authorized_signatories',
+      );
+
+      await tx.commit();
+      return {...result, currentProgress};
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
   // get my company profile..
-  @authenticate('jwt')
+  @authenticate('jwt')        
   @authorize({roles: ['company']})
   @get('/company-profiles/me')
   async getMyCompanyProfile(

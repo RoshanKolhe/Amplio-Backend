@@ -44,37 +44,45 @@ export class BankDetailsService {
   }
 
   // create new bank account...
-  async createNewBankAccount(bankDetails: Omit<BankDetails, 'id'>): Promise<{
-    success: boolean;
-    message: string;
-    account: BankDetails;
-  }> {
-    try {
-      const checkForExistingAccount = await this.bankDetailsRepository.find({
-        where: {
-          and: [
-            {usersId: bankDetails.usersId},
-            {roleValue: bankDetails.roleValue}
-          ]
-        }
-      });
+ async createNewBankAccount(bankDetails: Omit<BankDetails, 'id'>) {
+  try {
 
-      if (!checkForExistingAccount || checkForExistingAccount.length === 0) {
-        bankDetails.isPrimary = true;
+    const existingAccount = await this.bankDetailsRepository.findOne({
+      where: {
+        usersId: bankDetails.usersId,
+        accountNumber: bankDetails.accountNumber,
+        roleValue: bankDetails.roleValue
       }
+    });
 
-      const newAccount = await this.bankDetailsRepository.create(bankDetails);
+    if (existingAccount) {
+      const updated = await this.bankDetailsRepository.updateById(
+        existingAccount.id,
+        bankDetails
+      );
+
+      const account = await this.bankDetailsRepository.findById(existingAccount.id);
 
       return {
         success: true,
-        message: 'New Account Created',
-        account: newAccount
-      }
-    } catch (error) {
-      console.log('Error while creating new bank account :', error);
-      throw error;
+        message: 'Bank account updated',
+        account
+      };
     }
+
+    const newAccount = await this.bankDetailsRepository.create(bankDetails);
+
+    return {
+      success: true,
+      message: 'New Account Created',
+      account: newAccount
+    };
+
+  } catch (error) {
+    console.log('Error while creating new bank account:', error);
+    throw error;
   }
+}
 
   // fetch user bank accounts...
   async fetchUserBankAccounts(usersId: string, roleValue: string): Promise<{success: boolean; message: string; accounts: BankDetails[]}> {

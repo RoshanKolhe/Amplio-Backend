@@ -59,7 +59,7 @@ export class CompanyKycDocumentService {
     private companyKycDocumentRequirementsService: CompanyKycDocumentRequirementsService,
     @inject('service.media.service')
     private mediaService: MediaService,
-  ) {}
+  ) { }
 
   async fetchForKycStepper(usersId: string): Promise<{
     success: boolean;
@@ -135,10 +135,10 @@ export class CompanyKycDocumentService {
             verifiedAt: uploaded.verifiedAt,
             documentFile: uploaded.media
               ? {
-                  id: uploaded.media.id,
-                  fileUrl: uploaded.media.fileUrl,
-                  fileOriginalName: uploaded.media.fileOriginalName,
-                }
+                id: uploaded.media.id,
+                fileUrl: uploaded.media.fileUrl,
+                fileOriginalName: uploaded.media.fileOriginalName,
+              }
               : null,
           },
         };
@@ -173,16 +173,16 @@ export class CompanyKycDocumentService {
           },
         },
         {
-        relation: 'companyKycDocumentRequirements',
-        scope: {
-          fields: {
-            id: true,
-            documentLabel: true,
-            documentValue: true,
-            isMandatory: true,
+          relation: 'companyKycDocumentRequirements',
+          scope: {
+            fields: {
+              id: true,
+              documentLabel: true,
+              documentValue: true,
+              isMandatory: true,
+            },
           },
         },
-      },
       ],
       // order: ['createdAt DESC'],
     });
@@ -239,10 +239,50 @@ export class CompanyKycDocumentService {
       }
     }
 
-    const uploadedDocuments = await this.companyKycDocumentRepository.createAll(
-      documents,
-      {transaction: tx},
-    );
+    const uploadedDocuments: CompanyKycDocument[] = [];
+
+    for (const document of documents) {
+
+      const existingDoc = await this.companyKycDocumentRepository.findOne(
+        {
+          where: {
+            and: [
+              {usersId: document.usersId},
+              {companyKycDocumentRequirementsId: document.companyKycDocumentRequirementsId},
+              {isDeleted: false},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (existingDoc) {
+        await this.companyKycDocumentRepository.updateById(
+          existingDoc.id,
+          {
+            documentsFileId: document.documentsFileId,
+            status: document.status ?? 0,
+            mode: document.mode ?? 1,
+            updatedAt: new Date(),
+          },
+          {transaction: tx},
+        );
+
+        const updated = await this.companyKycDocumentRepository.findById(existingDoc.id, {
+        });
+
+        uploadedDocuments.push(updated);
+
+      } else {
+
+        const created = await this.companyKycDocumentRepository.create(
+          document,
+          {transaction: tx},
+        );
+
+        uploadedDocuments.push(created);
+      }
+    }
 
     const mediaIds = documents.map(document => document.documentsFileId);
     await this.mediaService.updateMediaUsedStatus(mediaIds, true);

@@ -356,6 +356,10 @@ export class BusinessKycController {
       throw new HttpErrors.BadRequest('Verification link expired');
     }
 
+    if (verification.isVerified) {
+      throw new HttpErrors.BadRequest('Verification already completed');
+    }
+
     const guarantor =
       await this.businessKycGuarantorRepository.findById(guarantorId);
 
@@ -363,31 +367,26 @@ export class BusinessKycController {
       throw new HttpErrors.NotFound('Guarantor not found');
     }
 
-    if (!verification.isUsed) {
-      await this.businessKycGuarantorVerificationRepository.updateById(
-        verificationId,
-        {
-          isVerified: true,
-          isUsed: true,
-          verifiedAt: new Date(),
-        },
-      );
+    await this.businessKycGuarantorVerificationRepository.updateById(
+      verificationId,
+      {
+        isVerified: true,
+        isUsed: true,
+        verifiedAt: new Date(),
+      },
+    );
 
-      await this.businessKycGuarantorRepository.updateById(guarantorId, {
-        isExecutionDone: true,
-      });
-    }
+    await this.businessKycGuarantorRepository.updateById(guarantorId, {
+      isExecutionDone: true,
+    });
 
     return {
       success: true,
-      message: verification.isUsed
-        ? 'Guarantor already verified'
-        : 'Guarantor verified successfully',
+      message: 'Guarantor verified successfully',
       data: {
         guarantorId: guarantor.id,
         guarantorName: guarantor.guarantorCompanyName,
         cin: guarantor.CIN,
-        // documentUrl: guarantor.businessKycGuarantorVerification.mediaId
       },
     };
   }
