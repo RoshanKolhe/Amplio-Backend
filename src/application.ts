@@ -48,6 +48,7 @@ import {BusinessKycDpnService} from './services/business-kyc-dpn.service';
 import {BusinessKycFinancialsService} from './services/business-kyc-financials.service';
 import {CompanyKycDocumentService} from './services/company-kyc-document.service';
 import {CompanyKycDocumentRequirementsService} from './services/company-kyc-document-requirements.service';
+import {CompanyDataMapperService} from './services/company-brisk-data-mapper.service';
 
 export {ApplicationConfig};
 
@@ -136,22 +137,25 @@ export class AmplioBackendApplication extends BootMixin(
       BusinessKycTransactionsService,
     );
     this.bind('service.businessKycAgreementService.service').toClass(
-      BusinessKycAgreementService
+      BusinessKycAgreementService,
     );
     this.bind('service.businessKycRocService.service').toClass(
-      BusinessKycRocService
+      BusinessKycRocService,
     );
     this.bind('service.businessKycDpnService.service').toClass(
-      BusinessKycDpnService
+      BusinessKycDpnService,
     );
     this.bind('service.businessKycFinancialsService.service').toClass(
-      BusinessKycFinancialsService
+      BusinessKycFinancialsService,
     );
     this.bind('service.companyKycDocumentRequirementsService.service').toClass(
       CompanyKycDocumentRequirementsService,
     );
     this.bind('service.companyKycDocumentService.service').toClass(
       CompanyKycDocumentService,
+    );
+    this.bind('service.companyDataMapper.service').toClass(
+      CompanyDataMapperService,
     );
   }
 

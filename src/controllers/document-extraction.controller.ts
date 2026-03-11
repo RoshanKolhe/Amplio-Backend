@@ -8,12 +8,15 @@ import {
   RestBindings,
 } from '@loopback/rest';
 import multer from 'multer';
+import {CompanyDataMapperService} from '../services/company-brisk-data-mapper.service';
 import {DocumentExtractionService} from '../services/document-extraction.service';
 
 export class DocumentExtractionController {
   constructor(
     @inject('service.documentExtraction.service')
     private documentExtractionService: DocumentExtractionService,
+    @inject('service.companyDataMapper.service')
+    private companyDataMapperService: CompanyDataMapperService,
   ) { }
 
   private multerHandler = multer({storage: multer.memoryStorage()}).any();
@@ -99,20 +102,13 @@ export class DocumentExtractionController {
       CIN: string;
     }
   ): Promise<{success: boolean; message: string; data: object}> {
-    const response: any = await this.documentExtractionService.extractCompanyInfo(body.CIN);
-    const newResult = {
-      companyName: response.company_name || '',
-      gstin: response.gstin || '',
-      dateOfIncorporation: response.date_of_incorporation || '',
-      cityOfIncorporation: response.city_of_incorporation || '',
-      stateOfIncorporation: response.state_of_incorporation || '',
-      countryOfIncorporation: response.country_of_incorporation || '',
-      companyPanNumber: response.company_pan_number || ''
-    }
+    const response: any = await this.companyDataMapperService.fetchCompanyDataFromInstaFinancials(body.CIN);
+    console.log('response', response);
+
     return {
       success: true,
       message: 'Company info fetched',
-      data: newResult
+      data: response
     }
   }
 }
