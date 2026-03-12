@@ -4,6 +4,7 @@ import {HttpErrors} from '@loopback/rest';
 import {
   CompanyProfilesRepository,
   InvestorProfileRepository,
+  MerchantProfilesRepository,
   PermissionsRepository,
   RolePermissionsRepository,
   RolesRepository,
@@ -30,7 +31,9 @@ export class RbacService {
     @repository(TrusteeProfilesRepository)
     private trusteeProfilesRepository: TrusteeProfilesRepository,
     @repository(InvestorProfileRepository)
-    private investorProfileRepository: InvestorProfileRepository
+    private investorProfileRepository: InvestorProfileRepository,
+    @repository(MerchantProfilesRepository)
+    private merchantProfileRepository: MerchantProfilesRepository
   ) { }
 
   // --------------------------------------------validate profile------------------------------------
@@ -194,6 +197,27 @@ export class RbacService {
     });
     return {
       fullName: investor?.fullName,
+      email: user.email,
+      phone: user.phone,
+      isActive: user.isActive,
+      roles,
+      permissions
+    }
+  }
+
+  async returnMerchantProfile(userId: string, roles: string[], permissions: string[]) {
+    const user = await this.usersRepository.findById(userId);
+    const merchant = await this.merchantProfileRepository.findOne({
+      where: {
+        and: [
+          {usersId: user.id},
+          {isActive: true},
+          {isDeleted: false}
+        ]
+      }
+    });
+    return {
+      fullName: merchant?.companyName,
       email: user.email,
       phone: user.phone,
       isActive: user.isActive,

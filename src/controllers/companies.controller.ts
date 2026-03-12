@@ -1158,7 +1158,7 @@ export class CompaniesController {
   }
 
   // get my company profile..
-  @authenticate('jwt')        
+  @authenticate('jwt')
   @authorize({roles: ['company']})
   @get('/company-profiles/me')
   async getMyCompanyProfile(

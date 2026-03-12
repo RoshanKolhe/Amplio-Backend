@@ -5,7 +5,7 @@ import {get, HttpErrors, post, requestBody} from '@loopback/rest';
 import {securityId, UserProfile} from '@loopback/security';
 import _ from 'lodash';
 import {authorize} from '../authorization';
-import {CompanyPanCardsRepository, CompanyProfilesRepository, InvestorPanCardsRepository, InvestorProfileRepository, KycApplicationsRepository, OtpRepository, RegistrationSessionsRepository, RolesRepository, TrusteePanCardsRepository, TrusteeProfilesRepository, UserRolesRepository, UsersRepository} from '../repositories';
+import {CompanyPanCardsRepository, CompanyProfilesRepository, InvestorPanCardsRepository, InvestorProfileRepository, KycApplicationsRepository, MerchantPanCardRepository, MerchantProfilesRepository, OtpRepository, RegistrationSessionsRepository, RolesRepository, TrusteePanCardsRepository, TrusteeProfilesRepository, UserRolesRepository, UsersRepository} from '../repositories';
 import {BcryptHasher} from '../services/hash.password.bcrypt';
 import {JWTService} from '../services/jwt-service';
 import {MediaService} from '../services/media.service';
@@ -38,6 +38,10 @@ export class AuthController {
     private investorProfileRepository: InvestorProfileRepository,
     @repository(InvestorPanCardsRepository)
     private investorPanCardsRepository: InvestorPanCardsRepository,
+    @repository(MerchantProfilesRepository)
+    private merchantProfileRepository: MerchantProfilesRepository,
+    @repository(MerchantPanCardRepository)
+    private merchantPanCardRepository: MerchantPanCardRepository,
     @inject('service.hasher')
     private hasher: BcryptHasher,
     @inject('service.user.service')
@@ -1325,7 +1329,7 @@ export class AuthController {
     };
   }
 
-  // ------------------------------------------Company Registration API's------------------------------
+  // ------------------------------------------Trustee Registration API's------------------------------
   @post('/auth/trustee-registration')
   async trusteeRegistration(
     @requestBody({
@@ -2304,6 +2308,444 @@ export class AuthController {
     return {
       success: true,
       message: "Investor login successful",
+      accessToken: token,
+      user: profile
+    };
+  }
+
+
+  // ---------------------- Merchant Profile Registration API's --------------//
+
+  @post('/auth/merchant-registration')
+  async merchantRegistration(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: [
+              'sessionId',
+              // 'password',
+              'companyName',
+              'CIN',
+              'GSTIN',
+              // 'udyamRegistrationNumber',
+              'dateOfIncorporation',
+              'cityOfIncorporation',
+              'stateOfIncorporation',
+              'countryOfIncorporation',
+              'submittedPanDetails',
+              'panCardDocumentId',
+              'merchantDealershipTypeId',
+            ],
+            properties: {
+              sessionId: {
+                type: 'string',
+                description: 'Registration session id'
+              },
+              // password: {type: 'string'},
+              companyName: {type: 'string'},
+              CIN: {
+                type: 'string',
+                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$'
+              },
+              GSTIN: {
+                type: 'string',
+                minLength: 15,
+                maxLength: 15
+              },
+              udyamRegistrationNumber: {
+                type: 'string'
+              },
+              dateOfIncorporation: {
+                type: 'string',
+                pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+              },
+              cityOfIncorporation: {type: 'string'},
+              stateOfIncorporation: {type: 'string'},
+              countryOfIncorporation: {type: 'string'},
+              humanInteraction: {
+                type: 'boolean',
+                default: false
+              },
+              extractedPanDetails: {
+                type: 'object',
+                required: [],
+                properties: {
+                  extractedMerchantName: {type: 'string'},
+                  extractedPanNumber: {
+                    type: 'string',
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
+                  }
+                }
+              },
+              submittedPanDetails: {
+                type: 'object',
+                required: ['submittedMerchantName', 'submittedPanNumber'],
+                properties: {
+                  submittedMerchantName: {type: 'string'},
+                  submittedPanNumber: {
+                    type: 'string',
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
+                  }
+                }
+              },
+              panCardDocumentId: {
+                type: 'string',
+                description: 'Media ID of uploaded PAN card'
+              },
+              merchantDealershipTypeId: {type: 'string'},
+            }
+          }
+        }
+      }
+    })
+    body: {
+      sessionId: string;
+      // password: string;
+      companyName: string;
+      CIN: string;
+      GSTIN: string;
+      udyamRegistrationNumber: string;
+      dateOfIncorporation: string; // yyyy-mm-dd
+      cityOfIncorporation: string;
+      stateOfIncorporation: string;
+      countryOfIncorporation: string;
+      humanInteraction?: boolean;
+      extractedPanDetails?: {
+        extractedMerchantName?: string;
+        extractedPanNumber?: string;
+      };
+      submittedPanDetails: {
+        submittedMerchantName: string;
+        submittedPanNumber: string;
+      };
+      panCardDocumentId: string;
+      merchantDealershipTypeId: string;
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    kycStatus: number;
+    currentProgress: string[];
+    usersId: string;
+  }> {
+    const tx = await this.merchantProfileRepository.dataSource.beginTransaction({
+      isolationLevel: 'READ COMMITTED',
+    });
+    console.log('body', body);
+    try {
+      // ----------------------------
+      //  Validate Registration Session
+      // ----------------------------
+      const registrationSession = await this.registrationSessionsRepository.findById(
+        body.sessionId,
+        undefined,
+        {transaction: tx}
+      );
+
+      if (
+        !registrationSession ||
+        !registrationSession.phoneVerified ||
+        !registrationSession.emailVerified ||
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+        registrationSession.isDeleted ||
+        new Date(registrationSession.expiresAt) < new Date()
+      ) {
+        throw new HttpErrors.BadRequest('Session is not valid');
+      }
+
+      // ----------------------------
+      //  Validate CIN & GSTIN
+      // ----------------------------
+      const companyWithCIN = await this.merchantProfileRepository.findOne(
+        {where: {CIN: body.CIN, isDeleted: false}},
+        {transaction: tx}
+      );
+      if (companyWithCIN) throw new HttpErrors.BadRequest('CIN already registered');
+
+      const companyWithGSTIN = await this.merchantProfileRepository.findOne(
+        {where: {GSTIN: body.GSTIN, isDeleted: false}},
+        {transaction: tx}
+      );
+      if (companyWithGSTIN)
+        throw new HttpErrors.BadRequest('GSTIN already registered');
+
+      // ----------------------------
+      //  Create User
+      // ----------------------------
+      const hashedPassword = await this.hasher.hashPassword("Merchant@123");
+
+      let newUserProfile = await this.usersRepository.findOne({
+        where: {
+          and: [
+            {email: registrationSession.email},
+            {phone: registrationSession.phoneNumber},
+            {isActive: true},
+            {isDeleted: false}
+          ]
+        }
+      });
+
+      if (!newUserProfile) {
+        newUserProfile = await this.usersRepository.create(
+          {
+            phone: registrationSession.phoneNumber,
+            email: registrationSession.email,
+            password: hashedPassword,
+            isFirstTime: true,
+            isActive: true,
+            isDeleted: false,
+          },
+          {transaction: tx}
+        );
+      }
+      // ----------------------------
+      //  Create Company Profile
+      // ----------------------------
+      const newCompanyProfile = await this.merchantProfileRepository.create(
+        {
+          usersId: newUserProfile.id,
+          companyName: body.companyName,
+          CIN: body.CIN,
+          GSTIN: body.GSTIN,
+          dateOfIncorporation: body.dateOfIncorporation,
+          cityOfIncorporation: body.cityOfIncorporation,
+          stateOfIncorporation: body.stateOfIncorporation,
+          countryOfIncorporation: body.countryOfIncorporation,
+          udyamRegistrationNumber: body.udyamRegistrationNumber,
+          merchantDealershipTypeId: body.merchantDealershipTypeId,
+          isActive: false,
+          isDeleted: false,
+        },
+        {transaction: tx}
+      );
+
+      // ----------------------------
+      //  Check PAN duplicate
+      // ----------------------------
+      const isPanExist = await this.merchantPanCardRepository.findOne(
+        {
+          where: {
+            and: [
+              {submittedPanNumber: body.submittedPanDetails.submittedPanNumber},
+              {isDeleted: false},
+              {status: 1},
+            ],
+          },
+        },
+        {transaction: tx}
+      );
+
+      if (isPanExist)
+        throw new HttpErrors.BadRequest('Pan already exists with another company');
+
+      // ----------------------------
+      //  Prepare PAN Data
+      // ----------------------------
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const companyPanData: any = {
+        submittedMerchantName: body.submittedPanDetails.submittedMerchantName,
+        submittedPanNumber: body.submittedPanDetails.submittedPanNumber,
+        extractedMerchantName: body.extractedPanDetails?.extractedMerchantName,
+        extractedPanNumber: body.extractedPanDetails?.extractedPanNumber,
+        panCardDocumentId: body.panCardDocumentId,
+        mode: body.humanInteraction ? 1 : 0,
+        status: 0,
+        isActive: false,
+        isDeleted: false,
+        merchantProfilesId: newCompanyProfile.id,
+      };
+
+      // ----------------------------
+      //  Human Interaction Required
+      // ----------------------------
+      if (body.humanInteraction) {
+        await this.merchantPanCardRepository.create(companyPanData, {
+          transaction: tx,
+        });
+
+        const newApplication = await this.kycApplicationsRepository.create(
+          {
+            roleValue: registrationSession.roleValue,
+            usersId: newUserProfile.id,
+            status: 1,
+            humanInteraction: true,
+            mode: 0,
+            isActive: true,
+            isDeleted: false,
+            currentProgress: ['merchant_kyc'],
+            identifierId: newCompanyProfile.id
+          },
+          {transaction: tx}
+        );
+
+        await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
+        const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'merchant');
+        if (!result.success || !result.data) {
+          if (process.env.NODE_ENV === 'dev') {
+            throw new HttpErrors.InternalServerError('Error while assigning role to user');
+          } else {
+            throw new HttpErrors.InternalServerError('Internal server error');
+          }
+        }
+
+        await this.merchantProfileRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
+        await tx.commit();
+
+        return {
+          success: true,
+          message: 'Registration completed',
+          kycStatus: 0,
+          currentProgress: newApplication.currentProgress ?? ['merchant_kyc'],
+          usersId: newUserProfile.id
+        };
+      }
+
+      // ----------------------------
+      //  Auto verification (No Human Interaction)
+      // ----------------------------
+      if (
+        body.submittedPanDetails.submittedMerchantName !== body.companyName
+      ) {
+        throw new HttpErrors.BadRequest('PAN details do not match company name');
+      }
+
+      // // Basic validation: Submitted PAN should match Extracted PAN
+      // if (
+      //   body.extractedPanDetails?.extractedPanNumber &&
+      //   body.extractedPanDetails.extractedPanNumber !==
+      //   body.submittedPanDetails.submittedPanNumber
+      // ) {
+      //   throw new HttpErrors.BadRequest('PAN number mismatch');
+      // }
+
+      // Auto approve PAN
+      companyPanData.status = 1; // Verified
+      companyPanData.isActive = true;
+
+      await this.merchantPanCardRepository.create(companyPanData, {
+        transaction: tx,
+      });
+
+      // ----------------------------
+      //  Create KYC (Auto Approved PAN)
+      // ----------------------------
+      const newApplication = await this.kycApplicationsRepository.create(
+        {
+          roleValue: registrationSession.roleValue,
+          usersId: newUserProfile.id,
+          identifierId: newCompanyProfile.id,
+          status: 0,
+          humanInteraction: false,
+          mode: 0,
+          isActive: true,
+          isDeleted: false,
+          currentProgress: ['merchant_kyc', 'pan_verified'],
+        },
+        {transaction: tx}
+      );
+
+      await this.merchantProfileRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
+      await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
+      const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'merchant');
+      if (!result.success || !result.data) {
+        if (process.env.NODE_ENV === 'dev') {
+          throw new HttpErrors.InternalServerError('Error while assigning role to user');
+        } else {
+          throw new HttpErrors.InternalServerError('Internal server error');
+        }
+      }
+      console.log('result', result.data);
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Registration completed',
+        kycStatus: 0,
+        currentProgress: newApplication.currentProgress ?? ['merchant_kyc', 'pan_verified'],
+        usersId: newUserProfile.id
+      };
+
+    } catch (error) {
+      await tx.rollback();
+      console.log('error while registering new company :', error);
+      throw error;
+    }
+  }
+
+  @post('/auth/merchant-login')
+  async merchantLogin(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['email', 'password', 'rememberMe'],
+            properties: {
+              email: {type: 'string'},
+              password: {type: 'string'},
+              rememberMe: {type: 'boolean'},
+            }
+          }
+        }
+      }
+    })
+    body: {email: string; password: string; rememberMe: boolean}
+  ): Promise<{success: boolean; message: string; accessToken: string; user: object}> {
+    const userData = await this.usersRepository.findOne({
+      where: {
+        and: [
+          {email: body.email},
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (!userData) {
+      throw new HttpErrors.BadRequest('User not exist');
+    }
+
+    const company = await this.merchantProfileRepository.findOne({
+      where: {
+        and: [
+          {usersId: userData.id},
+          {isActive: true},
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (!company) {
+      throw new HttpErrors.Unauthorized('Unauthorized access');
+    }
+
+    const user = await this.userService.verifyCredentials(body);
+
+    const {roles, permissions} = await this.rbacService.getUserRoleAndPermissionsByRole(user.id!, 'merchant');
+
+    if (!roles.includes('merchant')) {
+      throw new HttpErrors.Forbidden('Access denied. Only merchant users can login here.');
+    }
+
+    const userProfile: UserProfile & {
+      roles: string[];
+      permissions: string[];
+      phone: string;
+    } = {
+      [securityId]: user.id!,
+      id: user.id!,
+      email: user.email,
+      phone: user.phone,
+      roles,
+      permissions,
+    };
+
+    const token = await this.jwtService.generateToken(userProfile);
+    const profile = await this.rbacService.returnMerchantProfile(user.id, roles, permissions);
+    return {
+      success: true,
+      message: "Merchant login successful",
       accessToken: token,
       user: profile
     };

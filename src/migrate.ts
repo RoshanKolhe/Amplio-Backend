@@ -52,7 +52,13 @@ export async function migrate(args: string[]) {
       'BusinessKycDpn',
       'BusinessKycFinancial',
       'CompanyKycDocument',
-      'CompanyKycDocumentRequirements'
+      'CompanyKycDocumentRequirements',
+      'MerchantDealershipType',
+      'MerchantProfiles',
+      'MerchantPanCard',
+      'MerchantKycDocumentRequirements',
+      'MerchantKycDocument',
+      'MerchantUboDetails'
     ]
   });
 
