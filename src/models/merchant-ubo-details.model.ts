@@ -2,7 +2,25 @@ import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {Media} from './media.model';
 import {Users} from './users.model';
 
-@model()
+@model({
+  settings: {
+    postgresql: {
+      table: 'merchant_ubo_details',
+      schema: 'public',
+    },
+    indexes: {
+      uniqueUbos: {
+        keys: {
+          usersId: 1,
+          roleValue: 1,
+          identifierId: 1,
+          submittedPanNumber: 1,
+        },
+        options: {unique: true},
+      },
+    },
+  },
+})
 export class MerchantUboDetails extends Entity {
 
   @property({
