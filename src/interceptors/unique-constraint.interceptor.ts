@@ -17,18 +17,20 @@ export class UniqueConstraintInterceptor implements Provider<Interceptor> {
 
   intercept(
     context: InvocationContext,
-    next: () => ValueOrPromise<InvocationResult>
+    next: () => ValueOrPromise<InvocationResult>,
   ): ValueOrPromise<InvocationResult> {
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return next().catch((error: any) => {
+    return Promise.resolve(next()).catch((error: unknown) => {
 
-      if (error?.code === '23505') {
+      const err = error as {code?: string; detail?: string};
+
+      // Postgres Unique Constraint
+      if (err?.code === '23505') {
 
         let message = 'Duplicate value violates unique constraint';
 
-        if (error?.detail) {
-          message = error.detail
+        if (err?.detail) {
+          message = err.detail
             .replace('Key', '')
             .replace(/[()=]/g, ' ')
             .trim();
@@ -38,7 +40,7 @@ export class UniqueConstraintInterceptor implements Provider<Interceptor> {
       }
 
       // Postgres Foreign Key Violation
-      if (error?.code === '23503') {
+      if (err?.code === '23503') {
         throw new HttpErrors.BadRequest(
           'Invalid reference — related record does not exist'
         );

@@ -1,9 +1,10 @@
-import {belongsTo, Entity, hasOne, model, property} from '@loopback/repository';
+import {belongsTo, Entity, hasOne, model, property, hasMany} from '@loopback/repository';
 import {KycApplications} from './kyc-applications.model';
 import {Media} from './media.model';
 import {MerchantDealershipType} from './merchant-dealership-type.model';
 import {MerchantPanCard} from './merchant-pan-card.model';
 import {Users} from './users.model';
+import {Psp} from './psp.model';
 
 @model({
   settings: {
@@ -186,6 +187,8 @@ export class MerchantProfiles extends Entity {
   @belongsTo(() => KycApplications)
   kycApplicationsId: string;
 
+  @hasMany(() => Psp)
+  psps: Psp[];
   @property({
     type: 'date',
   })

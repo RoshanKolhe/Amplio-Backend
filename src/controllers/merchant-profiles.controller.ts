@@ -18,6 +18,7 @@ import {
   MerchantKycDocument,
   MerchantProfiles,
   MerchantUboDetails,
+  Psp,
 } from '../models';
 import {
   KycApplicationsRepository,
@@ -27,6 +28,7 @@ import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
 import {MerchantKycDocumentService} from '../services/merchant-kyc-document.service';
 import {MerchantUboDetailsService} from '../services/merchant-ubo-details.service';
+import {PspService} from '../services/psp.service';
 import {SessionService} from '../services/session.service';
 
 export class MerchantProfilesController {
@@ -45,7 +47,9 @@ export class MerchantProfilesController {
     private addressDetailsService: AddressDetailsService,
     @inject('service.merchantUboDetailsService.service')
     private merchantUboDetailsService: MerchantUboDetailsService,
-  ) { }
+    @inject('service.pspService.service')
+    private pspService: PspService,
+  ) {}
 
   async getKycApplicationStatus(applicationId: string): Promise<string[]> {
     const kycApplication =
@@ -79,6 +83,7 @@ export class MerchantProfilesController {
     currentProgress: string[];
     profile: MerchantProfiles | null;
   }> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const response: any = await this.sessionService.fetchProfile(sessionId);
 
     if (response.success && response?.profile?.id) {
@@ -159,6 +164,7 @@ export class MerchantProfilesController {
   ): Promise<{
     success: boolean;
     message: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     data: any;
     merchantDealershipType?: {
       id: string;
@@ -173,7 +179,7 @@ export class MerchantProfilesController {
       'merchant_address_details',
       'merchant_bank_details',
       'merchant_ubo_details',
-      'psp'
+      'merchant_psp_details',
     ];
 
     if (!steppersAllowed.includes(stepperId)) {
@@ -256,20 +262,40 @@ export class MerchantProfilesController {
     }
 
     if (stepperId === 'merchant_documents') {
-      const merchantDealershipType = (merchantProfile as MerchantProfiles & {
-        merchantDealershipType?: {id: string; label: string; value: string};
-      }).merchantDealershipType
-        ? {
-          id: (merchantProfile as MerchantProfiles & {
-            merchantDealershipType: {id: string; label: string; value: string};
-          }).merchantDealershipType.id,
-          label: (merchantProfile as MerchantProfiles & {
-            merchantDealershipType: {id: string; label: string; value: string};
-          }).merchantDealershipType.label,
-          value: (merchantProfile as MerchantProfiles & {
-            merchantDealershipType: {id: string; label: string; value: string};
-          }).merchantDealershipType.value,
+      const merchantDealershipType = (
+        merchantProfile as MerchantProfiles & {
+          merchantDealershipType?: {id: string; label: string; value: string};
         }
+      ).merchantDealershipType
+        ? {
+            id: (
+              merchantProfile as MerchantProfiles & {
+                merchantDealershipType: {
+                  id: string;
+                  label: string;
+                  value: string;
+                };
+              }
+            ).merchantDealershipType.id,
+            label: (
+              merchantProfile as MerchantProfiles & {
+                merchantDealershipType: {
+                  id: string;
+                  label: string;
+                  value: string;
+                };
+              }
+            ).merchantDealershipType.label,
+            value: (
+              merchantProfile as MerchantProfiles & {
+                merchantDealershipType: {
+                  id: string;
+                  label: string;
+                  value: string;
+                };
+              }
+            ).merchantDealershipType.value,
+          }
         : null;
 
       const documentsResponse =
@@ -284,11 +310,12 @@ export class MerchantProfilesController {
     }
 
     if (stepperId === 'merchant_address_details') {
-      const addressResponse = await this.addressDetailsService.fetchUserAddressDetails(
-        merchantProfile.usersId,
-        'merchant',
-        merchantProfile.id,
-      );
+      const addressResponse =
+        await this.addressDetailsService.fetchUserAddressDetails(
+          merchantProfile.usersId,
+          'merchant',
+          merchantProfile.id,
+        );
 
       return {
         success: true,
@@ -322,6 +349,18 @@ export class MerchantProfilesController {
         success: true,
         message: 'Merchant UBO details',
         data: merchantUboDetailsResponse.uboDetails,
+      };
+    }
+
+    if (stepperId === 'merchant_psp_details') {
+      const pspData = await this.pspService.fetchMerchantPsp(
+        merchantProfile.usersId,
+        merchantProfile.id,
+      );
+      return {
+        success: true,
+        message: 'Merchant PSP data',
+        data: pspData.psp,
       };
     }
 
@@ -377,9 +416,10 @@ export class MerchantProfilesController {
     uploadedDocuments: MerchantKycDocument[];
     currentProgress: string[];
   }> {
-    const tx = await this.merchantProfilesRepository.dataSource.beginTransaction(
-      {IsolationLevel: IsolationLevel.READ_COMMITTED},
-    );
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        IsolationLevel: IsolationLevel.READ_COMMITTED,
+      });
 
     try {
       const merchant = await this.merchantProfilesRepository.findOne(
@@ -410,11 +450,12 @@ export class MerchantProfilesController {
         );
       }
 
-      const result = await this.merchantKycDocumentService.uploadDocumentsForKyc(
-        body.usersId,
-        newDocs,
-        tx,
-      );
+      const result =
+        await this.merchantKycDocumentService.uploadDocumentsForKyc(
+          body.usersId,
+          newDocs,
+          tx,
+        );
 
       const currentProgress = await this.updateKycProgress(
         merchant.kycApplicationsId,
@@ -713,9 +754,10 @@ export class MerchantProfilesController {
     }>;
     currentProgress: string[];
   }> {
-    const tx = await this.merchantProfilesRepository.dataSource.beginTransaction(
-      {IsolationLevel: IsolationLevel.READ_COMMITTED},
-    );
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        IsolationLevel: IsolationLevel.READ_COMMITTED,
+      });
 
     try {
       const merchant = await this.merchantProfilesRepository.findOne(
@@ -743,10 +785,11 @@ export class MerchantProfilesController {
           }),
       );
 
-      const result = await this.merchantUboDetailsService.createMerchantUboDetails(
-        merchantUboDetailsData,
-        tx,
-      );
+      const result =
+        await this.merchantUboDetailsService.createMerchantUboDetails(
+          merchantUboDetailsData,
+          tx,
+        );
 
       const currentProgress = await this.updateKycProgress(
         merchant.kycApplicationsId,
@@ -812,6 +855,154 @@ export class MerchantProfilesController {
     }
   }
 
+  @post('/merchant-profiles/kyc-psp')
+  async createMerchantPsp(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'psp'],
+            properties: {
+              usersId: {type: 'string'},
+              psp: {type: 'object'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      psp: Partial<Psp>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    psp: Psp;
+    currentProgress: string[];
+  }> {
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        IsolationLevel: IsolationLevel.READ_COMMITTED,
+      });
+
+    try {
+      const merchant = await this.merchantProfilesRepository.findOne(
+        {
+          where: {
+            usersId: body.usersId,
+            isDeleted: false,
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!merchant) {
+        throw new HttpErrors.NotFound('Merchant not found');
+      }
+
+      const result = await this.pspService.upsertMerchantPsp(
+        merchant.id,
+        body.usersId,
+        body.psp,
+        undefined,
+        tx,
+      );
+
+      const currentProgress = await this.updateKycProgress(
+        merchant.kycApplicationsId,
+        'merchant_psp_details',
+      );
+
+      await tx.commit();
+
+      return {
+        success: result.success,
+        message: result.message,
+        psp: result.psp,
+        currentProgress,
+      };
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
+  @patch('/merchant-profiles/kyc-psp')
+  async updateMerchantPsp(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'pspId', 'psp'],
+            properties: {
+              usersId: {type: 'string'},
+              pspId: {type: 'string'},
+              psp: {type: 'object'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      pspId: string;
+      psp: Partial<Psp>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    psp: Psp;
+    currentProgress: string[];
+  }> {
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        isolationLevel: IsolationLevel.READ_COMMITTED,
+      });
+
+    try {
+      const merchant = await this.merchantProfilesRepository.findOne(
+        {
+          where: {
+            usersId: body.usersId,
+            isDeleted: false,
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!merchant) {
+        throw new HttpErrors.NotFound('Merchant not found');
+      }
+
+      const result = await this.pspService.upsertMerchantPsp(
+        merchant.id,
+        body.usersId,
+        body.psp,
+        body.pspId, // pass PSP ID for update
+        tx,
+      );
+
+      const currentProgress = await this.updateKycProgress(
+        merchant.kycApplicationsId,
+        'merchant_psp_details',
+      );
+
+      await tx.commit();
+
+      return {
+        success: result.success,
+        message: result.message,
+        psp: result.psp,
+        currentProgress,
+      };
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+  
   @post('/merchant-profiles/kyc-address-details')
   async uploadMerchantKycAddressDetails(
     @requestBody({

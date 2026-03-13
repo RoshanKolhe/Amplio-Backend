@@ -1,13 +1,14 @@
 import {Constructor, Getter, inject} from '@loopback/core';
-import {BelongsToAccessor, DefaultCrudRepository, repository, HasOneRepositoryFactory} from '@loopback/repository';
+import {BelongsToAccessor, DefaultCrudRepository, repository, HasOneRepositoryFactory, HasManyRepositoryFactory} from '@loopback/repository';
 import {AmplioDataSource} from '../datasources';
 import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
-import {Media, MerchantProfiles, MerchantProfilesRelations, MerchantPanCard, MerchantDealershipType, Users, KycApplications} from '../models';
+import {Media, MerchantProfiles, MerchantProfilesRelations, MerchantPanCard, MerchantDealershipType, Users, KycApplications, Psp} from '../models';
 import {MediaRepository} from './media.repository';
 import {MerchantPanCardRepository} from './merchant-pan-card.repository';
 import {MerchantDealershipTypeRepository} from './merchant-dealership-type.repository';
 import {UsersRepository} from './users.repository';
 import {KycApplicationsRepository} from './kyc-applications.repository';
+import {PspRepository} from './psp.repository';
 
 export class MerchantProfilesRepository extends TimeStampRepositoryMixin<
   MerchantProfiles,
@@ -31,10 +32,14 @@ export class MerchantProfilesRepository extends TimeStampRepositoryMixin<
 
   public readonly kycApplications: BelongsToAccessor<KycApplications, typeof MerchantProfiles.prototype.id>;
 
+  public readonly psps: HasManyRepositoryFactory<Psp, typeof MerchantProfiles.prototype.id>;
+
   constructor(
-    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('MerchantPanCardRepository') protected merchantPanCardRepositoryGetter: Getter<MerchantPanCardRepository>, @repository.getter('MerchantDealershipTypeRepository') protected merchantDealershipTypeRepositoryGetter: Getter<MerchantDealershipTypeRepository>, @repository.getter('UsersRepository') protected usersRepositoryGetter: Getter<UsersRepository>, @repository.getter('KycApplicationsRepository') protected kycApplicationsRepositoryGetter: Getter<KycApplicationsRepository>,
+    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('MerchantPanCardRepository') protected merchantPanCardRepositoryGetter: Getter<MerchantPanCardRepository>, @repository.getter('MerchantDealershipTypeRepository') protected merchantDealershipTypeRepositoryGetter: Getter<MerchantDealershipTypeRepository>, @repository.getter('UsersRepository') protected usersRepositoryGetter: Getter<UsersRepository>, @repository.getter('KycApplicationsRepository') protected kycApplicationsRepositoryGetter: Getter<KycApplicationsRepository>, @repository.getter('PspRepository') protected pspRepositoryGetter: Getter<PspRepository>,
   ) {
     super(MerchantProfiles, dataSource);
+    this.psps = this.createHasManyRepositoryFactoryFor('psps', pspRepositoryGetter,);
+    this.registerInclusionResolver('psps', this.psps.inclusionResolver);
     this.kycApplications = this.createBelongsToAccessorFor('kycApplications', kycApplicationsRepositoryGetter,);
     this.registerInclusionResolver('kycApplications', this.kycApplications.inclusionResolver);
     this.users = this.createBelongsToAccessorFor('users', usersRepositoryGetter,);

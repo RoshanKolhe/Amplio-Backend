@@ -20,6 +20,7 @@ import {AddressDetailsService} from '../services/address-details.service';
 import {AuthorizeSignatoriesService} from '../services/signatories.service';
 import {UserUploadedDocumentsService} from '../services/user-documents.service';
 import {CompanyKycDocumentService} from '../services/company-kyc-document.service';
+import {PspService} from '../services/psp.service';
 
 export class AdminProfilesController {
   constructor(
@@ -39,6 +40,8 @@ export class AdminProfilesController {
     private authorizeSignatoriesService: AuthorizeSignatoriesService,
     @inject('service.AddressDetails.service')
     private addressDetailsService: AddressDetailsService,
+    @inject('service.pspService.service')
+    private pspService: PspService,
   ) {}
 
   // ------------------------------------------------Trustee Profile API's-------------------------------------------------
@@ -772,6 +775,42 @@ export class AdminProfilesController {
   ): Promise<{success: boolean; message: string}> {
     const result = await this.bankDetailsService.updateAccountStatus(
       body.accountId,
+      body.status,
+      body.reason ?? '',
+    );
+
+    return result;
+  }
+
+  // ------------------------------------------------Merchant Profile PSP API-------------------------------------------------
+  // super admin merchant psp approval API
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/merchant-profiles/psp-verification')
+  async merchantPspVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status', 'pspId'],
+            properties: {
+              status: {type: 'number'},
+              pspId: {type: 'string'},
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      status: number;
+      pspId: string;
+      reason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    const result = await this.pspService.updatePspStatus(
+      body.pspId,
       body.status,
       body.reason ?? '',
     );

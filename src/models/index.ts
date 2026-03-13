@@ -53,3 +53,6 @@ export * from './merchant-kyc-document.model';
 export * from './merchant-profiles.model';
 export * from './merchant-pan-card.model';
 export * from './merchant-ubo-details.model';
+export * from './psp.model';
+export * from './psp-master.model';
+export * from './psp-master-fields.model';

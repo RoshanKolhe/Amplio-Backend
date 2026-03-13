@@ -84,7 +84,7 @@ export class MerchantUboDetailsService {
       const fullName = uboDetail.fullName.trim().toLowerCase();
 
       const nameMatches =
-        extractedName?.includes(fullName) || submittedPanName?.includes(fullName);
+        extractedName?.includes(fullName) ?? submittedPanName?.includes(fullName);
 
       if (
         uboDetail.extractedPanNumber &&

@@ -30,3 +30,5 @@ export * from './trustee-entity-types.controller';
 export * from './trustee-profiles.controller';
 export * from './merchant-ubo-details-media.controller';
 export * from './merchant-ubo-details-users.controller';
+export * from './psp-master.controller';
+export * from './psp-master-fields.controller';

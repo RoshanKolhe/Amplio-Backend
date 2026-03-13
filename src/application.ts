@@ -51,6 +51,7 @@ import {CompanyKycDocumentRequirementsService} from './services/company-kyc-docu
 import {MerchantKycDocumentService} from './services/merchant-kyc-document.service';
 import {MerchantKycDocumentRequirementsService} from './services/merchant-kyc-document-requirements.service';
 import {MerchantUboDetailsService} from './services/merchant-ubo-details.service';
+import {PspService} from './services/psp.service';
 
 export {ApplicationConfig};
 
@@ -164,6 +165,9 @@ export class AmplioBackendApplication extends BootMixin(
     );
     this.bind('service.merchantUboDetailsService.service').toClass(
       MerchantUboDetailsService,
+    );
+    this.bind('service.pspService.service').toClass(
+      PspService,
     );
   }
 
