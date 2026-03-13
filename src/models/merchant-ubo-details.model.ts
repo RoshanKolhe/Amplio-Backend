@@ -52,6 +52,9 @@ export class MerchantUboDetails extends Entity {
   @property({
     type: 'number',
     required: true,
+    postgresql: {
+      dataType: 'float'
+    }
   })
   ownershipPercentage: number;
   // designation selection

@@ -12,7 +12,7 @@ export class MerchantUboDetailsService {
     private merchantUboDetailsRepository: MerchantUboDetailsRepository,
     @inject('service.media.service')
     private mediaService: MediaService,
-  ) {}
+  ) { }
 
   async fetchMerchantUboDetails(
     usersId: string,
@@ -210,7 +210,14 @@ export class MerchantUboDetailsService {
 
     await this.merchantUboDetailsRepository.updateById(
       uboId,
-      {...uboData, status: 0, mode: 1},
+      {
+        ...uboData,
+        status: 0,
+        mode: 1,
+        identifierId: uboDetail.identifierId,
+        usersId: uboDetail.usersId,
+        roleValue: 'merchant'
+      },
       {transaction: tx},
     );
 

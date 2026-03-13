@@ -769,45 +769,11 @@ export class MerchantProfilesController {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'uboDetails'],
+            required: ['usersId', 'uboId', 'uboDetail'],
             properties: {
               usersId: {type: 'string'},
-              uboDetails: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  required: [
-                    'fullName',
-                    'email',
-                    'phone',
-                    'ownershipPercentage',
-                    'designationType',
-                    'designationValue',
-                    'submittedPanNumber',
-                    'submittedPanFullName',
-                    'submittedDateOfBirth',
-                    'panCardId',
-                  ],
-                  properties: {
-                    fullName: {type: 'string'},
-                    email: {type: 'string'},
-                    phone: {type: 'string'},
-                    ownershipPercentage: {type: 'number'},
-                    designationType: {
-                      type: 'string',
-                      enum: ['dropdown', 'custom'],
-                    },
-                    designationValue: {type: 'string'},
-                    submittedPanNumber: {type: 'string'},
-                    submittedPanFullName: {type: 'string'},
-                    submittedDateOfBirth: {type: 'string'},
-                    extractedPanNumber: {type: 'string'},
-                    extractedPanFullName: {type: 'string'},
-                    extractedDateOfBirth: {type: 'string'},
-                    panCardId: {type: 'string'},
-                  },
-                },
-              },
+              uboId: {type: 'string'},
+              uboDetail: {type: 'object'},
             },
           },
         },
@@ -815,36 +781,35 @@ export class MerchantProfilesController {
     })
     body: {
       usersId: string;
-      uboDetails: Array<{
-        fullName: string;
-        email: string;
-        phone: string;
-        ownershipPercentage: number;
-        designationType: string;
-        designationValue: string;
-        submittedPanNumber: string;
-        submittedPanFullName: string;
-        submittedDateOfBirth: string;
-        extractedPanNumber?: string;
-        extractedPanFullName?: string;
-        extractedDateOfBirth?: string;
-        panCardId: string;
-      }>;
+      uboId: string;
+      uboDetail: Partial<MerchantUboDetails>;
     },
   ): Promise<{
     success: boolean;
     message: string;
-    createdMerchantUboDetails: MerchantUboDetails[];
-    erroredMerchantUboDetails: Array<{
-      fullName: string;
-      email: string;
-      phone: string;
-      submittedPanNumber: string;
-      message: string;
-    }>;
-    currentProgress: string[];
+    uboDetail: MerchantUboDetails | null;
   }> {
-    return this.uploadMerchantKycUboDetails(body);
+
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        isolationLevel: IsolationLevel.READ_COMMITTED,
+      });
+
+    try {
+      const result =
+        await this.merchantUboDetailsService.updateMerchantUboDetail(
+          body.uboId,
+          body.uboDetail,
+          tx,
+        );
+
+      await tx.commit();
+
+      return result;
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
   }
 
   @post('/merchant-profiles/kyc-address-details')
