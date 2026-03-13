@@ -1,26 +1,26 @@
+import {authenticate} from '@loopback/authentication';
+import {Filter, FilterExcludingWhere, repository} from '@loopback/repository';
 import {
-  Filter,
-  FilterExcludingWhere,
-  repository,
-} from '@loopback/repository';
-import {
-  post,
-  param,
   get,
   getModelSchemaRef,
+  param,
   patch,
+  post,
   requestBody,
   response,
 } from '@loopback/rest';
+import {authorize} from '../authorization';
 import {PspMasterFields} from '../models';
 import {PspMasterFieldsRepository} from '../repositories';
 
 export class PspMasterFieldsController {
   constructor(
     @repository(PspMasterFieldsRepository)
-    public pspMasterFieldsRepository : PspMasterFieldsRepository,
+    public pspMasterFieldsRepository: PspMasterFieldsRepository,
   ) {}
 
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
   @post('/psp-master-fields')
   @response(200, {
     description: 'PspMasterFields model instance',
@@ -71,11 +71,14 @@ export class PspMasterFieldsController {
   })
   async findById(
     @param.path.string('id') id: string,
-    @param.filter(PspMasterFields, {exclude: 'where'}) filter?: FilterExcludingWhere<PspMasterFields>
+    @param.filter(PspMasterFields, {exclude: 'where'})
+    filter?: FilterExcludingWhere<PspMasterFields>,
   ): Promise<PspMasterFields> {
     return this.pspMasterFieldsRepository.findById(id, filter);
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
   @patch('/psp-master-fields/{id}')
   @response(204, {
     description: 'PspMasterFields PATCH success',

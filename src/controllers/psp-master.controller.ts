@@ -10,6 +10,8 @@ import {
 } from '@loopback/rest';
 import {PspMaster} from '../models';
 import {PspMasterRepository} from '../repositories';
+import {authenticate} from '@loopback/authentication';
+import {authorize} from '../authorization';
 
 export class PspMasterController {
   constructor(
@@ -17,6 +19,8 @@ export class PspMasterController {
     public pspMasterRepository: PspMasterRepository,
   ) {}
 
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
   @post('/psp-masters')
   @response(200, {
     description: 'PspMaster model instance',
@@ -96,6 +100,8 @@ export class PspMasterController {
     return this.pspMasterRepository.findById(id, finalFilter);
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
   @patch('/psp-masters/{id}')
   @response(204, {
     description: 'PspMaster PATCH success',
