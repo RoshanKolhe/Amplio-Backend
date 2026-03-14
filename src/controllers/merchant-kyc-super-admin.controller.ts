@@ -15,6 +15,7 @@ import {
   MerchantKycDocument,
   MerchantProfiles,
   MerchantUboDetails,
+  Psp,
 } from '../models';
 import {
   KycApplicationsRepository,
@@ -25,6 +26,7 @@ import {BankDetailsService} from '../services/bank-details.service';
 import {KycService} from '../services/kyc.service';
 import {MerchantKycDocumentService} from '../services/merchant-kyc-document.service';
 import {MerchantUboDetailsService} from '../services/merchant-ubo-details.service';
+import {PspService} from '../services/psp.service';
 
 
 export class MerchantKycSuperAdminController {
@@ -43,6 +45,8 @@ export class MerchantKycSuperAdminController {
     private addressDetailsService: AddressDetailsService,
     @inject('service.merchantUboDetailsService.service')
     private merchantUboDetailsService: MerchantUboDetailsService,
+    @inject('service.pspService.service')
+    private pspService: PspService,
   ) { }
 
   private async countByStatus(status: number) {
@@ -402,7 +406,7 @@ export class MerchantKycSuperAdminController {
     throw new HttpErrors.BadRequest('Invalid status value');
   }
 
-  //----Merchant Profile UBO Get And Patch call
+  //----Merchant Profile UBO Get And Patch call ---//
 
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
@@ -450,10 +454,10 @@ export class MerchantKycSuperAdminController {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['status', 'merchantId'],
+            required: ['status', 'uboId'],
             properties: {
               status: {type: 'number'},
-              merchantId: {type: 'string'},
+              uboId: {type: 'string'},
               reason: {type: 'string'},
             },
           },
@@ -462,12 +466,12 @@ export class MerchantKycSuperAdminController {
     })
     body: {
       status: number;
-      merchantId: string;
+      uboId: string;
       reason?: string;
     },
   ): Promise<{success: boolean; message: string}> {
     const result = await this.merchantUboDetailsService.updateUBOSStatus(
-      body.merchantId,
+      body.uboId,
       body.status,
       body.reason ?? '',
     );
@@ -475,6 +479,67 @@ export class MerchantKycSuperAdminController {
     return result;
   }
 
-  
+  //---Merchant Profile PSP Get And Patch calls ----//
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/merchant-profiles/{merchantId}/psp-details')
+  async fetchMerchantPsp(
+    @param.path.string('merchantId') merchantId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    psp: Psp[];
+  }> {
+
+    const merchantProfile = await this.merchantProfilesRepository.findOne({
+      where: {
+        id: merchantId,
+        isDeleted: false,
+      },
+    });
+
+    if (!merchantProfile) {
+      throw new HttpErrors.NotFound('Merchant not found');
+    }
+
+    return this.pspService.fetchMerchantPsp(
+      merchantProfile.usersId,
+      merchantProfile.id,
+    );
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/merchant-profiles/psp-verification')
+  async merchantPspVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status', 'pspId'],
+            properties: {
+              status: {type: 'number'},
+              pspId: {type: 'string'},
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      status: number;
+      pspId: string;
+      reason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    const result = await this.pspService.updatePspStatus(
+      body.pspId,
+      body.status,
+      body.reason ?? '',
+    );
+
+    return result;
+  }
 
 }
