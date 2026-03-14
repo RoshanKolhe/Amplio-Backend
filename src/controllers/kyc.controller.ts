@@ -15,6 +15,8 @@ export class KycControllerController {
   ) { }
 
   // ------------------------------------------Approve KYC--------------------------------------------
+
+  
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
   @patch('/kyc/handle-kyc-application')
@@ -100,6 +102,22 @@ export class KycControllerController {
 
       if (kycApplication.roleValue === 'investor') {
         result = await this.kycService.handleInvestorKycApplication(
+          kycApplication.id,
+          kycApplication.identifierId,
+          body.status,
+          body.reason ?? '',
+          tx
+        );
+
+        await tx.commit();
+        return {
+          success: true,
+          message: result.message
+        };
+      }
+
+      if (kycApplication.roleValue === 'merchant') {
+        result = await this.kycService.handleMerchantKycApplication(
           kycApplication.id,
           kycApplication.identifierId,
           body.status,
