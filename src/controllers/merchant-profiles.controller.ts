@@ -26,6 +26,7 @@ import {
 } from '../repositories';
 import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
+import {KycService} from '../services/kyc.service';
 import {MerchantKycDocumentService} from '../services/merchant-kyc-document.service';
 import {MerchantUboDetailsService} from '../services/merchant-ubo-details.service';
 import {PspService} from '../services/psp.service';
@@ -49,7 +50,9 @@ export class MerchantProfilesController {
     private merchantUboDetailsService: MerchantUboDetailsService,
     @inject('service.pspService.service')
     private pspService: PspService,
-  ) {}
+    @inject('service.kyc.service')
+    private kycService: KycService,
+  ) { }
 
   async getKycApplicationStatus(applicationId: string): Promise<string[]> {
     const kycApplication =
@@ -268,34 +271,34 @@ export class MerchantProfilesController {
         }
       ).merchantDealershipType
         ? {
-            id: (
-              merchantProfile as MerchantProfiles & {
-                merchantDealershipType: {
-                  id: string;
-                  label: string;
-                  value: string;
-                };
-              }
-            ).merchantDealershipType.id,
-            label: (
-              merchantProfile as MerchantProfiles & {
-                merchantDealershipType: {
-                  id: string;
-                  label: string;
-                  value: string;
-                };
-              }
-            ).merchantDealershipType.label,
-            value: (
-              merchantProfile as MerchantProfiles & {
-                merchantDealershipType: {
-                  id: string;
-                  label: string;
-                  value: string;
-                };
-              }
-            ).merchantDealershipType.value,
-          }
+          id: (
+            merchantProfile as MerchantProfiles & {
+              merchantDealershipType: {
+                id: string;
+                label: string;
+                value: string;
+              };
+            }
+          ).merchantDealershipType.id,
+          label: (
+            merchantProfile as MerchantProfiles & {
+              merchantDealershipType: {
+                id: string;
+                label: string;
+                value: string;
+              };
+            }
+          ).merchantDealershipType.label,
+          value: (
+            merchantProfile as MerchantProfiles & {
+              merchantDealershipType: {
+                id: string;
+                label: string;
+                value: string;
+              };
+            }
+          ).merchantDealershipType.value,
+        }
         : null;
 
       const documentsResponse =
@@ -1002,7 +1005,7 @@ export class MerchantProfilesController {
       throw err;
     }
   }
-  
+
   @post('/merchant-profiles/kyc-address-details')
   async uploadMerchantKycAddressDetails(
     @requestBody({
@@ -1178,4 +1181,153 @@ export class MerchantProfilesController {
       profile: merchantProfile,
     };
   }
+
+  /////------Merchant profiles get-----//////
+  private async countByStatus(status: number) {
+    const kycIds = (
+      await this.kycApplicationsRepository.find({
+        where: {isDeleted: false, status},
+        fields: {id: true},
+      })
+    ).map(k => k.id);
+
+    return (
+      await this.merchantProfilesRepository.count({
+        isDeleted: false,
+        kycApplicationsId: {inq: kycIds},
+      })
+    ).count;
+  }
+
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/merchant-profiles')
+  async getMerchantProfiles(
+    @param.filter(MerchantProfiles) filter?: Filter<MerchantProfiles>,
+    @param.query.number('status') status?: number,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: MerchantProfiles[];
+    count: {
+      totalCount: number;
+      totalRejected: number;
+      totalPending: number;
+      totalVerified: number;
+      totalUnderReview: number;
+    }
+  }> {
+    let rootWhere = {
+      ...filter?.where,
+    };
+
+    if (status !== undefined && status !== null) {
+      const filteredProfiles = await this.kycService.handleKycApplicationFilter(
+        status,
+        'merchant',
+      );
+
+      rootWhere = {
+        ...filter?.where,
+        id: {inq: filteredProfiles.profileIds},
+      };
+    }
+
+    const merchant = await this.merchantProfilesRepository.find({
+      ...filter,
+      where: rootWhere,
+      limit: filter?.limit ?? 10,
+      skip: filter?.skip ?? 0,
+      include: [
+        {
+          relation: 'users',
+          scope: {fields: {id: true, phone: true, email: true}},
+        },
+        {
+          relation: 'kycApplications',
+          scope: {fields: {id: true, usersId: true, status: true, mode: true}},
+        },
+        {relation: 'merchantDealershipType'},
+        {
+          relation: 'media',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+        },
+      ],
+      order: filter?.order ?? ['createdAt DESC'],
+
+    });
+
+    const totalCount = (await this.merchantProfilesRepository.count(filter?.where)).count;
+    const totalPending = await this.countByStatus(0);
+    const totalUnderReview = await this.countByStatus(1);
+    const totalVerified = await this.countByStatus(2);
+    const totalRejected = await this.countByStatus(3);
+    return {
+      success: true,
+      message: 'merchant Profiles',
+      data: merchant,
+      count: {
+        totalCount: totalCount,
+        totalPending: totalPending,
+        totalRejected: totalRejected,
+        totalUnderReview: totalUnderReview,
+        totalVerified: totalVerified,
+      }
+    };
+  }
+
+  // Get merchant profiles by id...
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/merchant-profiles/{id}')
+  async getMerchantProfile(
+    @param.path.string('id') id: string,
+    @param.filter(MerchantProfiles) filter?: Filter<MerchantProfiles>,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: MerchantProfiles;
+  }> {
+    const merchant = await this.merchantProfilesRepository.findById(id, {
+      ...filter,
+      include: [
+        {
+          relation: 'users',
+          scope: {fields: {id: true, phone: true, email: true}},
+        },
+        {relation: 'kycApplications'},
+        {
+          relation: 'merchantPanCard',
+          scope: {
+            include: [
+              {
+                relation: 'media',
+                scope: {
+                  fields: {
+                    fileUrl: true,
+                    id: true,
+                    fileOriginalName: true,
+                    fileType: true,
+                  },
+                },
+              },
+            ],
+          },
+        },
+        {relation: 'merchantDealershipType'},
+        {
+          relation: 'media',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+        },
+      ],
+    });
+
+    return {
+      success: true,
+      message: 'Merchant Profiles',
+      data: merchant,
+    };
+  }
+
 }
