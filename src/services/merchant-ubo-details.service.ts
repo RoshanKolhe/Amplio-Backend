@@ -51,6 +51,36 @@ export class MerchantUboDetailsService {
     };
   }
 
+
+  async fetchMerchantUbosDetails(usersId: string, roleValue: string, identifierId: string, filter?: Filter<MerchantUboDetails>): Promise<{
+    success: boolean;
+    message: string;
+    ubos: MerchantUboDetails[]
+  }> {
+    const merchantUBOS = await this.merchantUboDetailsRepository.find({
+      where: {
+        and: [
+          {...filter?.where},
+          {usersId: usersId},
+          {roleValue: roleValue},
+          {identifierId: identifierId},
+          {isActive: true},
+          {isDeleted: false}
+        ]
+      },
+      include: [
+        {relation: 'panCard', scope: {fields: {id: true, fileUrl: true, fileOriginalName: true}}},
+      ],
+    });
+
+    return {
+      success: true,
+      message: 'Merchant UBOS Details',
+      ubos: merchantUBOS
+    }
+  }
+
+
   async createMerchantUboDetails(
     uboDetails: Omit<MerchantUboDetails, 'id'>[],
     tx: any,
@@ -251,5 +281,47 @@ export class MerchantUboDetailsService {
       message: 'Merchant UBO detail updated',
       uboDetail: updatedUboDetail,
     };
+  }
+
+
+
+  async updateUBOSStatus(merchantId: string, status: number, reason: string): Promise<{success: boolean; message: string}> {
+    const existingUBOS = await this.merchantUboDetailsRepository.findById(merchantId);
+
+    if (!existingUBOS) {
+      throw new HttpErrors.NotFound('No UBOS found');
+    }
+
+    const statusOptions = [0, 1, 2];
+
+    if (!statusOptions.includes(status)) {
+      throw new HttpErrors.BadRequest('Invalid status');
+    }
+
+    if (status === 1) {
+      await this.merchantUboDetailsRepository.updateById(existingUBOS.id, {status: 1, verifiedAt: new Date()});
+      return {
+        success: true,
+        message: 'UBOS Approved'
+      }
+    }
+
+    if (status === 2) {
+      await this.merchantUboDetailsRepository.updateById(existingUBOS.id, {status: 2, reason: reason});
+      return {
+        success: true,
+        message: 'UBOS Rejected'
+      }
+    }
+
+    if (status === 3) {
+      await this.merchantUboDetailsRepository.updateById(existingUBOS.id, {status: 0});
+      return {
+        success: true,
+        message: 'UBOS status is in under review'
+      }
+    }
+
+    throw new HttpErrors.BadRequest('invalid status');
   }
 }
