@@ -11,10 +11,15 @@ import {
   InvestorPanCardsRepository,
   InvestorProfileRepository,
   KycApplicationsRepository,
+  MerchantPanCardRepository,
+  MerchantProfilesRepository,
   TrusteePanCardsRepository,
   TrusteeProfilesRepository,
 } from '../repositories';
 import {CompanyKycDocumentRequirementsService} from './company-kyc-document-requirements.service';
+import {MerchantKycDocumentService} from './merchant-kyc-document.service';
+import {MerchantUboDetailsService} from './merchant-ubo-details.service';
+import {PspService} from './psp.service';
 
 export class KycService {
   constructor(
@@ -42,6 +47,16 @@ export class KycService {
     private authorizeSignatoriesRepository: AuthorizeSignatoriesRepository,
     @inject('service.companyKycDocumentRequirementsService.service')
     private companyKycDocumentRequirementsService: CompanyKycDocumentRequirementsService,
+    @repository(MerchantPanCardRepository)
+    private merchantPanCardsRepository: MerchantPanCardRepository,
+    @repository(MerchantProfilesRepository)
+    private merchantProfileRepository: MerchantProfilesRepository,
+    @inject('service.merchantKycDocumentService.service')
+    private merchantKycDocumentService: MerchantKycDocumentService,
+    @inject('service.merchantUboDetailsService.service')
+    private merchantUboDetailsService: MerchantUboDetailsService,
+    @inject('service.pspService.service')
+    private pspService: PspService,
   ) { }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -191,6 +206,135 @@ export class KycService {
     if (notApprovedSections.length) {
       throw new HttpErrors.BadRequest(
         `Cannot approve company profile. These KYC sections are not approved: ${notApprovedSections.join(', ')}`,
+      );
+    }
+  }
+
+
+  private async ensureMerchantSectionsApproved(
+    merchantId: string,
+    tx: any,
+  ): Promise<void> {
+
+    const merchantProfile = await this.merchantProfileRepository.findOne(
+      {
+        where: {
+          and: [{id: merchantId}, {isDeleted: false}],
+        },
+      },
+      {transaction: tx},
+    );
+
+    if (!merchantProfile) {
+      throw new HttpErrors.NotFound('Merchant profile not found');
+    }
+
+    const notApprovedSections: string[] = [];
+
+    // ---------------- DOCUMENTS ----------------
+    try {
+      const documentsResponse =
+        await this.merchantKycDocumentService.fetchByUser(
+          merchantProfile.usersId,
+        );
+
+      const documents = documentsResponse.documents ?? [];
+
+      if (!documents.length || documents.some(doc => doc.status !== 1)) {
+        notApprovedSections.push('documents');
+      }
+    } catch {
+      notApprovedSections.push('documents');
+    }
+
+    // ---------------- ADDRESS ----------------
+    try {
+      const addressDetails = await this.addressDetailsRepository.find(
+        {
+          where: {
+            and: [
+              {roleValue: 'merchant'},
+              {identifierId: merchantId},
+              {isActive: true},
+              {isDeleted: false},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (
+        !addressDetails.length ||
+        addressDetails.some(address => address.status !== 1)
+      ) {
+        notApprovedSections.push('address');
+      }
+    } catch {
+      notApprovedSections.push('address');
+    }
+
+    // ---------------- BANK ----------------
+    try {
+      const bankDetails = await this.bankDetailsRepository.find(
+        {
+          where: {
+            and: [
+              {usersId: merchantProfile.usersId},
+              {roleValue: 'merchant'},
+              {isActive: true},
+              {isDeleted: false},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!bankDetails.length || bankDetails.some(bank => bank.status !== 1)) {
+        notApprovedSections.push('bank details');
+      }
+    } catch {
+      notApprovedSections.push('bank details');
+    }
+
+    // ---------------- UBO ----------------
+    try {
+      const uboResponse =
+        await this.merchantUboDetailsService.fetchMerchantUbosDetails(
+          merchantProfile.usersId,
+          'merchant',
+          merchantProfile.id,
+        );
+
+      const ubos = uboResponse.ubos ?? [];
+
+      if (!ubos.length || ubos.some(ubo => ubo.status !== 1)) {
+        notApprovedSections.push('ubo');
+      }
+    } catch {
+      notApprovedSections.push('ubo');
+    }
+
+    // ---------------- PSP ----------------
+    try {
+      const pspResponse = await this.pspService.fetchMerchantPsp(
+        merchantProfile.usersId,
+        merchantProfile.id,
+      );
+
+      const pspList = pspResponse.psp ?? [];
+
+      if (!pspList.length || pspList.some(psp => psp.status !== 1)) {
+        notApprovedSections.push('psp');
+      }
+    } catch {
+      notApprovedSections.push('psp');
+    }
+
+    // ---------------- FINAL CHECK ----------------
+
+    if (notApprovedSections.length) {
+      throw new HttpErrors.BadRequest(
+        `Cannot approve merchant profile. These KYC sections are not approved: ${notApprovedSections.join(', ')}`,
       );
     }
   }
@@ -402,6 +546,79 @@ export class KycService {
 
     } catch (error) {
       console.log('error in handle Investor Kyc Application:', error);
+      throw error;
+    }
+  }
+
+  async handleMerchantKycApplication(
+    applicationId: string,
+    merchantId: string,
+    status: number,
+    reason: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tx: any
+  ) {
+    try {
+      const merchantPanCard = await this.merchantPanCardsRepository.findOne(
+        {
+          where: {merchantProfilesId: merchantId},
+          order: ['createdAt DESC']
+        }
+      );
+
+      if (!merchantPanCard || !merchantPanCard.id) {
+        throw new HttpErrors.NotFound('Unable to fetch pan card details');
+      }
+
+      if (status === 2) {
+        await this.ensureMerchantSectionsApproved(merchantId, tx);
+      }
+
+      // update kyc application
+      await this.kycApplicationsRepository.updateById(
+        applicationId,
+        {status, verifiedAt: new Date()},
+        {transaction: tx}
+      );
+
+      // APPROVED
+      if (status === 2) {
+        await this.merchantProfileRepository.updateById(
+          merchantId,
+          {isActive: true},
+          {transaction: tx}
+        );
+
+        await this.merchantPanCardsRepository.updateById(merchantPanCard?.id, {status: 1, verifiedAt: new Date()})
+
+        return {
+          success: true,
+          message: 'Merchant KYC approved successfully',
+          kycStatus: 2
+        };
+      }
+
+      // REJECTED
+      if (status === 3) {
+        await this.merchantProfileRepository.updateById(
+          merchantId,
+          {isActive: false},
+          {transaction: tx}
+        );
+
+        await this.merchantPanCardsRepository.updateById(merchantPanCard?.id, {status: 2, reason: reason})
+
+        return {
+          success: true,
+          message: 'Merchant KYC rejected',
+          kycStatus: 3
+        };
+      }
+
+      throw new HttpErrors.BadRequest('Invalid status value');
+
+    } catch (error) {
+      console.log('error in handle Merchant Kyc Application:', error);
       throw error;
     }
   }
