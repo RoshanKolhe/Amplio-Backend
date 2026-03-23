@@ -137,7 +137,7 @@ export class MerchantProfiles extends Entity {
       minLength: 10,
     },
   })
-  companyAbout?: string;
+  merchantAbout?: string;
 
   @hasOne(() => MerchantPanCard)
   merchantPanCard: MerchantPanCard;

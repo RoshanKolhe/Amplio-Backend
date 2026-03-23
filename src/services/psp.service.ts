@@ -54,6 +54,30 @@ export class PspService {
     };
   }
 
+  private async fetchPspWithRelations(pspId: string, tx?: unknown) {
+    return this.pspRepository.findById(
+      pspId,
+      {
+        include: [
+          {
+            relation: 'pspMaster',
+            scope: {
+              include: [
+                {
+                  relation: 'pspMasterFields',
+                  scope: {
+                    order: ['order ASC'],
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      tx ? {transaction: tx} : undefined,
+    );
+  }
+
   async upsertMerchantPsp(
     merchantProfilesId: string,
     usersId: string,
@@ -141,7 +165,17 @@ export class PspService {
     // ------------------------------------------------
 
     if (pspId) {
-      const existingPsp = await this.pspRepository.findById(pspId);
+      const existingPsp = await this.pspRepository.findOne(
+        {
+          where: {
+            id: pspId,
+            usersId,
+            merchantProfilesId,
+            isDeleted: false,
+          },
+        },
+        {transaction: tx},
+      );
 
       if (!existingPsp) {
         throw new HttpErrors.NotFound('PSP not found');
@@ -165,20 +199,7 @@ export class PspService {
         {transaction: tx},
       );
 
-      psp = await this.pspRepository.findById(
-        pspId,
-        {
-          include: [
-            {
-              relation: 'pspMaster',
-              scope: {
-                include: [{relation: 'pspMasterFields'}],
-              },
-            },
-          ],
-        },
-        {transaction: tx},
-      );
+      psp = await this.fetchPspWithRelations(pspId, tx);
       
       return {
         success: true,
@@ -203,6 +224,8 @@ export class PspService {
       },
       {transaction: tx},
     );
+
+    psp = await this.fetchPspWithRelations(psp.id, tx);
 
     return {
       success: true,
