@@ -22,11 +22,14 @@ import {
 } from '../models';
 import {
   KycApplicationsRepository,
+  MerchantPanCardRepository,
   MerchantProfilesRepository,
+  UsersRepository,
 } from '../repositories';
 import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
 import {KycService} from '../services/kyc.service';
+import {MediaService} from '../services/media.service';
 import {MerchantKycDocumentService} from '../services/merchant-kyc-document.service';
 import {MerchantUboDetailsService} from '../services/merchant-ubo-details.service';
 import {PspService} from '../services/psp.service';
@@ -38,6 +41,10 @@ export class MerchantProfilesController {
     private merchantProfilesRepository: MerchantProfilesRepository,
     @repository(KycApplicationsRepository)
     private kycApplicationsRepository: KycApplicationsRepository,
+    @repository(MerchantPanCardRepository)
+    private merchantPanCardRepository: MerchantPanCardRepository,
+    @repository(UsersRepository)
+    private usersRepository: UsersRepository,
     @inject('service.session.service')
     private sessionService: SessionService,
     @inject('service.merchantKycDocumentService.service')
@@ -52,6 +59,8 @@ export class MerchantProfilesController {
     private pspService: PspService,
     @inject('service.kyc.service')
     private kycService: KycService,
+    @inject('service.media.service')
+    private mediaService: MediaService,
   ) { }
 
   async getKycApplicationStatus(applicationId: string): Promise<string[]> {
@@ -1328,6 +1337,844 @@ export class MerchantProfilesController {
       message: 'Merchant Profiles',
       data: merchant,
     };
+  }
+
+
+  // for merchant bank details upload
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @post('/merchant-profiles/bank-details')
+  async uploadMerchantBanksDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['bankDetails'],
+            properties: {
+              bankDetails: {
+                type: 'object',
+                required: [
+                  'bankName',
+                  'bankShortCode',
+                  'ifscCode',
+                  'branchName',
+                  'bankAddress',
+                  'accountType',
+                  'accountHolderName',
+                  'accountNumber',
+                  'bankAccountProofType',
+                  'bankAccountProofId',
+                ],
+                properties: {
+                  bankName: {type: 'string'},
+                  bankShortCode: {type: 'string'},
+                  ifscCode: {type: 'string'},
+                  branchName: {type: 'string'},
+                  bankAddress: {type: 'string'},
+                  accountType: {type: 'number'},
+                  accountHolderName: {type: 'string'},
+                  accountNumber: {type: 'string'},
+                  bankAccountProofType: {type: 'number'},
+                  bankAccountProofId: {type: 'string'},
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    body: {
+      bankDetails: {
+        bankName: string;
+        bankShortCode: string;
+        ifscCode: string;
+        branchName: string;
+        bankAddress: string;
+        accountType: number;
+        accountHolderName: string;
+        accountNumber: string;
+        bankAccountProofType: number;
+        bankAccountProofId: string;
+      };
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    account: BankDetails;
+  }> {
+    const merchant = await this.merchantProfilesRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
+    });
+
+
+    if (!merchant) throw new HttpErrors.NotFound('Merchant not found');
+
+    const bankData = new BankDetails({
+      ...body.bankDetails,
+      usersId: merchant.usersId,
+      mode: 1,
+      status: 0,
+      roleValue: 'merchant',
+    });
+
+    const result = await this.bankDetailsService.createNewBankAccount(bankData);
+
+    return result;
+  }
+
+  // fetch bank accounts...
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @get('/merchant-profiles/bank-details')
+  async fetchBankDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+  ): Promise<{success: boolean; message: string; bankDetails: BankDetails[]}> {
+    const merchantProfile = await this.merchantProfilesRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
+    });
+
+    if (!merchantProfile) {
+      throw new HttpErrors.NotFound('Merchant not found');
+    }
+
+    const bankDetailsResponse =
+      await this.bankDetailsService.fetchUserBankAccounts(
+        merchantProfile.usersId,
+        'merchant',
+      );
+
+    return {
+      success: true,
+      message: 'Bank accounts',
+      bankDetails: bankDetailsResponse.accounts,
+    };
+  }
+
+  // fetch bank account
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @get('/merchant-profiles/bank-details/{accountId}')
+  async fetchBankDetailsWithId(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @param.path.string('accountId') accountId: string,
+  ): Promise<{success: boolean; message: string; bankDetails: BankDetails}> {
+    const merchantProfile = await this.merchantProfilesRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
+    });
+
+    if (!merchantProfile) {
+      throw new HttpErrors.NotFound('Merchant not found');
+    }
+
+    const bankDetailsResponse =
+      await this.bankDetailsService.fetchUserBankAccount(accountId);
+
+    return {
+      success: true,
+      message: 'Bank accounts',
+      bankDetails: bankDetailsResponse.account,
+    };
+  }
+
+  // Update Bank account info for company...
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @patch('/merchant-profiles/bank-details/{accountId}')
+  async updateBankDetailsWithId(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @param.path.string('accountId') accountId: string,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: getModelSchemaRef(BankDetails, {partial: true}),
+        },
+      },
+    })
+    accountData: Partial<BankDetails>,
+  ): Promise<{success: boolean; message: string; account: BankDetails | null}> {
+    const tx = await this.merchantProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
+    try {
+      const merchantProfile = await this.merchantProfilesRepository.findOne(
+        {
+          where: {
+            and: [{usersId: currentUser.id}, {isDeleted: false}],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!merchantProfile) {
+        throw new HttpErrors.NotFound('Company not found');
+      }
+
+      const bankDetailsResponse =
+        await this.bankDetailsService.updateBankAccountInfo(
+          accountId,
+          accountData,
+          tx,
+        );
+
+      await tx.commit();
+
+      return bankDetailsResponse;
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
+
+
+  // fetch UBOs...
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @get('/merchant-profiles/bank-details')
+  async fetchUBODetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+  ): Promise<{success: boolean; message: string; bankDetails: BankDetails[]}> {
+    const merchantProfile = await this.merchantProfilesRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
+    });
+
+    if (!merchantProfile) {
+      throw new HttpErrors.NotFound('Merchant not found');
+    }
+
+    const bankDetailsResponse =
+      await this.bankDetailsService.fetchUserBankAccounts(
+        merchantProfile.usersId,
+        'merchant',
+      );
+
+    return {
+      success: true,
+      message: 'Bank accounts',
+      bankDetails: bankDetailsResponse.accounts,
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @get('/merchant-profiles/UBO-details')
+  async fetchUboDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+  ): Promise<{success: boolean, message: string, UboDetails: MerchantUboDetails[]}> {
+    const merchantProfiles = await this.merchantProfilesRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
+    });
+
+    if (!merchantProfiles) {
+      throw HttpErrors.NotFound('Merchant not found');
+    }
+    const uboDetails = await this.merchantUboDetailsService.fetchMerchantUboDetails(
+      merchantProfiles?.usersId,
+      merchantProfiles?.id
+    );
+
+    return {
+      success: true,
+      message: 'UBO Details',
+      UboDetails: uboDetails.uboDetails
+    }
+  }
+
+
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @get('/merchant-profiles/PSP-details')
+  async fetchPSPDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+  ): Promise<{success: boolean, message: string, pspDetails: Psp[]}> {
+    const merchantProfiles = await this.merchantProfilesRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
+    });
+
+    if (!merchantProfiles) {
+      throw HttpErrors.NotFound('Merchant not found');
+    }
+    const pspDetails = await this.pspService.fetchMerchantPsp(
+      merchantProfiles?.usersId,
+      merchantProfiles?.id
+    );
+
+    return {
+      success: true,
+      message: 'PSP Details',
+      pspDetails: pspDetails.psp
+    }
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @post('/merchant-profiles/PSP-details')
+  async createPSPDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['psp'],
+            properties: {
+              psp: {type: 'object'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      psp: Partial<Psp>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    psp: Psp;
+  }> {
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        isolationLevel: IsolationLevel.READ_COMMITTED,
+      });
+
+    try {
+      const merchant = await this.merchantProfilesRepository.findOne(
+        {
+          where: {
+            usersId: currentUser.id,
+            isDeleted: false,
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!merchant) {
+        throw new HttpErrors.NotFound('Merchant not found');
+      }
+
+      const result = await this.pspService.upsertMerchantPsp(
+        merchant.id,
+        merchant.usersId,
+        body.psp,
+        undefined,
+        tx,
+      );
+
+      await tx.commit();
+
+      return {
+        success: result.success,
+        message: result.message,
+        psp: result.psp,
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @patch('/merchant-profiles/PSP-details/{pspId}')
+  async updatePSPDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @param.path.string('pspId') pspId: string,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['psp'],
+            properties: {
+              psp: {type: 'object'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      psp: Partial<Psp>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    psp: Psp;
+  }> {
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        isolationLevel: IsolationLevel.READ_COMMITTED,
+      });
+
+    try {
+      const merchant = await this.merchantProfilesRepository.findOne(
+        {
+          where: {
+            usersId: currentUser.id,
+            isDeleted: false,
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!merchant) {
+        throw new HttpErrors.NotFound('Merchant not found');
+      }
+
+      const result = await this.pspService.upsertMerchantPsp(
+        merchant.id,
+        merchant.usersId,
+        body.psp,
+        pspId,
+        tx,
+      );
+
+
+      await tx.commit();
+
+      return {
+        success: result.success,
+        message: result.message,
+        psp: result.psp,
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @patch('/merchant-profiles/update-general-info')
+  async updateMerchantProfile(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: [
+              'companyName',
+              'CIN',
+              'GSTIN',
+              'dateOfIncorporation',
+              'cityOfIncorporation',
+              'stateOfIncorporation',
+              'countryOfIncorporation',
+              'merchantDealershipTypeId',
+              'submittedPanDetails',
+              'panCardDocumentId',
+              'email',
+              'phone',
+            ],
+            properties: {
+              merchantLogo: {type: 'string', nullable: true},
+              merchantAbout: {type: 'string'},
+              companyName: {type: 'string'},
+              CIN: {type: 'string'},
+              GSTIN: {type: 'string'},
+              dateOfIncorporation: {type: 'string'},
+              udyamRegistrationNumber: {type: 'string', nullable: true},
+              cityOfIncorporation: {type: 'string'},
+              stateOfIncorporation: {type: 'string'},
+              countryOfIncorporation: {type: 'string'},
+              merchantDealershipTypeId: {type: 'string'},
+              panCardDocumentId: {type: 'string'},
+              submittedPanDetails: {
+                type: 'object',
+                required: ['submittedMerchantName', 'submittedPanNumber'],
+                properties: {
+                  submittedMerchantName: {type: 'string'},
+                  submittedPanNumber: {type: 'string'},
+                },
+              },
+              email: {type: 'string'},
+              phone: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      merchantLogo?: string | null;
+      merchantAbout?: string;
+      companyName: string;
+      CIN: string;
+      GSTIN: string;
+      dateOfIncorporation: string;
+      udyamRegistrationNumber?: string | null;
+      cityOfIncorporation: string;
+      stateOfIncorporation: string;
+      countryOfIncorporation: string;
+      merchantDealershipTypeId: string;
+      panCardDocumentId: string;
+      submittedPanDetails: {
+        submittedMerchantName: string;
+        submittedPanNumber: string;
+      };
+      email: string;
+      phone: string;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    updatedProfile: MerchantProfiles;
+  }> {
+    const tx = await this.merchantProfilesRepository.dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const merchantProfile = await this.merchantProfilesRepository.findOne(
+        {
+          where: {
+            and: [{usersId: currentUser.id}, {isActive: true}, {isDeleted: false}],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!merchantProfile) {
+        throw new HttpErrors.NotFound('Merchant not found');
+      }
+
+      const merchantPanCard = await this.merchantPanCardRepository.findOne(
+        {
+          where: {
+            and: [
+              {merchantProfilesId: merchantProfile.id},
+              {isDeleted: false},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      const duplicateCin = await this.merchantProfilesRepository.findOne(
+        {
+          where: {
+            and: [
+              {CIN: body.CIN},
+              {isDeleted: false},
+              {id: {neq: merchantProfile.id}},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+      if (duplicateCin) {
+        throw new HttpErrors.BadRequest('CIN already registered');
+      }
+
+      const duplicateGstin = await this.merchantProfilesRepository.findOne(
+        {
+          where: {
+            and: [
+              {GSTIN: body.GSTIN},
+              {isDeleted: false},
+              {id: {neq: merchantProfile.id}},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+      if (duplicateGstin) {
+        throw new HttpErrors.BadRequest('GSTIN already registered');
+      }
+
+      const normalizedUdyamRegistrationNumber =
+        body.udyamRegistrationNumber?.trim() || null;
+
+      if (
+        normalizedUdyamRegistrationNumber &&
+        normalizedUdyamRegistrationNumber !== merchantProfile.udyamRegistrationNumber
+      ) {
+        const duplicateUdyam = await this.merchantProfilesRepository.findOne(
+          {
+            where: {
+              and: [
+                {udyamRegistrationNumber: normalizedUdyamRegistrationNumber},
+                {isDeleted: false},
+                {id: {neq: merchantProfile.id}},
+              ],
+            },
+          },
+          {transaction: tx},
+        );
+
+        if (duplicateUdyam) {
+          throw new HttpErrors.BadRequest(
+            'Udyam registration number already registered',
+          );
+        }
+      }
+
+      const duplicateEmail = await this.usersRepository.findOne(
+        {
+          where: {
+            and: [
+              {email: body.email},
+              {isDeleted: false},
+              {id: {neq: merchantProfile.usersId}},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+      if (duplicateEmail) {
+        throw new HttpErrors.BadRequest('Email already registered');
+      }
+
+      const duplicatePhone = await this.usersRepository.findOne(
+        {
+          where: {
+            and: [
+              {phone: body.phone},
+              {isDeleted: false},
+              {id: {neq: merchantProfile.usersId}},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+      if (duplicatePhone) {
+        throw new HttpErrors.BadRequest('Phone already registered');
+      }
+
+      const duplicatePan = await this.merchantPanCardRepository.findOne(
+        {
+          where: {
+            and: [
+              {submittedPanNumber: body.submittedPanDetails.submittedPanNumber},
+              {isDeleted: false},
+              {
+                id: {
+                  neq: merchantPanCard?.id ?? '',
+                },
+              },
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+      if (duplicatePan) {
+        throw new HttpErrors.BadRequest(
+          'Pan already exists with another company',
+        );
+      }
+
+      await this.merchantProfilesRepository.updateById(
+        merchantProfile.id,
+        {
+          merchantLogo: body.merchantLogo ?? undefined,
+          merchantAbout: body.merchantAbout ?? '',
+          companyName: body.companyName,
+          CIN: body.CIN,
+          GSTIN: body.GSTIN,
+          dateOfIncorporation: body.dateOfIncorporation,
+          udyamRegistrationNumber:
+            normalizedUdyamRegistrationNumber ?? undefined,
+          cityOfIncorporation: body.cityOfIncorporation,
+          stateOfIncorporation: body.stateOfIncorporation,
+          countryOfIncorporation: body.countryOfIncorporation,
+          merchantDealershipTypeId: body.merchantDealershipTypeId,
+        } as Partial<MerchantProfiles>,
+        {transaction: tx},
+      );
+
+      await this.usersRepository.updateById(
+        merchantProfile.usersId,
+        {
+          email: body.email,
+          phone: body.phone,
+        },
+        {transaction: tx},
+      );
+
+      if (merchantPanCard) {
+        await this.merchantPanCardRepository.updateById(
+          merchantPanCard.id,
+          {
+            submittedMerchantName:
+              body.submittedPanDetails.submittedMerchantName,
+            submittedPanNumber: body.submittedPanDetails.submittedPanNumber,
+            panCardDocumentId: body.panCardDocumentId,
+          },
+          {transaction: tx},
+        );
+      } else {
+        await this.merchantPanCardRepository.create(
+          {
+            merchantProfilesId: merchantProfile.id,
+            submittedMerchantName:
+              body.submittedPanDetails.submittedMerchantName,
+            submittedPanNumber: body.submittedPanDetails.submittedPanNumber,
+            panCardDocumentId: body.panCardDocumentId,
+            status: 0,
+            mode: 1,
+            isActive: false,
+            isDeleted: false,
+          },
+          {transaction: tx},
+        );
+      }
+
+      const updatedMerchantProfile =
+        await this.merchantProfilesRepository.findById(
+          merchantProfile.id,
+          {
+            include: [
+              {
+                relation: 'merchantPanCard',
+                scope: {
+                  include: [
+                    {
+                      relation: 'media',
+                      scope: {
+                        fields: {
+                          fileUrl: true,
+                          id: true,
+                          fileOriginalName: true,
+                          fileType: true,
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+              {
+                relation: 'merchantDealershipType',
+              },
+              {
+                relation: 'users',
+                scope: {fields: {id: true, phone: true, email: true}},
+              },
+              {
+                relation: 'media',
+                scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+              },
+            ],
+          },
+          {transaction: tx},
+        );
+
+      if (merchantProfile.merchantLogo !== updatedMerchantProfile.merchantLogo) {
+        if (merchantProfile.merchantLogo) {
+          await this.mediaService.updateMediaUsedStatus(
+            [merchantProfile.merchantLogo],
+            false,
+          );
+        }
+
+        if (updatedMerchantProfile.merchantLogo) {
+          await this.mediaService.updateMediaUsedStatus(
+            [updatedMerchantProfile.merchantLogo],
+            true,
+          );
+        }
+      }
+
+      if (
+        merchantPanCard?.panCardDocumentId !==
+        updatedMerchantProfile.merchantPanCard?.panCardDocumentId
+      ) {
+        if (merchantPanCard?.panCardDocumentId) {
+          await this.mediaService.updateMediaUsedStatus(
+            [merchantPanCard.panCardDocumentId],
+            false,
+          );
+        }
+
+        if (updatedMerchantProfile.merchantPanCard?.panCardDocumentId) {
+          await this.mediaService.updateMediaUsedStatus(
+            [updatedMerchantProfile.merchantPanCard.panCardDocumentId],
+            true,
+          );
+        }
+      }
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Merchant profile updated',
+        updatedProfile: updatedMerchantProfile,
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @get('/merchant-profiles/documents')
+  async fetchMerchantDocument(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    documents: MerchantKycDocument[];
+  }> {
+
+    const merchantProfiles = await this.merchantProfilesRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
+    });
+
+    if (!merchantProfiles) {
+      throw HttpErrors.NotFound('Merchant not found');
+    }
+
+    const documentDetails = await this.merchantKycDocumentService.fetchByUser(merchantProfiles.usersId);
+
+    return {
+      success: true,
+      message: 'Documents',
+      documents: documentDetails.documents
+    }
+  }
+
+
+  @authenticate('jwt')
+  @authorize({roles: ['merchant']})
+  @get('/merchant-profiles/address-details')
+  async fetchMerchantAddressDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    registeredAddress: AddressDetails | null;
+    correspondenceAddress: AddressDetails | null;
+  }> {
+    const merchantProfiles = await this.merchantProfilesRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
+    });
+
+    if (!merchantProfiles) {
+      throw new HttpErrors.NotFound('Merchant not found');
+    }
+
+    return this.addressDetailsService.fetchUserAddressDetails(
+      merchantProfiles.usersId,
+      'merchant',
+      merchantProfiles.id,
+    );
   }
 
 }

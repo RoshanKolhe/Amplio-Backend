@@ -52,3 +52,4 @@ export * from './merchant-ubo-details.repository';
 export * from './psp.repository';
 export * from './psp-master.repository';
 export * from './psp-master-fields.repository';
+export * from './transaction.repository';

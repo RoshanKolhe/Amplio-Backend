@@ -22,8 +22,8 @@ export function TimeStampRepositoryMixin<
         entity.id = uuidv4();
       }
 
-      entity.createdAt = new Date();
-      entity.updatedAt = new Date();
+      entity.createdAt = entity.createdAt ?? new Date();
+      entity.updatedAt = entity.updatedAt ?? new Date();
       return super.create(entity, options);
     }
 
@@ -37,8 +37,8 @@ export function TimeStampRepositoryMixin<
         if (!entity.id) {
           entity.id = uuidv4();
         }
-        entity.createdAt = currentTime;
-        entity.updatedAt = currentTime;
+        entity.createdAt = entity.createdAt ?? currentTime;
+        entity.updatedAt = entity.updatedAt ?? currentTime;
       });
 
       return super.createAll(entities, options);

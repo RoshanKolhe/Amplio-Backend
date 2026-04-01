@@ -7,6 +7,7 @@ export async function main(options: ApplicationConfig = {}) {
   const app = new AmplioBackendApplication(options);
   await app.boot();
   await app.start();
+  await app.startCrons();
   console.log('port', process.env.PORT);
   const url = app.restServer.url;
   console.log(`Server is running at ${url}`);
@@ -20,7 +21,7 @@ if (require.main === module) {
   const config = {
     rest: {
       port: +(process.env.PORT ?? 3000),
-      host: process.env.HOST ?? '127.0.0.1',
+      host: process.env.HOST ?? '192.168.1.18',
       // The `gracePeriodForClose` provides a graceful close for http/https
       // servers with keep-alive clients. The default value is `Infinity`
       // (don't force-close). If you want to immediately destroy all sockets

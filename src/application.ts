@@ -51,13 +51,19 @@ import {CompanyKycDocumentRequirementsService} from './services/company-kyc-docu
 import {MerchantKycDocumentService} from './services/merchant-kyc-document.service';
 import {MerchantKycDocumentRequirementsService} from './services/merchant-kyc-document-requirements.service';
 import {MerchantUboDetailsService} from './services/merchant-ubo-details.service';
+import {LiquidityEngineService} from './services/liquidity-engine.service';
 import {PspService} from './services/psp.service';
+import {TransactionCron} from './crons/transaction.cron';
+import {PspRepository} from './repositories/psp.repository';
+import {TransactionRepository} from './repositories/transaction.repository';
 
 export {ApplicationConfig};
 
 export class AmplioBackendApplication extends BootMixin(
   ServiceMixin(RepositoryMixin(RestApplication)),
 ) {
+  private transactionCron?: TransactionCron;
+
   constructor(options: ApplicationConfig = {}) {
     super(options);
 
@@ -166,6 +172,9 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.merchantUboDetailsService.service').toClass(
       MerchantUboDetailsService,
     );
+    this.bind('service.liquidityEngineService.service').toClass(
+      LiquidityEngineService,
+    );
     this.bind('service.pspService.service').toClass(
       PspService,
     );
@@ -187,5 +196,30 @@ export class AmplioBackendApplication extends BootMixin(
     };
 
     this.configure(FILE_UPLOAD_SERVICE).to(multerOptions);
+  }
+
+  async startCrons() {
+    if (this.transactionCron) {
+      return;
+    }
+
+    const transactionRepository = await this.get<TransactionRepository>(
+      'repositories.TransactionRepository',
+    );
+    const pspRepository = await this.get<PspRepository>(
+      'repositories.PspRepository',
+    );
+    const liquidityEngineService = await this.get<LiquidityEngineService>(
+      'service.liquidityEngineService.service',
+    );
+    const pspService = await this.get<PspService>('service.pspService.service');
+
+    this.transactionCron = new TransactionCron(
+      transactionRepository,
+      pspRepository,
+      pspService,
+      liquidityEngineService,
+    );
+    this.transactionCron.start();
   }
 }

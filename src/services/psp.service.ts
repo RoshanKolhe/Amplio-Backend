@@ -1,12 +1,17 @@
-import {injectable, BindingScope} from '@loopback/core';
+import {BindingScope, injectable} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
-import {
-  PspRepository,
-  PspMasterRepository,
-  PspMasterFieldsRepository,
-} from '../repositories';
+import axios from 'axios';
 import {Psp} from '../models';
+import {
+  PspMasterFieldsRepository,
+  PspMasterRepository,
+  PspRepository,
+} from '../repositories';
+
+type RazorpayPaymentsResponse = {
+  items?: Record<string, unknown>[];
+};
 
 @injectable({scope: BindingScope.TRANSIENT})
 export class PspService {
@@ -19,7 +24,7 @@ export class PspService {
 
     @repository(PspMasterFieldsRepository)
     public pspMasterFieldsRepository: PspMasterFieldsRepository,
-  ) {}
+  ) { }
 
   async fetchMerchantPsp(usersId: string, merchantProfilesId: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,6 +57,30 @@ export class PspService {
       message: 'Merchant PSP fetched',
       psp,
     };
+  }
+
+  private async fetchPspWithRelations(pspId: string, tx?: unknown) {
+    return this.pspRepository.findById(
+      pspId,
+      {
+        include: [
+          {
+            relation: 'pspMaster',
+            scope: {
+              include: [
+                {
+                  relation: 'pspMasterFields',
+                  scope: {
+                    order: ['order ASC'],
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      tx ? {transaction: tx} : undefined,
+    );
   }
 
   async upsertMerchantPsp(
@@ -141,7 +170,17 @@ export class PspService {
     // ------------------------------------------------
 
     if (pspId) {
-      const existingPsp = await this.pspRepository.findById(pspId);
+      const existingPsp = await this.pspRepository.findOne(
+        {
+          where: {
+            id: pspId,
+            usersId,
+            merchantProfilesId,
+            isDeleted: false,
+          },
+        },
+        {transaction: tx},
+      );
 
       if (!existingPsp) {
         throw new HttpErrors.NotFound('PSP not found');
@@ -165,21 +204,8 @@ export class PspService {
         {transaction: tx},
       );
 
-      psp = await this.pspRepository.findById(
-        pspId,
-        {
-          include: [
-            {
-              relation: 'pspMaster',
-              scope: {
-                include: [{relation: 'pspMasterFields'}],
-              },
-            },
-          ],
-        },
-        {transaction: tx},
-      );
-      
+      psp = await this.fetchPspWithRelations(pspId, tx);
+
       return {
         success: true,
         message: 'Merchant PSP updated',
@@ -203,6 +229,8 @@ export class PspService {
       },
       {transaction: tx},
     );
+
+    psp = await this.fetchPspWithRelations(psp.id, tx);
 
     return {
       success: true,
@@ -261,4 +289,104 @@ export class PspService {
 
     throw new HttpErrors.BadRequest('invalid status');
   }
+
+
+
+
+  private async getPspProviderValue(psp: Psp & {pspMaster?: {value?: string}}) {
+    if (psp.pspMaster?.value) {
+      return psp.pspMaster.value.toLowerCase();
+    }
+
+    const pspMaster = await this.pspMasterRepository.findById(psp.pspMasterId);
+    return pspMaster.value.toLowerCase();
+  }
+
+  async fetchTransactions(
+    psp: Psp & {pspMaster?: {value?: string}},
+  ): Promise<Record<string, unknown>[]> {
+    const provider = await this.getPspProviderValue(psp);
+
+    if (provider !== 'razorpay') {
+      return [];
+    }
+
+    if (!psp.apiKey || !psp.apiSecret) {
+      throw new HttpErrors.BadRequest(
+        `API credentials are missing for PSP ${psp.id}`,
+      );
+    }
+
+    const payments: Record<string, unknown>[] = [];
+    const pageSize = 100;
+    let skip = 0;
+
+    try {
+      while (true) {
+        const response = await axios.get<RazorpayPaymentsResponse>(
+          'https://api.razorpay.com/v1/payments',
+          {
+            auth: {
+              username: psp.apiKey,
+              password: psp.apiSecret,
+            },
+            params: {
+              count: pageSize,
+              skip,
+            },
+            timeout: 10000,
+          },
+        );
+
+        console.log('responcessssssssss', response)
+
+        const items = Array.isArray(response.data.items)
+          ? response.data.items
+          : [];
+
+        payments.push(...items);
+
+        if (items.length < pageSize) {
+          break;
+        }
+
+        skip += pageSize;
+      }
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'isAxiosError' in error &&
+        error.isAxiosError
+      ) {
+
+        const status = error.response?.status;
+        const razorpayMessage =
+          error.response?.data &&
+            typeof error.response.data === 'object' &&
+            'error' in error.response.data &&
+            typeof error.response.data.error === 'object' &&
+            error.response.data.error &&
+            'description' in error.response.data.error
+            ? String(error.response.data.error.description)
+            : undefined;
+
+        if (status === 401) {
+          throw new HttpErrors.Unauthorized(
+            `Razorpay authentication failed for PSP ${psp.id}. Please verify that the saved apiKey/apiSecret are the actual Razorpay key_id and key_secret from the Razorpay dashboard.${razorpayMessage ? ` Razorpay says: ${razorpayMessage}` : ''}`,
+          );
+        }
+
+        throw new HttpErrors.BadGateway(
+          `Failed to fetch Razorpay payments for PSP ${psp.id}.${status ? ` Status: ${status}.` : ''}${razorpayMessage ? ` Razorpay says: ${razorpayMessage}` : ''}`,
+        );
+      }
+
+      throw error;
+    }
+
+    return payments;
+  }
+
 }
+
