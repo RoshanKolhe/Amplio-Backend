@@ -1,7 +1,8 @@
-import {belongsTo, Entity, model, property} from '@loopback/repository';
+import {belongsTo, Entity, model, property, hasMany} from '@loopback/repository';
 import {MerchantProfiles} from './merchant-profiles.model';
 import {PspMaster} from './psp-master.model';
 import {Users} from './users.model';
+import {Transaction} from './transaction.model';
 
 @model({
   settings: {
@@ -140,6 +141,9 @@ export class Psp extends Entity {
 
   @belongsTo(() => MerchantProfiles)
   merchantProfilesId: string;
+
+  @hasMany(() => Transaction)
+  transactions: Transaction[];
 
   constructor(data?: Partial<Psp>) {
     super(data);
