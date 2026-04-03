@@ -48,6 +48,8 @@ import {BusinessKycDpnService} from './services/business-kyc-dpn.service';
 import {BusinessKycFinancialsService} from './services/business-kyc-financials.service';
 import {CompanyKycDocumentService} from './services/company-kyc-document.service';
 import {CompanyKycDocumentRequirementsService} from './services/company-kyc-document-requirements.service';
+import {InvestorKycDocumentService} from './services/investor-kyc-document.service';
+import {InvestorKycDocumentRequirementsService} from './services/investor-kyc-document-requirements.service';
 import {MerchantKycDocumentService} from './services/merchant-kyc-document.service';
 import {MerchantKycDocumentRequirementsService} from './services/merchant-kyc-document-requirements.service';
 import {MerchantUboDetailsService} from './services/merchant-ubo-details.service';
@@ -160,8 +162,14 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.companyKycDocumentRequirementsService.service').toClass(
       CompanyKycDocumentRequirementsService,
     );
+    this.bind('service.investorKycDocumentRequirementsService.service').toClass(
+      InvestorKycDocumentRequirementsService,
+    );
     this.bind('service.companyKycDocumentService.service').toClass(
       CompanyKycDocumentService,
+    );
+    this.bind('service.investorKycDocumentService.service').toClass(
+      InvestorKycDocumentService,
     );
     this.bind('service.merchantKycDocumentRequirementsService.service').toClass(
       MerchantKycDocumentRequirementsService,

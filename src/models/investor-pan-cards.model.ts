@@ -48,7 +48,6 @@ export class InvestorPanCards extends Entity {
 
   @property({
     type: 'string',
-    required: false,
     jsonSchema: {
       pattern: '^\\d{4}-\\d{2}-\\d{2}$'
     }
@@ -79,7 +78,6 @@ export class InvestorPanCards extends Entity {
 
   @property({
     type: 'string',
-    required: true,
     jsonSchema: {
       pattern: '^\\d{4}-\\d{2}-\\d{2}$'
     }

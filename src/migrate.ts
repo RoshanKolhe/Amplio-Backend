@@ -62,7 +62,10 @@ export async function migrate(args: string[]) {
       'MerchantKycDocumentRequirements',
       'MerchantKycDocument',
       'MerchantUboDetails',
-      'Transaction'
+      'Transaction',
+      'InvestorType',
+      'InvestorKycDocumentRequirements',
+      'InvestorKycDocument'
     ]
   });
 

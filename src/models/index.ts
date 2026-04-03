@@ -26,6 +26,8 @@ export * from './users.model';
 export * from './business-kyc-collateral-assets.model';
 export * from './business-kyc-guarantor.model';
 export * from './investor-pan-cards.model';
+export * from './investor-kyc-document.model';
+export * from './investor-kyc-document-requirements.model';
 export * from './investor-profile.model';
 
 export * from './address-details.model';
@@ -58,3 +60,4 @@ export * from './psp.model';
 export * from './roc.model';
 export * from './transaction.model';
 
+export * from './investor-type.model';

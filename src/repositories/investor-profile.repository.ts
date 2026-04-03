@@ -2,11 +2,12 @@ import {Constructor, inject, Getter} from '@loopback/core';
 import {DefaultCrudRepository, repository, BelongsToAccessor, HasOneRepositoryFactory} from '@loopback/repository';
 import {AmplioDataSource} from '../datasources';
 import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
-import {InvestorProfile, InvestorProfileRelations, Media, InvestorPanCards, Users, KycApplications} from '../models';
+import {InvestorProfile, InvestorProfileRelations, Media, InvestorPanCards, Users, KycApplications, InvestorType} from '../models';
 import {MediaRepository} from './media.repository';
 import {InvestorPanCardsRepository} from './investor-pan-cards.repository';
 import {UsersRepository} from './users.repository';
 import {KycApplicationsRepository} from './kyc-applications.repository';
+import {InvestorTypeRepository} from './investor-type.repository';
 
 export class InvestorProfileRepository extends TimeStampRepositoryMixin<
   InvestorProfile,
@@ -32,10 +33,18 @@ export class InvestorProfileRepository extends TimeStampRepositoryMixin<
 
   public readonly kycApplications: BelongsToAccessor<KycApplications, typeof InvestorProfile.prototype.id>;
 
+  public readonly investorType: BelongsToAccessor<InvestorType, typeof InvestorProfile.prototype.id>;
+
+  public readonly media: BelongsToAccessor<Media, typeof InvestorProfile.prototype.id>;
+
   constructor(
-    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('InvestorPanCardsRepository') protected investorPanCardsRepositoryGetter: Getter<InvestorPanCardsRepository>, @repository.getter('UsersRepository') protected usersRepositoryGetter: Getter<UsersRepository>, @repository.getter('KycApplicationsRepository') protected kycApplicationsRepositoryGetter: Getter<KycApplicationsRepository>,
+    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('InvestorPanCardsRepository') protected investorPanCardsRepositoryGetter: Getter<InvestorPanCardsRepository>, @repository.getter('UsersRepository') protected usersRepositoryGetter: Getter<UsersRepository>, @repository.getter('KycApplicationsRepository') protected kycApplicationsRepositoryGetter: Getter<KycApplicationsRepository>, @repository.getter('InvestorTypeRepository') protected investorTypeRepositoryGetter: Getter<InvestorTypeRepository>,
   ) {
     super(InvestorProfile, dataSource);
+    this.media = this.createBelongsToAccessorFor('media', mediaRepositoryGetter,);
+    this.registerInclusionResolver('media', this.media.inclusionResolver);
+    this.investorType = this.createBelongsToAccessorFor('investorType', investorTypeRepositoryGetter,);
+    this.registerInclusionResolver('investorType', this.investorType.inclusionResolver);
     this.kycApplications = this.createBelongsToAccessorFor('kycApplications', kycApplicationsRepositoryGetter,);
     this.registerInclusionResolver('kycApplications', this.kycApplications.inclusionResolver);
     this.users = this.createBelongsToAccessorFor('users', usersRepositoryGetter,);

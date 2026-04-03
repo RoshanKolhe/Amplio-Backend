@@ -15,7 +15,9 @@ export * from './company-kyc-document.controller';
 export * from './company-sector-type.controller';
 export * from './document-extraction.controller';
 export * from './documents.controller';
+export * from './investor-kyc-document.controller';
 export * from './investor-profile.controller';
+export * from './investor-kyc-document-requirements.controller';
 export * from './kyc.controller';
 export * from './merchant-dealership-type.controller';
 export * from './merchant-kyc-document-requirements.controller';
@@ -34,4 +36,6 @@ export * from './psp-master.controller';
 export * from './psp-master-fields.controller';
 export * from './merchant-kyc-super-admin.controller';
 export * from './transaction.controller';
+
+export * from './investor-types.controller';
 
