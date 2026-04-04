@@ -50,7 +50,7 @@ export * from './merchant-kyc-document-requirements.repository';
 export * from './merchant-kyc-document.repository';
 export * from './merchant-profiles.repository';
 export * from './merchant-pan-card.repository';
-export * from './merchant-ubo-details.repository';
+export * from './ubo-details.repository';
 export * from './psp.repository';
 export * from './psp-master.repository';
 export * from './psp-master-fields.repository';

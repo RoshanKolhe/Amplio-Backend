@@ -30,12 +30,9 @@ export * from './roles.controller';
 export * from './screens.controller';
 export * from './trustee-entity-types.controller';
 export * from './trustee-profiles.controller';
-export * from './merchant-ubo-details-media.controller';
-export * from './merchant-ubo-details-users.controller';
 export * from './psp-master.controller';
 export * from './psp-master-fields.controller';
 export * from './merchant-kyc-super-admin.controller';
 export * from './transaction.controller';
-
 export * from './investor-types.controller';
 

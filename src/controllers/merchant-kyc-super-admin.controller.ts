@@ -14,7 +14,7 @@ import {
   BankDetails,
   MerchantKycDocument,
   MerchantProfiles,
-  MerchantUboDetails,
+  UboDetails,
   Psp,
 } from '../models';
 import {
@@ -25,7 +25,7 @@ import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
 import {KycService} from '../services/kyc.service';
 import {MerchantKycDocumentService} from '../services/merchant-kyc-document.service';
-import {MerchantUboDetailsService} from '../services/merchant-ubo-details.service';
+import {UboDetailsService} from '../services/ubo-details.service';
 import {PspService} from '../services/psp.service';
 
 
@@ -43,8 +43,8 @@ export class MerchantKycSuperAdminController {
     private bankDetailsService: BankDetailsService,
     @inject('service.AddressDetails.service')
     private addressDetailsService: AddressDetailsService,
-    @inject('service.merchantUboDetailsService.service')
-    private merchantUboDetailsService: MerchantUboDetailsService,
+    @inject('service.uboDetailsService.service')
+    private uboDetailsService: UboDetailsService,
     @inject('service.pspService.service')
     private pspService: PspService,
   ) { }
@@ -411,13 +411,13 @@ export class MerchantKycSuperAdminController {
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
   @get('/merchant-profiles/{merchantId}/ubo-details')
-  async fetchMerchantUBODetails(
+  async fetchUBODetails(
     @param.path.string('merchantId') merchantId: string,
-    @param.filter(MerchantUboDetails) filter?: Filter<MerchantUboDetails>,
+    @param.filter(UboDetails) filter?: Filter<UboDetails>,
   ): Promise<{
     success: boolean;
     message: string;
-    uboDetails: MerchantUboDetails[];
+    uboDetails: UboDetails[];
   }> {
 
     const merchantProfile = await this.merchantProfilesRepository.findOne({
@@ -431,7 +431,7 @@ export class MerchantKycSuperAdminController {
       throw new HttpErrors.NotFound('Merchant not found');
     }
 
-    const merchantResponse = await this.merchantUboDetailsService.fetchMerchantUbosDetails(
+    const uboResponse = await this.uboDetailsService.fetchUbosDetails(
       merchantProfile.usersId,
       'merchant',
       merchantProfile.id,
@@ -441,14 +441,14 @@ export class MerchantKycSuperAdminController {
     return {
       success: true,
       message: 'UBO Details',
-      uboDetails: merchantResponse.ubos,
+      uboDetails: uboResponse.ubos,
     };
   }
 
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
   @patch('/merchant-profiles/ubo-verification')
-  async merchantUBOSVerification(
+  async UBOSVerification(
     @requestBody({
       content: {
         'application/json': {
@@ -470,7 +470,7 @@ export class MerchantKycSuperAdminController {
       reason?: string;
     },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.merchantUboDetailsService.updateUBOSStatus(
+    const result = await this.uboDetailsService.updateUBOSStatus(
       body.uboId,
       body.status,
       body.reason ?? '',

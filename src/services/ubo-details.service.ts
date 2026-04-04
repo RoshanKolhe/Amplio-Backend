@@ -2,34 +2,35 @@
 import {inject} from '@loopback/core';
 import {Filter, repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
-import {MerchantUboDetails} from '../models';
-import {MerchantUboDetailsRepository} from '../repositories';
+import {UboDetails} from '../models';
+import {UboDetailsRepository} from '../repositories';
 import {MediaService} from './media.service';
 
-export class MerchantUboDetailsService {
+export class UboDetailsService {
   constructor(
-    @repository(MerchantUboDetailsRepository)
-    private merchantUboDetailsRepository: MerchantUboDetailsRepository,
+    @repository(UboDetailsRepository)
+    private uboDetailsRepository: UboDetailsRepository,
     @inject('service.media.service')
     private mediaService: MediaService,
   ) { }
 
-  async fetchMerchantUboDetails(
+  async fetchUboDetails(
     usersId: string,
     identifierId: string,
-    filter?: Filter<MerchantUboDetails>,
+    roleValue: string,
+    filter?: Filter<UboDetails>,
   ): Promise<{
     success: boolean;
     message: string;
-    uboDetails: MerchantUboDetails[];
+    uboDetails: UboDetails[];
   }> {
-    const uboDetails = await this.merchantUboDetailsRepository.find({
+    const uboDetails = await this.uboDetailsRepository.find({
       where: {
         and: [
           {...filter?.where},
           {usersId},
           {identifierId},
-          {roleValue: 'merchant'},
+          {roleValue},
           {isActive: true},
           {isDeleted: false},
         ],
@@ -46,18 +47,18 @@ export class MerchantUboDetailsService {
 
     return {
       success: true,
-      message: 'Merchant UBO details',
+      message: 'UBO details',
       uboDetails,
     };
   }
 
 
-  async fetchMerchantUbosDetails(usersId: string, roleValue: string, identifierId: string, filter?: Filter<MerchantUboDetails>): Promise<{
+  async fetchUbosDetails(usersId: string, roleValue: string, identifierId: string, filter?: Filter<UboDetails>): Promise<{
     success: boolean;
     message: string;
-    ubos: MerchantUboDetails[]
+    ubos: UboDetails[]
   }> {
-    const merchantUBOS = await this.merchantUboDetailsRepository.find({
+    const ubos = await this.uboDetailsRepository.find({
       where: {
         and: [
           {...filter?.where},
@@ -75,20 +76,20 @@ export class MerchantUboDetailsService {
 
     return {
       success: true,
-      message: 'Merchant UBOS Details',
-      ubos: merchantUBOS
+      message: 'UBO Details',
+      ubos: ubos
     }
   }
 
 
-  async createMerchantUboDetails(
-    uboDetails: Omit<MerchantUboDetails, 'id'>[],
+  async createUboDetails(
+    uboDetails: Omit<UboDetails, 'id'>[],
     tx: any,
   ): Promise<{
     success: boolean;
     message: string;
-    createdMerchantUboDetails: MerchantUboDetails[];
-    erroredMerchantUboDetails: Array<{
+    createdUboDetails: UboDetails[];
+    erroredUboDetails: Array<{
       fullName: string;
       email: string;
       phone: string;
@@ -96,8 +97,8 @@ export class MerchantUboDetailsService {
       message: string;
     }>;
   }> {
-    const createdMerchantUboDetails: MerchantUboDetails[] = [];
-    const erroredMerchantUboDetails: Array<{
+    const createdUboDetails: UboDetails[] = [];
+    const erroredUboDetails: Array<{
       fullName: string;
       email: string;
       phone: string;
@@ -130,21 +131,21 @@ export class MerchantUboDetailsService {
           uboDetail.verifiedAt = new Date();
 
           try {
-            const created = await this.merchantUboDetailsRepository.create(
+            const created = await this.uboDetailsRepository.create(
               uboDetail,
               {transaction: tx},
             );
-            createdMerchantUboDetails.push(created);
+            createdUboDetails.push(created);
             mediaIds.push(created.panCardId);
             continue;
           } catch (dbErr) {
             if (dbErr?.code === '23505') {
-              erroredMerchantUboDetails.push({
+              erroredUboDetails.push({
                 fullName: uboDetail.fullName,
                 email: uboDetail.email,
                 phone: uboDetail.phone,
                 submittedPanNumber: uboDetail.submittedPanNumber,
-                message: 'This PAN is already added for this merchant',
+                message: 'This PAN is already added',
               });
               continue;
             }
@@ -152,7 +153,7 @@ export class MerchantUboDetailsService {
           }
         }
 
-        erroredMerchantUboDetails.push({
+        erroredUboDetails.push({
           fullName: uboDetail.fullName,
           email: uboDetail.email,
           phone: uboDetail.phone,
@@ -167,21 +168,21 @@ export class MerchantUboDetailsService {
         uboDetail.status = 0;
 
         try {
-          const created = await this.merchantUboDetailsRepository.create(
+          const created = await this.uboDetailsRepository.create(
             uboDetail,
             {transaction: tx},
           );
-          createdMerchantUboDetails.push(created);
+          createdUboDetails.push(created);
           mediaIds.push(created.panCardId);
           continue;
         } catch (dbErr) {
           if (dbErr?.code === '23505') {
-            erroredMerchantUboDetails.push({
+            erroredUboDetails.push({
               fullName: uboDetail.fullName,
               email: uboDetail.email,
               phone: uboDetail.phone,
               submittedPanNumber: uboDetail.submittedPanNumber,
-              message: 'This PAN is already added for this merchant',
+              message: 'This PAN is already added',
             });
             continue;
           }
@@ -189,7 +190,7 @@ export class MerchantUboDetailsService {
         }
       }
 
-      erroredMerchantUboDetails.push({
+      erroredUboDetails.push({
         fullName: uboDetail.fullName,
         email: uboDetail.email,
         phone: uboDetail.phone,
@@ -204,22 +205,22 @@ export class MerchantUboDetailsService {
 
     return {
       success: true,
-      message: 'Merchant UBO details data',
-      createdMerchantUboDetails,
-      erroredMerchantUboDetails,
+      message: 'UBO details data',
+      createdUboDetails,
+      erroredUboDetails,
     };
   }
 
-  async updateMerchantUboDetail(
+  async updateUboDetail(
     uboId: string,
-    uboData: Partial<MerchantUboDetails>,
+    uboData: Partial<UboDetails>,
     tx: any,
   ): Promise<{
     success: boolean;
     message: string;
-    uboDetail: MerchantUboDetails | null;
+    uboDetail: UboDetails | null;
   }> {
-    const uboDetail = await this.merchantUboDetailsRepository.findOne(
+    const uboDetail = await this.uboDetailsRepository.findOne(
       {
         where: {
           and: [{id: uboId}, {isActive: true}, {isDeleted: false}],
@@ -229,16 +230,16 @@ export class MerchantUboDetailsService {
     );
 
     if (!uboDetail) {
-      throw new HttpErrors.NotFound('Merchant UBO detail not found');
+      throw new HttpErrors.NotFound('UBO detail not found');
     }
 
     if (uboDetail.status === 1) {
       throw new HttpErrors.BadRequest(
-        'Merchant UBO detail is already approved! please contact admin',
+        'UBO detail is already approved! please contact admin',
       );
     }
 
-    await this.merchantUboDetailsRepository.updateById(
+    await this.uboDetailsRepository.updateById(
       uboId,
       {
         ...uboData,
@@ -246,12 +247,12 @@ export class MerchantUboDetailsService {
         mode: 1,
         identifierId: uboDetail.identifierId,
         usersId: uboDetail.usersId,
-        roleValue: 'merchant'
+        roleValue: uboDetail.roleValue
       },
       {transaction: tx},
     );
 
-    const updatedUboDetail = await this.merchantUboDetailsRepository.findOne(
+    const updatedUboDetail = await this.uboDetailsRepository.findOne(
       {
         where: {
           and: [{id: uboId}, {isActive: true}, {isDeleted: false}],
@@ -278,15 +279,15 @@ export class MerchantUboDetailsService {
 
     return {
       success: true,
-      message: 'Merchant UBO detail updated',
+      message: 'UBO detail updated',
       uboDetail: updatedUboDetail,
     };
   }
 
 
 
-  async updateUBOSStatus(merchantId: string, status: number, reason: string): Promise<{success: boolean; message: string}> {
-    const existingUBOS = await this.merchantUboDetailsRepository.findById(merchantId);
+  async updateUBOSStatus(id: string, status: number, reason: string): Promise<{success: boolean; message: string}> {
+    const existingUBOS = await this.uboDetailsRepository.findById(id);
 
     if (!existingUBOS) {
       throw new HttpErrors.NotFound('No UBOS found');
@@ -299,7 +300,7 @@ export class MerchantUboDetailsService {
     }
 
     if (status === 1) {
-      await this.merchantUboDetailsRepository.updateById(existingUBOS.id, {status: 1, verifiedAt: new Date()});
+      await this.uboDetailsRepository.updateById(existingUBOS.id, {status: 1, verifiedAt: new Date()});
       return {
         success: true,
         message: 'UBOS Approved'
@@ -307,7 +308,7 @@ export class MerchantUboDetailsService {
     }
 
     if (status === 2) {
-      await this.merchantUboDetailsRepository.updateById(existingUBOS.id, {status: 2, reason: reason});
+      await this.uboDetailsRepository.updateById(existingUBOS.id, {status: 2, reason: reason});
       return {
         success: true,
         message: 'UBOS Rejected'
@@ -315,7 +316,7 @@ export class MerchantUboDetailsService {
     }
 
     if (status === 3) {
-      await this.merchantUboDetailsRepository.updateById(existingUBOS.id, {status: 0});
+      await this.uboDetailsRepository.updateById(existingUBOS.id, {status: 0});
       return {
         success: true,
         message: 'UBOS status is in under review'

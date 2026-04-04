@@ -52,7 +52,7 @@ import {InvestorKycDocumentService} from './services/investor-kyc-document.servi
 import {InvestorKycDocumentRequirementsService} from './services/investor-kyc-document-requirements.service';
 import {MerchantKycDocumentService} from './services/merchant-kyc-document.service';
 import {MerchantKycDocumentRequirementsService} from './services/merchant-kyc-document-requirements.service';
-import {MerchantUboDetailsService} from './services/merchant-ubo-details.service';
+import {UboDetailsService} from './services/ubo-details.service';
 import {LiquidityEngineService} from './services/liquidity-engine.service';
 import {PspService} from './services/psp.service';
 import {TransactionCron} from './crons/transaction.cron';
@@ -177,8 +177,8 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.merchantKycDocumentService.service').toClass(
       MerchantKycDocumentService,
     );
-    this.bind('service.merchantUboDetailsService.service').toClass(
-      MerchantUboDetailsService,
+    this.bind('service.uboDetailsService.service').toClass(
+      UboDetailsService,
     );
     this.bind('service.liquidityEngineService.service').toClass(
       LiquidityEngineService,

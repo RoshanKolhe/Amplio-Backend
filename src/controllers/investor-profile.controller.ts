@@ -4,13 +4,15 @@ import {Filter, IsolationLevel, repository} from '@loopback/repository';
 import {get, getModelSchemaRef, HttpErrors, param, patch, post, requestBody} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
-import {AddressDetails, BankDetails, InvestorKycDocument, InvestorProfile} from '../models';
+import {AddressDetails, AuthorizeSignatories, BankDetails, InvestorKycDocument, InvestorProfile, UboDetails} from '../models';
 import {InvestorProfileRepository, KycApplicationsRepository} from '../repositories';
 import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
 import {InvestorKycDocumentService} from '../services/investor-kyc-document.service';
 import {KycService} from '../services/kyc.service';
 import {SessionService} from '../services/session.service';
+import {AuthorizeSignatoriesService} from '../services/signatories.service';
+import {UboDetailsService} from '../services/ubo-details.service';
 
 type InvestorKycFlowType = 'individual' | 'institutional';
 type InvestorKycDataResponse = {
@@ -40,7 +42,10 @@ export class InvestorProfileController {
     private investorKycDocumentService: InvestorKycDocumentService,
     @inject('service.AddressDetails.service')
     private addressDetailsService: AddressDetailsService,
-
+    @inject('service.uboDetailsService.service')
+    private uboDetailsService: UboDetailsService,
+    @inject('services.AuthorizeSignatoriesService.service')
+    private authorizeSignatoriesService: AuthorizeSignatoriesService,
   ) { }
 
   private getInvestorStepperConfig(investorKycType?: string): {
@@ -72,7 +77,7 @@ export class InvestorProfileController {
             'pan_verified',
           ],
           kyc_address_details: ['kyc_address_details'],
-          kyc_ubo_details: ['kyc_ubo_details', 'investor_ubo_details'],
+          kyc_ubo_details: ['kyc_ubo_details'],
           kyc_signatories: ['kyc_signatories'],
           kyc_compliance_declarations: ['kyc_compliance_declarations'],
           kyc_bank_details: ['kyc_bank_details', 'investor_bank_details'],
@@ -324,6 +329,38 @@ export class InvestorProfileController {
       };
     }
 
+    if (stepperId === 'kyc_ubo_details') {
+      const uboDetailsResponse =
+        await this.uboDetailsService.fetchUboDetails(
+          investorProfile.usersId,
+          investorProfile.id,
+          'investor'
+        );
+
+      return {
+        success: true,
+        message: 'UBO details',
+        data: uboDetailsResponse.uboDetails,
+      };
+    }
+
+    if (stepperId === 'kyc_signatories'){
+
+      const signatoriesResponse =
+        await this.authorizeSignatoriesService.fetchAuthorizeSignatories(
+          investorProfile.usersId,
+          'investor',
+          investorProfile.id,
+        );
+
+      return {
+        success: true,
+        message: 'Authorize signatories',
+        data: signatoriesResponse.signatories,
+      };
+
+    }
+
     if (stepperId === 'investor_bank_details') {
       const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccounts(investorProfile.usersId, 'investor');
 
@@ -334,13 +371,9 @@ export class InvestorProfileController {
       }
     }
 
-    if (stepperId === 'investor_ubo_details') {
-      return {
-        success: true,
-        message: 'UBO details',
-        data: []
-      }
-    }
+
+
+
 
     return {
       success: false,
@@ -912,6 +945,408 @@ export class InvestorProfileController {
     currentProgress: string[];
   }> {
     return this.uploadInvestorKycAddressDetails(body);
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['investor']})
+  @get('/investor-profiles/UBO-details')
+  async fetchUboDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+  ): Promise<{success: boolean, message: string, UboDetails: UboDetails[]}> {
+    const investorProfile = await this.investorProfileRepository.findOne({
+      where: {
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
+    });
+
+    if (!investorProfile) {
+      throw HttpErrors.NotFound('Investor not found');
+    }
+    const uboDetailsResponse = await this.uboDetailsService.fetchUboDetails(
+      investorProfile?.usersId,
+      investorProfile?.id,
+      'investor'
+    );
+
+    return {
+      success: true,
+      message: 'UBO Details',
+      UboDetails: uboDetailsResponse.uboDetails
+    }
+  }
+
+  @post('/investor-profiles/kyc-ubo-details')
+  async uploadInvestorKycUboDetails(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'uboDetails'],
+            properties: {
+              usersId: {type: 'string'},
+              uboDetails: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: [
+                    'fullName',
+                    'email',
+                    'phone',
+                    'ownershipPercentage',
+                    'designationType',
+                    'designationValue',
+                    'submittedPanNumber',
+                    'submittedPanFullName',
+                    'submittedDateOfBirth',
+                    'panCardId',
+                  ],
+                  properties: {
+                    fullName: {type: 'string'},
+                    email: {type: 'string'},
+                    phone: {type: 'string'},
+                    ownershipPercentage: {type: 'number'},
+                    designationType: {
+                      type: 'string',
+                      enum: ['dropdown', 'custom'],
+                    },
+                    designationValue: {type: 'string'},
+                    submittedPanNumber: {type: 'string'},
+                    submittedPanFullName: {type: 'string'},
+                    submittedDateOfBirth: {type: 'string'},
+                    extractedPanNumber: {type: 'string'},
+                    extractedPanFullName: {type: 'string'},
+                    extractedDateOfBirth: {type: 'string'},
+                    panCardId: {type: 'string'},
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      uboDetails: Array<{
+        fullName: string;
+        email: string;
+        phone: string;
+        ownershipPercentage: number;
+        designationType: string;
+        designationValue: string;
+        submittedPanNumber: string;
+        submittedPanFullName: string;
+        submittedDateOfBirth: string;
+        extractedPanNumber?: string;
+        extractedPanFullName?: string;
+        extractedDateOfBirth?: string;
+        panCardId: string;
+      }>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    createdUboDetails: UboDetails[];
+    erroredUboDetails: Array<{
+      fullName: string;
+      email: string;
+      phone: string;
+      submittedPanNumber: string;
+      message: string;
+    }>;
+    currentProgress: string[];
+  }> {
+    const tx =
+      await this.investorProfileRepository.dataSource.beginTransaction({
+        IsolationLevel: IsolationLevel.READ_COMMITTED,
+      });
+
+    try {
+      const investor = await this.investorProfileRepository.findOne(
+        {
+          where: {usersId: body.usersId, isDeleted: false},
+        },
+        {transaction: tx},
+      );
+
+      if (!investor) {
+        throw new HttpErrors.NotFound('Investor not found');
+      }
+
+      const uboDetailsData = body.uboDetails.map(
+        uboDetail =>
+          new UboDetails({
+            ...uboDetail,
+            usersId: body.usersId,
+            roleValue: 'investor',
+            identifierId: investor.id,
+            mode: 1,
+            status: 0,
+            isActive: true,
+            isDeleted: false,
+          }),
+      );
+
+      const result =
+        await this.uboDetailsService.createUboDetails(
+          uboDetailsData,
+          tx,
+        );
+
+      const currentProgress = await this.updateKycProgress(
+        investor.kycApplicationsId,
+        'kyc_ubo_details',
+      );
+
+      await tx.commit();
+
+      return {
+        success: result.success,
+        message: result.message,
+        createdUboDetails: result.createdUboDetails,
+        erroredUboDetails: result.erroredUboDetails,
+        currentProgress
+      };
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
+  @patch('/investor-profiles/kyc-ubo-details')
+  async patchInvestorKycUboDetails(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'uboId', 'uboDetail'],
+            properties: {
+              usersId: {type: 'string'},
+              uboId: {type: 'string'},
+              uboDetail: {type: 'object'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      uboId: string;
+      uboDetail: Partial<UboDetails>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    uboDetail: UboDetails | null;
+  }> {
+
+    const tx =
+      await this.investorProfileRepository.dataSource.beginTransaction({
+        isolationLevel: IsolationLevel.READ_COMMITTED,
+      });
+
+    try {
+      const result =
+        await this.uboDetailsService.updateUboDetail(
+          body.uboId,
+          body.uboDetail,
+          tx,
+        );
+
+      await tx.commit();
+
+      return result;
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
+  @post('/investor-profiles/kyc-authorize-signatory')
+  async uploadAuthorizeSignatoryForKyc(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'signatory'],
+            properties: {
+              usersId: {type: 'string'},
+              signatory: {
+                type: 'object',
+                required: [
+                  'fullName',
+                  'email',
+                  'phone',
+                  'submittedPanFullName',
+                  'submittedPanNumber',
+                  'submittedDateOfBirth',
+                  'panCardFileId',
+                  'boardResolutionFileId',
+                  'designationType',
+                  'designationValue',
+                ],
+                properties: {
+                  fullName: {type: 'string'},
+                  email: {type: 'string'},
+                  phone: {type: 'string'},
+                  extractedPanFullName: {type: 'string'},
+                  extractedPanNumber: {type: 'string'},
+                  extractedDateOfBirth: {type: 'string'},
+                  submittedPanFullName: {type: 'string'},
+                  submittedPanNumber: {type: 'string'},
+                  submittedDateOfBirth: {type: 'string'},
+                  panCardFileId: {type: 'string'},
+                  boardResolutionFileId: {type: 'string'},
+                  designationType: {type: 'string'},
+                  designationValue: {type: 'string'},
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      signatory: {
+        fullName: string;
+        email: string;
+        phone: string;
+        extractedPanFullName?: string;
+        extractedPanNumber?: string;
+        extractedDateOfBirth?: string;
+        submittedPanFullName: string;
+        submittedPanNumber: string;
+        submittedDateOfBirth: string;
+        panCardFileId: string;
+        boardResolutionFileId: string;
+        designationType: string;
+        designationValue: string;
+      };
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatory: AuthorizeSignatories;
+    currentProgress: string[];
+  }> {
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
+
+    try {
+      const investor = await this.investorProfileRepository.findOne(
+        {where: {usersId: body.usersId, isDeleted: false}},
+        {transaction: tx},
+      );
+
+      if (!investor) throw new HttpErrors.NotFound('Investor not found');
+
+      const signatoriesData = new AuthorizeSignatories({
+        ...body.signatory,
+        usersId: body.usersId,
+        roleValue: 'company',
+        identifierId: investor.id,
+        isActive: true,
+        isDeleted: false,
+      });
+
+      const result =
+        await this.authorizeSignatoriesService.createAuthorizeSignatory(
+          signatoriesData,
+        );
+
+      const currentProgress = await this.updateKycProgress(
+        investor.kycApplicationsId,
+        'kyc_signatories',
+      );
+
+      await tx.commit();
+      return {...result, currentProgress};
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+  }
+
+  // for investor but without login just for KYC
+  @patch('/investor-profiles/kyc-authorize-signatory')
+  async patchAuthorizeSignatoryForKyc(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['usersId', 'signatoryId', 'signatory'],
+            properties: {
+              usersId: {type: 'string'},
+              signatoryId: {type: 'string'},
+              signatory: {
+                type: 'object',
+                properties: {
+                  fullName: {type: 'string'},
+                  email: {type: 'string'},
+                  phone: {type: 'string'},
+                  extractedPanFullName: {type: 'string'},
+                  extractedPanNumber: {type: 'string'},
+                  extractedDateOfBirth: {type: 'string'},
+                  submittedPanFullName: {type: 'string'},
+                  submittedPanNumber: {type: 'string'},
+                  submittedDateOfBirth: {type: 'string'},
+                  panCardFileId: {type: 'string'},
+                  boardResolutionFileId: {type: 'string'},
+                  designationType: {type: 'string'},
+                  designationValue: {type: 'string'},
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    body: {
+      usersId: string;
+      signatoryId: string;
+      signatory: Partial<AuthorizeSignatories>;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatory: AuthorizeSignatories | null;
+    currentProgress: string[];
+  }> {
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
+
+    try {
+      const investor = await this.investorProfileRepository.findOne(
+        {where: {usersId: body.usersId, isDeleted: false}},
+        {transaction: tx},
+      );
+
+      if (!investor) throw new HttpErrors.NotFound('Investor not found');
+
+      const result = await this.authorizeSignatoriesService.updateSignatoryInfo(
+        body.signatoryId,
+        body.signatory,
+        tx,
+      );
+
+      const currentProgress = await this.updateKycProgress(
+        investor.kycApplicationsId,
+        'kyc_signatories',
+      );
+
+      await tx.commit();
+      return {...result, currentProgress};
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
   }
 
 }
