@@ -334,7 +334,7 @@ export class PspService {
               count: pageSize,
               skip,
             },
-            timeout: 10000,
+            timeout: 60000,
           },
         );
 
@@ -357,19 +357,35 @@ export class PspService {
         typeof error === 'object' &&
         error !== null &&
         'isAxiosError' in error &&
-        error.isAxiosError
+        (error as {isAxiosError?: boolean}).isAxiosError
       ) {
-
-        const status = error.response?.status;
+        const axiosError = error as {
+          code?: string;
+          message?: string;
+          response?: {
+            status?: number;
+            data?: unknown;
+          };
+        };
+        const status = axiosError.response?.status;
+        const responseData = axiosError.response?.data;
         const razorpayMessage =
-          error.response?.data &&
-            typeof error.response.data === 'object' &&
-            'error' in error.response.data &&
-            typeof error.response.data.error === 'object' &&
-            error.response.data.error &&
-            'description' in error.response.data.error
-            ? String(error.response.data.error.description)
+          responseData &&
+          typeof responseData === 'object' &&
+          'error' in responseData &&
+          typeof responseData.error === 'object' &&
+          responseData.error &&
+          'description' in responseData.error
+            ? String(responseData.error.description)
             : undefined;
+
+        console.error('Razorpay fetch failed', {
+          pspId: psp.id,
+          status,
+          code: axiosError.code,
+          message: axiosError.message,
+          responseData,
+        });
 
         if (status === 401) {
           throw new HttpErrors.Unauthorized(

@@ -56,3 +56,8 @@ export * from './psp-master.repository';
 export * from './psp-master-fields.repository';
 export * from './transaction.repository';
 export * from './investor-type.repository';
+export * from './compliance-and-declarations.repository';
+export * from './investment-mandate.repository';
+export * from './platform-agreement.repository';
+export * from './consent-template.repository';
+export * from './users-consent.repository';

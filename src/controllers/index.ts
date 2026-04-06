@@ -35,4 +35,5 @@ export * from './psp-master-fields.controller';
 export * from './merchant-kyc-super-admin.controller';
 export * from './transaction.controller';
 export * from './investor-types.controller';
-
+export * from './users-consent-consent-template.controller';
+export * from './user-consent-controller.controller';

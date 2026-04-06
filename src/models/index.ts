@@ -61,3 +61,8 @@ export * from './roc.model';
 export * from './transaction.model';
 
 export * from './investor-type.model';
+export * from './compliance-and-declarations.model';
+export * from './investment-mandate.model';
+export * from './platform-agreement.model';
+export * from './consent-template.model';
+export * from './users-consent.model';

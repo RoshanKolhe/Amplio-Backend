@@ -28,12 +28,17 @@ export class LiquidityEngineService {
     totalRecieved: number,
     settlementMethod?: string | null,
   ): LiquidityEngineResult {
-    const riskScore = BASE_RISK_SCORE;
-    const delayRisk = settlementMethod
-      ? DELAY_RISK[settlementMethod] ?? 0
-      : 0;
-    const chargebackRisk = BASE_CHARGEBACK_RISK;
-    const haircut = riskScore + delayRisk + chargebackRisk;
+    // const riskScore = BASE_RISK_SCORE;
+    // const delayRisk = settlementMethod
+    //   ? DELAY_RISK[settlementMethod] ?? 0
+    //   : 0;
+    // const chargebackRisk = BASE_CHARGEBACK_RISK;
+    // const haircut = riskScore + delayRisk + chargebackRisk;
+
+    const riskScore = 0;
+    const delayRisk = 0;
+    const chargebackRisk = 0;
+    const haircut = 10;
     const haircutAmount = (totalRecieved * haircut) / 100;
     const netAmount = Number((totalRecieved - haircutAmount).toFixed(2));
 

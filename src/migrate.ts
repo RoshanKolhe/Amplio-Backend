@@ -65,7 +65,10 @@ export async function migrate(args: string[]) {
       'Transaction',
       'InvestorType',
       'InvestorKycDocumentRequirements',
-      'InvestorKycDocument'
+      'InvestorKycDocument',
+      'ComplianceAndDeclarations',
+      'InvestmentMandate',
+      'PlatformAgreement'
     ]
   });
 
