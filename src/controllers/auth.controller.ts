@@ -11,6 +11,7 @@ import {JWTService} from '../services/jwt-service';
 import {MediaService} from '../services/media.service';
 import {RbacService} from '../services/rbac.service';
 import {MyUserService} from '../services/user-service';
+import {CompanyDataMapperService} from '../services/company-brisk-data-mapper.service';
 
 export class AuthController {
   constructor(
@@ -51,7 +52,9 @@ export class AuthController {
     @inject('services.rbac')
     public rbacService: RbacService,
     @inject('service.media.service')
-    private mediaService: MediaService
+    private mediaService: MediaService,
+    @inject('service.companyDataMapper.service')
+    private companyDataMapperService: CompanyDataMapperService,
   ) { }
 
   // ---------------------------------------Super Admin Auth API's------------------------------------
@@ -1030,6 +1033,10 @@ export class AuthController {
         throw new HttpErrors.BadRequest('Session is not valid');
       }
 
+      await this.companyDataMapperService.companyPanValidation(
+        body.submittedPanDetails.submittedPanNumber,
+        body.submittedPanDetails.submittedCompanyName,
+      );
       // ----------------------------
       //  Validate CIN & GSTIN
       // ----------------------------

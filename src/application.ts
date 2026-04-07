@@ -63,6 +63,7 @@ import {TransactionCron} from './crons/transaction.cron';
 import {PspRepository} from './repositories/psp.repository';
 import {TransactionRepository} from './repositories/transaction.repository';
 import {UserConsentService} from './services/user-consent.service';
+import {CompanyDataMapperService} from './services/company-brisk-data-mapper.service';
 
 export {ApplicationConfig};
 
@@ -153,16 +154,16 @@ export class AmplioBackendApplication extends BootMixin(
       BusinessKycTransactionsService,
     );
     this.bind('service.businessKycAgreementService.service').toClass(
-      BusinessKycAgreementService
+      BusinessKycAgreementService,
     );
     this.bind('service.businessKycRocService.service').toClass(
-      BusinessKycRocService
+      BusinessKycRocService,
     );
     this.bind('service.businessKycDpnService.service').toClass(
-      BusinessKycDpnService
+      BusinessKycDpnService,
     );
     this.bind('service.businessKycFinancialsService.service').toClass(
-      BusinessKycFinancialsService
+      BusinessKycFinancialsService,
     );
     this.bind('service.companyKycDocumentRequirementsService.service').toClass(
       CompanyKycDocumentRequirementsService,
@@ -204,6 +205,9 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.userConsentService.service').toClass(
       UserConsentService
     )
+    this.bind('service.companyDataMapper.service').toClass(
+      CompanyDataMapperService,
+    );
   }
 
   protected configureFileUpload(destination?: string) {
