@@ -338,7 +338,6 @@ export class PspService {
           },
         );
 
-        console.log('responcessssssssss', response)
 
         const items = Array.isArray(response.data.items)
           ? response.data.items
@@ -379,13 +378,13 @@ export class PspService {
             ? String(responseData.error.description)
             : undefined;
 
-        console.error('Razorpay fetch failed', {
-          pspId: psp.id,
-          status,
-          code: axiosError.code,
-          message: axiosError.message,
-          responseData,
-        });
+        // console.error('Razorpay fetch failed', {
+        //   pspId: psp.id,
+        //   status,
+        //   code: axiosError.code,
+        //   message: axiosError.message,
+        //   responseData,
+        // });
 
         if (status === 401) {
           throw new HttpErrors.Unauthorized(

@@ -54,10 +54,7 @@ export class TransactionCron {
       return;
     }
 
-    console.log('Transaction cron started...');
-
     this.job = cron.schedule('*/1 * * * *', async () => {
-      console.log('Transaction cron running...');
 
       const psps = await this.pspRepository.find({
         where: {isActive: true},
@@ -74,7 +71,6 @@ export class TransactionCron {
         } catch (error) {
           const message =
             error instanceof Error ? error.message : 'Unknown PSP sync error';
-          console.error(`Transaction sync failed for PSP ${psp.id}: ${message}`);
           continue;
         }
 
@@ -171,7 +167,6 @@ export class TransactionCron {
             createdAt,
           });
 
-          console.log(`Inserted transaction ${txn.id}`);
         }
       }
     });
