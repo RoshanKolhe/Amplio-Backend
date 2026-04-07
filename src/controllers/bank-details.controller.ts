@@ -1,10 +1,6 @@
 import {authenticate} from '@loopback/authentication';
 import {inject} from '@loopback/core';
-import {
-  Filter,
-  FilterExcludingWhere,
-  repository,
-} from '@loopback/repository';
+import {Filter, FilterExcludingWhere, repository} from '@loopback/repository';
 import {
   get,
   getModelSchemaRef,
@@ -18,6 +14,7 @@ import {authorize} from '../authorization';
 import {BankDetails} from '../models';
 import {BankDetailsRepository} from '../repositories';
 import {BankDetailsService} from '../services/bank-details.service';
+import {PerfiosService} from '../services/perfios.service';
 
 export class BankDetailsController {
   constructor(
@@ -25,18 +22,73 @@ export class BankDetailsController {
     public bankDetailsRepository: BankDetailsRepository,
     @inject('service.bankDetails.service')
     private bankDetailsService: BankDetailsService,
-  ) { }
+    @inject('service.perfios.service')
+    private perfiosService: PerfiosService,
+  ) {}
 
   @get('/bank-details/get-by-ifsc/{ifscCode}')
   async fetchBankInfo(
-    @param.path.string('ifscCode') ifscCode: string
+    @param.path.string('ifscCode') ifscCode: string,
   ): Promise<{success: boolean; message: string; bankDetails: object}> {
     const bankDetails = await this.bankDetailsService.extractBankInfo(ifscCode);
     return {
       success: true,
       message: 'Bank Details',
-      bankDetails: bankDetails
-    }
+      bankDetails: bankDetails,
+    };
+  }
+
+  // @authenticate('jwt')
+  // @authorize({roles: ['super_admin', 'company', 'trustee', 'investor', 'merchant']})
+  @post('/bank-details/verify-account')
+  @response(200, {
+    description: 'Verify bank account with Perfios',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            success: {type: 'boolean'},
+            message: {type: 'string'},
+            data: {type: 'object'},
+          },
+        },
+      },
+    },
+  })
+  async verifyAccount(
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['accountNumber', 'ifscCode', 'accountHolderName', 'usersId'],
+            properties: {
+              accountNumber: {type: 'string'},
+              ifscCode: {type: 'string'},
+              accountHolderName: {type: 'string'},
+              usersId: {type: 'string'},
+              roleValue: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      accountNumber: string;
+      ifscCode: string;
+      accountHolderName: string;
+      usersId: string;
+      roleValue?: string;
+    },
+  ): Promise<object> {
+    const roleValue = body.roleValue ?? 'merchant';
+    
+    return this.bankDetailsService.verifyWithPerfios({
+      ...body,
+      roleValue,
+    });
   }
 
   @authenticate('jwt')
@@ -95,7 +147,8 @@ export class BankDetailsController {
   })
   async findById(
     @param.path.string('id') id: string,
-    @param.filter(BankDetails, {exclude: 'where'}) filter?: FilterExcludingWhere<BankDetails>
+    @param.filter(BankDetails, {exclude: 'where'})
+    filter?: FilterExcludingWhere<BankDetails>,
   ): Promise<BankDetails> {
     return this.bankDetailsRepository.findById(id, filter);
   }

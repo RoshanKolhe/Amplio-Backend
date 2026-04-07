@@ -53,6 +53,7 @@ import {MerchantKycDocumentRequirementsService} from './services/merchant-kyc-do
 import {MerchantUboDetailsService} from './services/merchant-ubo-details.service';
 import {LiquidityEngineService} from './services/liquidity-engine.service';
 import {PspService} from './services/psp.service';
+import {PerfiosService} from './services/perfios.service';
 import {TransactionCron} from './crons/transaction.cron';
 import {PspRepository} from './repositories/psp.repository';
 import {TransactionRepository} from './repositories/transaction.repository';
@@ -178,6 +179,7 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.pspService.service').toClass(
       PspService,
     );
+    this.bind('service.perfios.service').toClass(PerfiosService);
   }
 
   protected configureFileUpload(destination?: string) {
