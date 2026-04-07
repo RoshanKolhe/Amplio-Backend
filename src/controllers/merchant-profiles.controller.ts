@@ -17,7 +17,7 @@ import {
   BankDetails,
   MerchantKycDocument,
   MerchantProfiles,
-  MerchantUboDetails,
+  UboDetails,
   Psp,
 } from '../models';
 import {
@@ -31,7 +31,7 @@ import {BankDetailsService} from '../services/bank-details.service';
 import {KycService} from '../services/kyc.service';
 import {MediaService} from '../services/media.service';
 import {MerchantKycDocumentService} from '../services/merchant-kyc-document.service';
-import {MerchantUboDetailsService} from '../services/merchant-ubo-details.service';
+import {UboDetailsService} from '../services/ubo-details.service';
 import {PspService} from '../services/psp.service';
 import {SessionService} from '../services/session.service';
 
@@ -53,8 +53,8 @@ export class MerchantProfilesController {
     private bankDetailsService: BankDetailsService,
     @inject('service.AddressDetails.service')
     private addressDetailsService: AddressDetailsService,
-    @inject('service.merchantUboDetailsService.service')
-    private merchantUboDetailsService: MerchantUboDetailsService,
+    @inject('service.uboDetailsService.service')
+    private uboDetailsService: UboDetailsService,
     @inject('service.pspService.service')
     private pspService: PspService,
     @inject('service.kyc.service')
@@ -351,16 +351,17 @@ export class MerchantProfilesController {
     }
 
     if (stepperId === 'merchant_ubo_details') {
-      const merchantUboDetailsResponse =
-        await this.merchantUboDetailsService.fetchMerchantUboDetails(
+      const uboDetailsResponse =
+        await this.uboDetailsService.fetchUboDetails(
           merchantProfile.usersId,
           merchantProfile.id,
+          'merchant'
         );
 
       return {
         success: true,
-        message: 'Merchant UBO details',
-        data: merchantUboDetailsResponse.uboDetails,
+        message: 'UBO details',
+        data: uboDetailsResponse.uboDetails,
       };
     }
 
@@ -756,8 +757,8 @@ export class MerchantProfilesController {
   ): Promise<{
     success: boolean;
     message: string;
-    createdMerchantUboDetails: MerchantUboDetails[];
-    erroredMerchantUboDetails: Array<{
+    createdUboDetails: UboDetails[];
+    erroredUboDetails: Array<{
       fullName: string;
       email: string;
       phone: string;
@@ -783,9 +784,9 @@ export class MerchantProfilesController {
         throw new HttpErrors.NotFound('Merchant not found');
       }
 
-      const merchantUboDetailsData = body.uboDetails.map(
+      const uboDetailsData = body.uboDetails.map(
         uboDetail =>
-          new MerchantUboDetails({
+          new UboDetails({
             ...uboDetail,
             usersId: body.usersId,
             roleValue: 'merchant',
@@ -798,8 +799,8 @@ export class MerchantProfilesController {
       );
 
       const result =
-        await this.merchantUboDetailsService.createMerchantUboDetails(
-          merchantUboDetailsData,
+        await this.uboDetailsService.createUboDetails(
+          uboDetailsData,
           tx,
         );
 
@@ -810,7 +811,13 @@ export class MerchantProfilesController {
 
       await tx.commit();
 
-      return {...result, currentProgress};
+      return {
+        success: result.success,
+        message: result.message,
+        createdUboDetails: result.createdUboDetails,
+        erroredUboDetails: result.erroredUboDetails,
+        currentProgress
+      };
     } catch (err) {
       await tx.rollback();
       throw err;
@@ -837,12 +844,12 @@ export class MerchantProfilesController {
     body: {
       usersId: string;
       uboId: string;
-      uboDetail: Partial<MerchantUboDetails>;
+      uboDetail: Partial<UboDetails>;
     },
   ): Promise<{
     success: boolean;
     message: string;
-    uboDetail: MerchantUboDetails | null;
+    uboDetail: UboDetails | null;
   }> {
 
     const tx =
@@ -852,7 +859,7 @@ export class MerchantProfilesController {
 
     try {
       const result =
-        await this.merchantUboDetailsService.updateMerchantUboDetail(
+        await this.uboDetailsService.updateUboDetail(
           body.uboId,
           body.uboDetail,
           tx,
@@ -1534,42 +1541,12 @@ export class MerchantProfilesController {
   }
 
 
-  // fetch UBOs...
-  @authenticate('jwt')
-  @authorize({roles: ['merchant']})
-  @get('/merchant-profiles/bank-details')
-  async fetchUBODetails(
-    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-  ): Promise<{success: boolean; message: string; bankDetails: BankDetails[]}> {
-    const merchantProfile = await this.merchantProfilesRepository.findOne({
-      where: {
-        and: [{usersId: currentUser.id}, {isDeleted: false}],
-      },
-    });
-
-    if (!merchantProfile) {
-      throw new HttpErrors.NotFound('Merchant not found');
-    }
-
-    const bankDetailsResponse =
-      await this.bankDetailsService.fetchUserBankAccounts(
-        merchantProfile.usersId,
-        'merchant',
-      );
-
-    return {
-      success: true,
-      message: 'Bank accounts',
-      bankDetails: bankDetailsResponse.accounts,
-    };
-  }
-
   @authenticate('jwt')
   @authorize({roles: ['merchant']})
   @get('/merchant-profiles/UBO-details')
   async fetchUboDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-  ): Promise<{success: boolean, message: string, UboDetails: MerchantUboDetails[]}> {
+  ): Promise<{success: boolean, message: string, UboDetails: UboDetails[]}> {
     const merchantProfiles = await this.merchantProfilesRepository.findOne({
       where: {
         and: [{usersId: currentUser.id}, {isDeleted: false}],
@@ -1579,15 +1556,16 @@ export class MerchantProfilesController {
     if (!merchantProfiles) {
       throw HttpErrors.NotFound('Merchant not found');
     }
-    const uboDetails = await this.merchantUboDetailsService.fetchMerchantUboDetails(
+    const uboDetailsResponse = await this.uboDetailsService.fetchUboDetails(
       merchantProfiles?.usersId,
-      merchantProfiles?.id
+      merchantProfiles?.id,
+      'merchant'
     );
 
     return {
       success: true,
       message: 'UBO Details',
-      UboDetails: uboDetails.uboDetails
+      UboDetails: uboDetailsResponse.uboDetails
     }
   }
 
@@ -2178,3 +2156,4 @@ export class MerchantProfilesController {
   }
 
 }
+

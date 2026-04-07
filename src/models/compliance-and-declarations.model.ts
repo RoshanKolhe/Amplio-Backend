@@ -1,88 +1,105 @@
 import {belongsTo, Entity, model, property} from '@loopback/repository';
-import {InvestorProfile} from './investor-profile.model';
-import {Media} from './media.model';
+import {Users} from './users.model';
 
 @model({
   settings: {
     postgresql: {
-      table: 'investor_pan_cards',
+      table: 'compliance_and_declarations',
       schema: 'public',
     },
     indexes: {
-      uniqueInvestorSubmittedPan: {
-        keys: {submittedPanNumber: 1},
+      uniqueComplianceDeclaration: {
+        keys: {usersId: 1, roleValue: 1, identifierId: 1},
         options: {unique: true},
-      },
-      investorPanStatusIndex: {
-        keys: {submittedPanNumber: 1, status: 1},
       },
     },
   },
 })
-export class InvestorPanCards extends Entity {
+export class ComplianceAndDeclarations extends Entity {
+
   @property({
     type: 'string',
     id: true,
     generated: false,
-    postgresql: {dataType: 'uuid'},
+    postgresql: {
+      dataType: 'uuid',
+    },
   })
   id: string;
 
+  @property({
+    type: 'string',
+    required: true,
+  })
+  taxCountry: string;
 
   @property({
     type: 'string',
-    jsonSchema: {
-      pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$', // PAN format
-    },
+    required: true,
   })
-  extractedPanNumber?: string;
+  taxNumber: string;
 
   @property({
-    type: 'string',
-    jsonSchema: {
-      minLength: 3,
-      maxLength: 200,
-    },
+    type: 'boolean',
+    required: true,
+    default: false,
   })
-  extractedInvestorName?: string;
+  isPEP: boolean;
 
-  @property({
-    type: 'string',
-    jsonSchema: {
-      pattern: '^\\d{4}-\\d{2}-\\d{2}$'
-    }
-  })
-  extractedDateOfBirth?: string;
 
   @property({
     type: 'string',
     required: true,
     jsonSchema: {
-      pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
-      errorMessage: {
-        pattern: 'Invalid PAN format (ABCDE1234F)',
-      },
+      enum: ['OWN_FUNDS', 'THIRD_PARTY'],
     },
   })
-  submittedPanNumber: string;
+  investmentOnBehalf: string;
 
   @property({
     type: 'string',
     required: true,
     jsonSchema: {
-      minLength: 3,
-      maxLength: 200,
+      enum: ['DOMESTIC', 'INTERNATIONAL'],
     },
   })
-  submittedInvestorName: string;
+  crossBorderFlow: string;
 
   @property({
     type: 'string',
-    jsonSchema: {
-      pattern: '^\\d{4}-\\d{2}-\\d{2}$'
-    }
+    required: true,
   })
-  submittedDateOfBirth: string;
+  sourceOfFunds: string;
+
+  @belongsTo(() => Users)
+  usersId: string;
+
+  @property({
+    type: 'string',
+    required: true,
+  })
+  roleValue: string;
+
+  @property({
+    type: 'string',
+    required: true,
+    postgresql: {dataType: 'uuid'},
+  })
+  identifierId: string;
+
+  @property({
+    type: 'boolean',
+    required: true,
+    default: false,
+  })
+  riskDisclosureAccepted: boolean;
+
+  @property({
+    type: 'boolean',
+    required: true,
+    default: false,
+  })
+  suitabilityConfirmed: boolean;
 
   @property({
     type: 'number',
@@ -141,19 +158,13 @@ export class InvestorPanCards extends Entity {
   })
   deletedAt?: Date;
 
-  @belongsTo(() => Media)
-  panCardDocumentId: string;
-
-  @belongsTo(() => InvestorProfile)
-  investorProfileId: string;
-
-  constructor(data?: Partial<InvestorPanCards>) {
+  constructor(data?: Partial<ComplianceAndDeclarations>) {
     super(data);
   }
 }
 
-export interface InvestorPanCardsRelations {
+export interface ComplianceAndDeclarationsRelations {
   // describe navigational properties here
 }
 
-export type InvestorPanCardsWithRelations = InvestorPanCards & InvestorPanCardsRelations;
+export type ComplianceAndDeclarationsWithRelations = ComplianceAndDeclarations & ComplianceAndDeclarationsRelations;

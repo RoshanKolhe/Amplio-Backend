@@ -18,7 +18,7 @@ import {
 } from '../repositories';
 import {CompanyKycDocumentRequirementsService} from './company-kyc-document-requirements.service';
 import {MerchantKycDocumentService} from './merchant-kyc-document.service';
-import {MerchantUboDetailsService} from './merchant-ubo-details.service';
+import {UboDetailsService} from './ubo-details.service';
 import {PspService} from './psp.service';
 
 export class KycService {
@@ -53,8 +53,8 @@ export class KycService {
     private merchantProfileRepository: MerchantProfilesRepository,
     @inject('service.merchantKycDocumentService.service')
     private merchantKycDocumentService: MerchantKycDocumentService,
-    @inject('service.merchantUboDetailsService.service')
-    private merchantUboDetailsService: MerchantUboDetailsService,
+    @inject('service.uboDetailsService.service')
+    private uboDetailsService: UboDetailsService,
     @inject('service.pspService.service')
     private pspService: PspService,
   ) { }
@@ -299,7 +299,7 @@ export class KycService {
     // ---------------- UBO ----------------
     try {
       const uboResponse =
-        await this.merchantUboDetailsService.fetchMerchantUbosDetails(
+        await this.uboDetailsService.fetchUbosDetails(
           merchantProfile.usersId,
           'merchant',
           merchantProfile.id,

@@ -5,11 +5,11 @@ import {Users} from './users.model';
 @model({
   settings: {
     postgresql: {
-      table: 'merchant_ubo_details',
+      table: 'ubo_details',
       schema: 'public',
     },
     indexes: {
-      uniqueUbos: {
+      uniqueUbosDetails: {
         keys: {
           usersId: 1,
           roleValue: 1,
@@ -21,7 +21,7 @@ import {Users} from './users.model';
     },
   },
 })
-export class MerchantUboDetails extends Entity {
+export class UboDetails extends Entity {
 
   @property({
     type: 'string',
@@ -207,13 +207,13 @@ export class MerchantUboDetails extends Entity {
   })
   deletedAt?: Date;
 
-  constructor(data?: Partial<MerchantUboDetails>) {
+  constructor(data?: Partial<UboDetails>) {
     super(data);
   }
 }
 
-export interface MerchantUboDetailsRelations {
+export interface UboDetailsRelations {
   // describe navigational properties here
 }
 
-export type MerchantUboDetailsWithRelations = MerchantUboDetails & MerchantUboDetailsRelations;
+export type UboDetailsWithRelations = UboDetails & UboDetailsRelations;

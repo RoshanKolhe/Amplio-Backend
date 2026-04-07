@@ -61,8 +61,14 @@ export async function migrate(args: string[]) {
       'MerchantPanCard',
       'MerchantKycDocumentRequirements',
       'MerchantKycDocument',
-      'MerchantUboDetails',
-      'Transaction'
+      'UboDetails',
+      'Transaction',
+      'InvestorType',
+      'InvestorKycDocumentRequirements',
+      'InvestorKycDocument',
+      'ComplianceAndDeclarations',
+      'InvestmentMandate',
+      'PlatformAgreement'
     ]
   });
 

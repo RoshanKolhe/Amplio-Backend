@@ -26,7 +26,7 @@ function getDisplayStatus(transaction: Transaction) {
     return transaction.status;
   }
 
-  return now.getTime() >= settlementDate.getTime() ? 'settled' : transaction.status;
+  return now.getTime() >= settlementDate.getTime() ? 'paid' : transaction.status;
 }
 
 // function generateTransactions(count = 60) {

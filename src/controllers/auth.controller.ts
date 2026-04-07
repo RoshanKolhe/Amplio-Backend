@@ -1930,6 +1930,7 @@ export class AuthController {
           usersId: newUserProfile.id,
           fullName: body.fullName,
           gender: body.gender,
+          investorKycType: 'individual',
           kycMode: body.kycMode,
           aadharFrontImageId: body.aadharFrontImageId,
           aadharBackImageId: body.aadharBackImageId,
@@ -1995,7 +1996,7 @@ export class AuthController {
             mode: 0,
             isActive: true,
             isDeleted: false,
-            currentProgress: ['investor_kyc'],
+            currentProgress: ['investor_basic_info'],
             identifierId: newInvestorProfile.id
           },
           {transaction: tx}
@@ -2305,6 +2306,443 @@ export class AuthController {
     const token = await this.jwtService.generateToken(userProfile);
     const profile = await this.rbacService.returnInvestorProfile(userData.id, roles, permissions);
 
+    return {
+      success: true,
+      message: "Investor login successful",
+      accessToken: token,
+      user: profile
+    };
+  }
+
+
+  @post('/auth/investor-institutional-registration')
+  async investorInstitutionalRegistration(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: [
+              'sessionId',
+              // 'password',
+              'companyName',
+              'CIN',
+              'GSTIN',
+              // 'udyamRegistrationNumber',
+              'dateOfIncorporation',
+              'cityOfIncorporation',
+              'stateOfIncorporation',
+              'countryOfIncorporation',
+              'submittedPanDetails',
+              'panCardDocumentId',
+              'investorTypeId',
+            ],
+            properties: {
+              sessionId: {
+                type: 'string',
+                description: 'Registration session id'
+              },
+              // password: {type: 'string'},
+              companyName: {type: 'string'},
+              CIN: {
+                type: 'string',
+                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$'
+              },
+              GSTIN: {
+                type: 'string',
+                minLength: 15,
+                maxLength: 15
+              },
+              udyamRegistrationNumber: {
+                type: 'string'
+              },
+              dateOfIncorporation: {
+                type: 'string',
+                pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+              },
+              cityOfIncorporation: {type: 'string'},
+              stateOfIncorporation: {type: 'string'},
+              countryOfIncorporation: {type: 'string'},
+              humanInteraction: {
+                type: 'boolean',
+                default: false
+              },
+              extractedPanDetails: {
+                type: 'object',
+                required: [],
+                properties: {
+                  extractedInvestorName: {type: 'string'},
+                  extractedPanNumber: {
+                    type: 'string',
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
+                  }
+                }
+              },
+              submittedPanDetails: {
+                type: 'object',
+                required: ['submittedInvestorName', 'submittedPanNumber'],
+                properties: {
+                  submittedInvestorName: {type: 'string'},
+                  submittedPanNumber: {
+                    type: 'string',
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
+                  }
+                }
+              },
+              panCardDocumentId: {
+                type: 'string',
+                description: 'Media ID of uploaded PAN card'
+              },
+              investorTypeId: {type: 'string'},
+            }
+          }
+        }
+      }
+    })
+    body: {
+      sessionId: string;
+      // password: string;
+      companyName: string;
+      CIN: string;
+      GSTIN: string;
+      udyamRegistrationNumber: string;
+      dateOfIncorporation: string; // yyyy-mm-dd
+      cityOfIncorporation: string;
+      stateOfIncorporation: string;
+      countryOfIncorporation: string;
+      humanInteraction?: boolean;
+      extractedPanDetails?: {
+        extractedInvestorName?: string;
+        extractedPanNumber?: string;
+      };
+      submittedPanDetails: {
+        submittedInvestorName: string;
+        submittedPanNumber: string;
+      };
+      panCardDocumentId: string;
+      investorTypeId: string;
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    kycStatus: number;
+    currentProgress: string[];
+    usersId: string;
+  }> {
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction({
+      isolationLevel: 'READ COMMITTED',
+    });
+    console.log('body', body);
+    try {
+      // ----------------------------
+      //  Validate Registration Session
+      // ----------------------------
+      const registrationSession = await this.registrationSessionsRepository.findById(
+        body.sessionId,
+        undefined,
+        {transaction: tx}
+      );
+
+      if (
+        !registrationSession ||
+        !registrationSession.phoneVerified ||
+        !registrationSession.emailVerified ||
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+        registrationSession.isDeleted ||
+        new Date(registrationSession.expiresAt) < new Date()
+      ) {
+        throw new HttpErrors.BadRequest('Session is not valid');
+      }
+
+      // ----------------------------
+      //  Validate CIN & GSTIN
+      // ----------------------------
+      const companyWithCIN = await this.investorProfileRepository.findOne(
+        {where: {CIN: body.CIN, isDeleted: false}},
+        {transaction: tx}
+      );
+      if (companyWithCIN) throw new HttpErrors.BadRequest('CIN already registered');
+
+      const companyWithGSTIN = await this.investorProfileRepository.findOne(
+        {where: {GSTIN: body.GSTIN, isDeleted: false}},
+        {transaction: tx}
+      );
+      if (companyWithGSTIN)
+        throw new HttpErrors.BadRequest('GSTIN already registered');
+
+      // ----------------------------
+      //  Create User
+      // ----------------------------
+      const hashedPassword = await this.hasher.hashPassword("Investor@123");
+
+      let newUserProfile = await this.usersRepository.findOne({
+        where: {
+          and: [
+            {email: registrationSession.email},
+            {phone: registrationSession.phoneNumber},
+            {isActive: true},
+            {isDeleted: false}
+          ]
+        }
+      });
+
+      if (!newUserProfile) {
+        newUserProfile = await this.usersRepository.create(
+          {
+            phone: registrationSession.phoneNumber,
+            email: registrationSession.email,
+            password: hashedPassword,
+            isFirstTime: true,
+            isActive: true,
+            isDeleted: false,
+          },
+          {transaction: tx}
+        );
+      }
+      // ----------------------------
+      //  Create Company Profile
+      // ----------------------------
+      const newCompanyProfile = await this.investorProfileRepository.create(
+        {
+          usersId: newUserProfile.id,
+          companyName: body.companyName,
+          CIN: body.CIN,
+          GSTIN: body.GSTIN,
+          investorKycType: 'institutional',
+          dateOfIncorporation: body.dateOfIncorporation,
+          cityOfIncorporation: body.cityOfIncorporation,
+          stateOfIncorporation: body.stateOfIncorporation,
+          countryOfIncorporation: body.countryOfIncorporation,
+          udyamRegistrationNumber: body.udyamRegistrationNumber,
+          investorTypeId: body.investorTypeId,
+          isActive: false,
+          isDeleted: false,
+        },
+        {transaction: tx}
+      );
+
+      // ----------------------------
+      //  Check PAN duplicate
+      // ----------------------------
+      const isPanExist = await this.investorPanCardsRepository.findOne(
+        {
+          where: {
+            and: [
+              {submittedPanNumber: body.submittedPanDetails.submittedPanNumber},
+              {isDeleted: false},
+              {status: 1},
+            ],
+          },
+        },
+        {transaction: tx}
+      );
+
+      if (isPanExist)
+        throw new HttpErrors.BadRequest('Pan already exists with another company');
+
+      // ----------------------------
+      //  Prepare PAN Data
+      // ----------------------------
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const companyPanData: any = {
+        submittedInvestorName: body.submittedPanDetails.submittedInvestorName,
+        submittedPanNumber: body.submittedPanDetails.submittedPanNumber,
+        extractedInvestorName: body.extractedPanDetails?.extractedInvestorName,
+        extractedPanNumber: body.extractedPanDetails?.extractedPanNumber,
+        panCardDocumentId: body.panCardDocumentId,
+        mode: body.humanInteraction ? 1 : 0,
+        status: 0,
+        isActive: false,
+        isDeleted: false,
+        investorProfileId: newCompanyProfile.id,
+      };
+
+      // ----------------------------
+      //  Human Interaction Required
+      // ----------------------------
+      if (body.humanInteraction) {
+        await this.investorPanCardsRepository.create(companyPanData, {
+          transaction: tx,
+        });
+
+        const newApplication = await this.kycApplicationsRepository.create(
+          {
+            roleValue: registrationSession.roleValue,
+            usersId: newUserProfile.id,
+            status: 1,
+            humanInteraction: true,
+            mode: 0,
+            isActive: true,
+            isDeleted: false,
+            currentProgress: ['investor_basic_info'],
+            identifierId: newCompanyProfile.id
+          },
+          {transaction: tx}
+        );
+
+        await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
+        const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'investor');
+        if (!result.success || !result.data) {
+          if (process.env.NODE_ENV === 'dev') {
+            throw new HttpErrors.InternalServerError('Error while assigning role to user');
+          } else {
+            throw new HttpErrors.InternalServerError('Internal server error');
+          }
+        }
+
+        await this.investorProfileRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
+        await tx.commit();
+
+        return {
+          success: true,
+          message: 'Registration completed',
+          kycStatus: 0,
+          currentProgress: newApplication.currentProgress ?? ['investor_basic_info'],
+          usersId: newUserProfile.id
+        };
+      }
+
+      // ----------------------------
+      //  Auto verification (No Human Interaction)
+      // ----------------------------
+      if (
+        body.submittedPanDetails.submittedInvestorName !== body.companyName
+      ) {
+        throw new HttpErrors.BadRequest('PAN details do not match company name');
+      }
+
+      // // Basic validation: Submitted PAN should match Extracted PAN
+      // if (
+      //   body.extractedPanDetails?.extractedPanNumber &&
+      //   body.extractedPanDetails.extractedPanNumber !==
+      //   body.submittedPanDetails.submittedPanNumber
+      // ) {
+      //   throw new HttpErrors.BadRequest('PAN number mismatch');
+      // }
+
+      // Auto approve PAN
+      companyPanData.status = 1; // Verified
+      companyPanData.isActive = true;
+
+      await this.investorPanCardsRepository.create(companyPanData, {
+        transaction: tx,
+      });
+
+      // ----------------------------
+      //  Create KYC (Auto Approved PAN)
+      // ----------------------------
+      const newApplication = await this.kycApplicationsRepository.create(
+        {
+          roleValue: registrationSession.roleValue,
+          usersId: newUserProfile.id,
+          identifierId: newCompanyProfile.id,
+          status: 0,
+          humanInteraction: false,
+          mode: 0,
+          isActive: true,
+          isDeleted: false,
+          currentProgress: ['investor_basic_info', 'pan_verified'],
+        },
+        {transaction: tx}
+      );
+
+      await this.investorProfileRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
+      await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
+      const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'investor');
+      if (!result.success || !result.data) {
+        if (process.env.NODE_ENV === 'dev') {
+          throw new HttpErrors.InternalServerError('Error while assigning role to user');
+        } else {
+          throw new HttpErrors.InternalServerError('Internal server error');
+        }
+      }
+      console.log('result', result.data);
+      await tx.commit();
+
+      return {
+        success: true,
+        message: 'Registration completed',
+        kycStatus: 0,
+        currentProgress: newApplication.currentProgress ?? ['investor_basic_info', 'pan_verified'],
+        usersId: newUserProfile.id
+      };
+
+    } catch (error) {
+      await tx.rollback();
+      console.log('error while registering new company :', error);
+      throw error;
+    }
+  }
+
+    @post('/auth/investor-login')
+  async investorLogin(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['email', 'password', 'rememberMe'],
+            properties: {
+              email: {type: 'string'},
+              password: {type: 'string'},
+              rememberMe: {type: 'boolean'},
+            }
+          }
+        }
+      }
+    })
+    body: {email: string; password: string; rememberMe: boolean}
+  ): Promise<{success: boolean; message: string; accessToken: string; user: object}> {
+    const userData = await this.usersRepository.findOne({
+      where: {
+        and: [
+          {email: body.email},
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (!userData) {
+      throw new HttpErrors.BadRequest('User not exist');
+    }
+
+    const company = await this.investorProfileRepository.findOne({
+      where: {
+        and: [
+          {usersId: userData.id},
+          {isActive: true},
+          {isDeleted: false}
+        ]
+      }
+    });
+
+    if (!company) {
+      throw new HttpErrors.Unauthorized('Unauthorized access');
+    }
+
+    const user = await this.userService.verifyCredentials(body);
+
+    const {roles, permissions} = await this.rbacService.getUserRoleAndPermissionsByRole(user.id!, 'investor');
+
+    if (!roles.includes('investor')) {
+      throw new HttpErrors.Forbidden('Access denied. Only investor users can login here.');
+    }
+
+    const userProfile: UserProfile & {
+      roles: string[];
+      permissions: string[];
+      phone: string;
+    } = {
+      [securityId]: user.id!,
+      id: user.id!,
+      email: user.email,
+      phone: user.phone,
+      roles,
+      permissions,
+    };
+
+    const token = await this.jwtService.generateToken(userProfile);
+    const profile = await this.rbacService.returnInvestorProfile(user.id, roles, permissions);
     return {
       success: true,
       message: "Investor login successful",
