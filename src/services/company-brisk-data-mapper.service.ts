@@ -4,6 +4,57 @@ import {HttpErrors} from '@loopback/rest';
 export class CompanyDataMapperService {
   constructor() { }
 
+  private normalizeText(value: string | null | undefined) {
+    return (value ?? '').toString().trim().toUpperCase();
+  }
+
+  private validatePanAndName(
+    panNumber: string,
+    entityName: string,
+    entityLabel: 'company' | 'merchant',
+  ) {
+    const companyKyc =
+      indianOilJson?.CorporateDirectory?.CompanyKYC;
+
+    const originalPan = companyKyc?.CompanyPAN;
+    const originalCompanyName = companyKyc?.CompanyName;
+
+    const submittedPan = this.normalizeText(panNumber);
+    const actualPan = this.normalizeText(originalPan);
+    const submittedEntityName = this.normalizeText(entityName);
+    const actualCompanyName = this.normalizeText(originalCompanyName);
+
+    if (!actualPan) {
+      throw new HttpErrors.NotFound('Original company PAN not found in source data');
+    }
+
+    if (submittedPan !== actualPan) {
+      throw new HttpErrors.BadRequest(
+        `Submitted PAN does not match ${entityLabel} PAN`,
+      );
+    }
+
+    if (!submittedEntityName || submittedEntityName !== actualCompanyName) {
+      throw new HttpErrors.BadRequest(
+        `Submitted ${entityLabel} name does not match ${entityLabel} name`,
+      );
+    }
+
+    return {
+      success: true,
+      isPanMatched: true,
+      isCompanyNameMatched: true,
+      submitted: {
+        panNumber: submittedPan,
+        companyName: submittedEntityName,
+      },
+      source: {
+        panNumber: actualPan,
+        companyName: actualCompanyName,
+      },
+    };
+  }
+
   // company kyc data...
   async fetchCompanyDataFromInstaFinancials(cin: string) {
     const companyMaster =
@@ -53,52 +104,16 @@ export class CompanyDataMapperService {
 
   // company pan validation...
   async companyPanValidation(panNumber: string, companyName: string) {
-    const companyKyc =
-      indianOilJson?.CorporateDirectory?.CompanyKYC;
-
-    const originalPan = companyKyc?.CompanyPAN;
-    const originalCompanyName = companyKyc?.CompanyName;
-
-    const normalizeText = (value: string | null | undefined) =>
-      (value ?? '').toString().trim().toUpperCase();
-
-    const submittedPan = normalizeText(panNumber);
-    const actualPan = normalizeText(originalPan);
-    const submittedCompanyName = normalizeText(companyName);
-    const actualCompanyName = normalizeText(originalCompanyName);
-
-    if (!actualPan) {
-      throw new HttpErrors.NotFound('Original company PAN not found in source data');
-    }
-
-    const isPanMatched = submittedPan === actualPan;
-
-    const isCompanyNameMatched =
-      submittedCompanyName.length > 0
-        ? submittedCompanyName === actualCompanyName
-        : false;
-
-    if (!isPanMatched) {
-      throw new HttpErrors.BadRequest('Submitted PAN does not match company PAN');
-    }
-
-    if (!isCompanyNameMatched) {
-      throw new HttpErrors.BadRequest('Submitted company name does not match company name');
-    }
-
     return {
-      success: true,
+      ...this.validatePanAndName(panNumber, companyName, 'company'),
       message: 'Company PAN and name matched',
-      isPanMatched: true,
-      isCompanyNameMatched: true,
-      submitted: {
-        panNumber: submittedPan,
-        companyName: submittedCompanyName,
-      },
-      source: {
-        panNumber: actualPan,
-        companyName: actualCompanyName,
-      },
+    };
+  }
+
+  async merchantPanValidation(panNumber: string, merchantName: string) {
+    return {
+      ...this.validatePanAndName(panNumber, merchantName, 'merchant'),
+      message: 'Merchant PAN and name matched',
     };
   }
 

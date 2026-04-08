@@ -2,6 +2,7 @@ import {authenticate, AuthenticationBindings} from '@loopback/authentication';
 import {inject} from '@loopback/core';
 import {Filter, IsolationLevel, repository} from '@loopback/repository';
 import {
+  del,
   get,
   getModelSchemaRef,
   HttpErrors,
@@ -21,9 +22,19 @@ import {
   Psp,
 } from '../models';
 import {
+  AddressDetailsRepository,
+  BankDetailsRepository,
   KycApplicationsRepository,
+  MerchantKycDocumentRepository,
   MerchantPanCardRepository,
   MerchantProfilesRepository,
+  OtpRepository,
+  PspRepository,
+  RegistrationSessionsRepository,
+  RolesRepository,
+  TransactionRepository,
+  UboDetailsRepository,
+  UserRolesRepository,
   UsersRepository,
 } from '../repositories';
 import {AddressDetailsService} from '../services/address-details.service';
@@ -43,6 +54,26 @@ export class MerchantProfilesController {
     private kycApplicationsRepository: KycApplicationsRepository,
     @repository(MerchantPanCardRepository)
     private merchantPanCardRepository: MerchantPanCardRepository,
+    @repository(MerchantKycDocumentRepository)
+    private merchantKycDocumentRepository: MerchantKycDocumentRepository,
+    @repository(AddressDetailsRepository)
+    private addressDetailsRepository: AddressDetailsRepository,
+    @repository(BankDetailsRepository)
+    private bankDetailsRepository: BankDetailsRepository,
+    @repository(UboDetailsRepository)
+    private uboDetailsRepository: UboDetailsRepository,
+    @repository(PspRepository)
+    private pspRepository: PspRepository,
+    @repository(TransactionRepository)
+    private transactionRepository: TransactionRepository,
+    @repository(UserRolesRepository)
+    private userRolesRepository: UserRolesRepository,
+    @repository(RolesRepository)
+    private rolesRepository: RolesRepository,
+    @repository(RegistrationSessionsRepository)
+    private registrationSessionsRepository: RegistrationSessionsRepository,
+    @repository(OtpRepository)
+    private otpRepository: OtpRepository,
     @repository(UsersRepository)
     private usersRepository: UsersRepository,
     @inject('service.session.service')
@@ -84,6 +115,301 @@ export class MerchantProfilesController {
     }
 
     return progress;
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @del('/merchant-profiles/{profileId}/purge')
+  async purgeMerchantProfile(
+    @param.path.string('profileId') profileId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    profileId: string;
+    userDeleted: boolean;
+    deleted: {
+      merchantProfile: number;
+      merchantPanCards: number;
+      merchantDocuments: number;
+      addressDetails: number;
+      bankDetails: number;
+      uboDetails: number;
+      psps: number;
+      transactions: number;
+      kycApplications: number;
+      registrationSessions: number;
+      merchantUserRoles: number;
+      otpEntries: number;
+    };
+  }> {
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        isolationLevel: IsolationLevel.READ_COMMITTED,
+      });
+
+    try {
+      const merchantProfile = await this.merchantProfilesRepository.findOne(
+        {
+          where: {id: profileId, isDeleted: false},
+        },
+        {transaction: tx},
+      );
+
+      if (!merchantProfile) {
+        throw new HttpErrors.NotFound('Merchant profile not found');
+      }
+
+      const merchantUser = await this.usersRepository.findById(
+        merchantProfile.usersId,
+        undefined,
+        {transaction: tx},
+      );
+
+      const merchantPanCards = await this.merchantPanCardRepository.find(
+        {
+          where: {merchantProfilesId: profileId},
+        },
+        {transaction: tx},
+      );
+
+      const merchantDocuments = await this.merchantKycDocumentRepository.find(
+        {
+          where: {usersId: merchantProfile.usersId},
+        },
+        {transaction: tx},
+      );
+
+      const addressDetails = await this.addressDetailsRepository.find(
+        {
+          where: {
+            identifierId: profileId,
+            roleValue: 'merchant',
+          },
+        },
+        {transaction: tx},
+      );
+
+      const bankDetails = await this.bankDetailsRepository.find(
+        {
+          where: {
+            usersId: merchantProfile.usersId,
+            roleValue: 'merchant',
+          },
+        },
+        {transaction: tx},
+      );
+
+      const uboDetails = await this.uboDetailsRepository.find(
+        {
+          where: {
+            usersId: merchantProfile.usersId,
+            identifierId: profileId,
+            roleValue: 'merchant',
+          },
+        },
+        {transaction: tx},
+      );
+
+      const psps = await this.pspRepository.find(
+        {
+          where: {
+            usersId: merchantProfile.usersId,
+            merchantProfilesId: profileId,
+          },
+        },
+        {transaction: tx},
+      );
+
+      const pspIds = psps.map(psp => psp.id);
+
+      const kycApplications = await this.kycApplicationsRepository.find(
+        {
+          where: {
+            usersId: merchantProfile.usersId,
+            identifierId: profileId,
+            roleValue: 'merchant',
+          },
+        },
+        {transaction: tx},
+      );
+
+      const mediaIds = Array.from(
+        new Set(
+          [
+            merchantProfile.merchantLogo,
+            ...merchantPanCards.map(pan => pan.panCardDocumentId),
+            ...merchantDocuments.map(doc => doc.documentsFileId),
+            ...addressDetails.map(address => address.addressProofId),
+            ...bankDetails.map(bank => bank.bankAccountProofId),
+            ...uboDetails.map(ubo => ubo.panCardId),
+          ].filter((id): id is string => !!id),
+        ),
+      );
+
+      const deletedTransactions = pspIds.length
+        ? await this.transactionRepository.deleteAll(
+          {pspId: {inq: pspIds}},
+          {transaction: tx},
+        )
+        : {count: 0};
+
+      const deletedPsps = await this.pspRepository.deleteAll(
+        {
+          usersId: merchantProfile.usersId,
+          merchantProfilesId: profileId,
+        },
+        {transaction: tx},
+      );
+
+      const deletedUboDetails = await this.uboDetailsRepository.deleteAll(
+        {
+          usersId: merchantProfile.usersId,
+          identifierId: profileId,
+          roleValue: 'merchant',
+        },
+        {transaction: tx},
+      );
+
+      const deletedBankDetails = await this.bankDetailsRepository.deleteAll(
+        {
+          usersId: merchantProfile.usersId,
+          roleValue: 'merchant',
+        },
+        {transaction: tx},
+      );
+
+      const deletedAddressDetails = await this.addressDetailsRepository.deleteAll(
+        {
+          identifierId: profileId,
+          roleValue: 'merchant',
+        },
+        {transaction: tx},
+      );
+
+      const deletedMerchantDocuments =
+        await this.merchantKycDocumentRepository.deleteAll(
+          {
+            usersId: merchantProfile.usersId,
+          },
+          {transaction: tx},
+        );
+
+      const deletedMerchantPanCards =
+        await this.merchantPanCardRepository.deleteAll(
+          {
+            merchantProfilesId: profileId,
+          },
+          {transaction: tx},
+        );
+
+      const deletedKycApplications = await this.kycApplicationsRepository.deleteAll(
+        {
+          usersId: merchantProfile.usersId,
+          identifierId: profileId,
+          roleValue: 'merchant',
+        },
+        {transaction: tx},
+      );
+
+      const merchantRole = await this.rolesRepository.findOne(
+        {
+          where: {value: 'merchant', isDeleted: false},
+        },
+        {transaction: tx},
+      );
+
+      const deletedMerchantUserRoles = merchantRole
+        ? await this.userRolesRepository.deleteAll(
+          {
+            usersId: merchantProfile.usersId,
+            rolesId: merchantRole.id,
+          },
+          {transaction: tx},
+        )
+        : {count: 0};
+
+      const deletedRegistrationSessions =
+        await this.registrationSessionsRepository.deleteAll(
+          {
+            and: [
+              {roleValue: 'merchant'},
+              {
+                or: [
+                  {email: merchantUser.email},
+                  {phoneNumber: merchantUser.phone},
+                ],
+              },
+            ],
+          },
+          {transaction: tx},
+        );
+
+      const deletedOtpEntries = await this.otpRepository.deleteAll(
+        {
+          or: [
+            {identifier: merchantUser.email},
+            {identifier: merchantUser.phone},
+          ],
+        },
+        {transaction: tx},
+      );
+
+      const deletedMerchantProfile = await this.merchantProfilesRepository.deleteAll(
+        {id: profileId},
+        {transaction: tx},
+      );
+
+      const remainingUserRoles = await this.userRolesRepository.count(
+        {
+          usersId: merchantProfile.usersId,
+        },
+        {transaction: tx},
+      );
+
+      const remainingKycApplications = await this.kycApplicationsRepository.count(
+        {
+          usersId: merchantProfile.usersId,
+        },
+        {transaction: tx},
+      );
+
+      let userDeleted = false;
+
+      if (remainingUserRoles.count === 0 && remainingKycApplications.count === 0) {
+        await this.usersRepository.deleteById(merchantProfile.usersId, {
+          transaction: tx,
+        });
+        userDeleted = true;
+      }
+
+      await tx.commit();
+
+      await this.mediaService.updateMediaUsedStatus(mediaIds, false);
+
+      return {
+        success: true,
+        message: 'Merchant profile and related records deleted successfully',
+        profileId,
+        userDeleted,
+        deleted: {
+          merchantProfile: deletedMerchantProfile.count,
+          merchantPanCards: deletedMerchantPanCards.count,
+          merchantDocuments: deletedMerchantDocuments.count,
+          addressDetails: deletedAddressDetails.count,
+          bankDetails: deletedBankDetails.count,
+          uboDetails: deletedUboDetails.count,
+          psps: deletedPsps.count,
+          transactions: deletedTransactions.count,
+          kycApplications: deletedKycApplications.count,
+          registrationSessions: deletedRegistrationSessions.count,
+          merchantUserRoles: deletedMerchantUserRoles.count,
+          otpEntries: deletedOtpEntries.count,
+        },
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
   }
 
   @get('/merchant-profiles/kyc-progress/{sessionId}')

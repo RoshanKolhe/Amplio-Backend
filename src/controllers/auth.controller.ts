@@ -2916,6 +2916,11 @@ export class AuthController {
       if (companyWithGSTIN)
         throw new HttpErrors.BadRequest('GSTIN already registered');
 
+      await this.companyDataMapperService.merchantPanValidation(
+        body.submittedPanDetails.submittedPanNumber,
+        body.submittedPanDetails.submittedMerchantName,
+      );
+
       // ----------------------------
       //  Create User
       // ----------------------------

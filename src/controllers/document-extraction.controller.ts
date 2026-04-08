@@ -111,4 +111,45 @@ export class DocumentExtractionController {
       data: response
     }
   }
+
+  @post('/extraction/merchant-company-info', {
+    responses: {
+      '200': {
+        description: 'Extract merchant company info',
+        content: {'application/json': {schema: {type: 'object'}}},
+      },
+    },
+  })
+  async extractMerchantCompanyInfo(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['CIN'],
+            properties: {
+              CIN: {
+                type: 'string',
+                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$'
+              },
+            }
+          }
+        }
+      }
+    })
+    body: {
+      CIN: string;
+    }
+  ): Promise<{success: boolean; message: string; data: object}> {
+    const response: any =
+      await this.companyDataMapperService.fetchCompanyDataFromInstaFinancials(
+        body.CIN,
+      );
+
+    return {
+      success: true,
+      message: 'Merchant company info fetched',
+      data: response,
+    };
+  }
 }

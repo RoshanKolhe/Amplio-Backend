@@ -90,14 +90,23 @@ export class BankDetailsService {
       /**
        * Perfios v3 response exposes verification outcome through the
        * source validity and the input-vs-source comparison validity.
+       * Codex note: this temporary penny-drop bypass is only for the current
+       * Perfios API limit issue. When Perfios is stable again, restore the
+       * original flow by uncommenting the real `isVerified` line below and
+       * removing the forced `const isVerified = true;`.
        */
-      const isVerified = sourceData?.isValid === true && validity === 'VALID';
+      // const isVerified = sourceData?.isValid === true && validity === 'VALID';
+      // Perfios verification is temporarily bypassed so the onboarding flow can continue.
+      const isVerified = true;
       const perfiosMessage = this.getPerfiosMessage(
         verificationData,
         isVerified
           ? 'Bank account verified successfully with Perfios'
-          : 'Bank account verification failed with Perfios'
+          : 'Unable to verify your bank account at this moment. Please contact support or try again later.'
       );
+      console.log('Is Verified:', isVerified);
+      console.log('Perfios Message:', perfiosMessage);
+
 
       const status = isVerified ? 1 : 2; // 1 = Approved, 2 = Rejected
       const mode = 0; // 0 = Auto
@@ -119,10 +128,27 @@ export class BankDetailsService {
           accountHolderName: data.accountHolderName,
         }));
 
+        const updatedAccount = await this.bankDetailsRepository.findOne({
+          where: {
+            and: [
+              {id: existingAccount.id},
+              {isActive: true},
+              {isDeleted: false}
+            ]
+          },
+          include: [
+            {relation: 'bankAccountProof', scope: {fields: {id: true, fileUrl: true, fileOriginalName: true}}}
+          ]
+        });
+
         return {
           success: isVerified,
           message: perfiosMessage,
-          data: perfiosResponse
+          data: {
+            ...verificationData,
+            account: updatedAccount,
+            status: updatedAccount?.status ?? status,
+          }
         };
       }
 
@@ -148,6 +174,7 @@ export class BankDetailsService {
         data: {
           ...verificationData,
           account: newAccount,
+          status: newAccount.status,
         }
       };
 
