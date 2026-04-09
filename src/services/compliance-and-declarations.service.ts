@@ -39,21 +39,16 @@ export class ComplianceAndDeclarationsService {
         },
       });
 
-    if (existingComplianceDeclaration?.status === 1) {
-      throw new HttpErrors.BadRequest(
-        'Compliance and declarations is already approved and cannot be modified',
-      );
-    }
-
     if (existingComplianceDeclaration) {
       await this.complianceAndDeclarationsRepository.updateById(
         existingComplianceDeclaration.id,
         {
           ...complianceData,
-          status: 0,
+          status: complianceData.status ?? 1,
           mode: 1,
           reason: undefined,
-          verifiedAt: undefined,
+          verifiedAt:
+            (complianceData.status ?? 1) === 1 ? new Date() : undefined,
         },
       );
 
@@ -72,8 +67,10 @@ export class ComplianceAndDeclarationsService {
     const complianceDeclaration =
       await this.complianceAndDeclarationsRepository.create({
         ...complianceData,
-        status: complianceData.status ?? 0,
+        status: complianceData.status ?? 1,
         mode: complianceData.mode ?? 1,
+        verifiedAt:
+          (complianceData.status ?? 1) === 1 ? new Date() : undefined,
         isActive: complianceData.isActive ?? true,
         isDeleted: complianceData.isDeleted ?? false,
       });

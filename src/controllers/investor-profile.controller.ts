@@ -676,6 +676,14 @@ export class InvestorProfileController {
       include: [
         {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
         {relation: 'kycApplications', scope: {fields: {id: true, usersId: true, status: true, mode: true}}},
+        {
+          relation: 'investorType',
+          scope: {fields: {id: true, label: true, value: true}},
+        },
+        {
+          relation: 'media',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true, fileName: true, fileType: true}},
+        },
       ]
     });
 
@@ -688,7 +696,7 @@ export class InvestorProfileController {
 
     return {
       success: true,
-      message: 'Company Profiles',
+      message: 'Investor Profiles',
       data: investors,
       count: {
         totalCount: totalCount,
@@ -720,7 +728,15 @@ export class InvestorProfileController {
         {relation: 'investorPanCards', scope: {include: [{relation: 'panCardDocument', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}]}},
         {relation: 'aadharFrontImage', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
         {relation: 'aadharBackImage', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
-        {relation: 'selfie', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}
+        {relation: 'selfie', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
+        {
+          relation: 'investorType',
+          scope: {fields: {id: true, label: true, value: true}},
+        },
+        {
+          relation: 'media',
+          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true, fileName: true, fileType: true}},
+        },
       ]
     });
 
@@ -1553,7 +1569,7 @@ export class InvestorProfileController {
           roleValue: 'investor',
           identifierId: investor.id,
           mode: 1,
-          status: 0,
+          status: 1,
           isActive: true,
           isDeleted: false,
         }),
@@ -1850,7 +1866,7 @@ export class InvestorProfileController {
           roleValue: 'investor',
           identifierId: investor.id,
           mode: 1,
-          status: 0,
+          status: 1,
           isActive: true,
           isDeleted: false,
         }),
@@ -1967,7 +1983,7 @@ export class InvestorProfileController {
           roleValue: 'investor',
           identifierId: investor.id,
           mode: 1,
-          status: 0,
+          status: 1,
           isActive: true,
           isDeleted: false,
         }),

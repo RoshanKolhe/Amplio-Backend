@@ -156,17 +156,13 @@ export class PlatformAgreementService {
       ...agreementData,
       businessKycDocumentTypeId: documentType.id,
       mediaId: documentType.fileTemplateId,
-      status: agreementData.status ?? 0,
+      status: agreementData.status ?? 1,
       mode: agreementData.mode ?? 1,
+      verifiedAt:
+        (agreementData.status ?? 1) === 1 ? new Date() : undefined,
       isActive: agreementData.isActive ?? true,
       isDeleted: agreementData.isDeleted ?? false,
     };
-
-    if (existingAgreement?.status === 1) {
-      throw new HttpErrors.BadRequest(
-        'Platform agreement is already approved and cannot be modified',
-      );
-    }
 
     if (existingAgreement) {
       await this.platformAgreementRepository.updateById(existingAgreement.id, {
