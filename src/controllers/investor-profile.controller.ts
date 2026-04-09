@@ -1,17 +1,44 @@
 import {authenticate, AuthenticationBindings} from '@loopback/authentication';
 import {inject} from '@loopback/core';
 import {Filter, IsolationLevel, repository} from '@loopback/repository';
-import {get, getModelSchemaRef, HttpErrors, param, patch, post, requestBody} from '@loopback/rest';
+import {
+  del,
+  get,
+  getModelSchemaRef,
+  HttpErrors,
+  param,
+  patch,
+  post,
+  requestBody,
+} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
 import {AddressDetails, AuthorizeSignatories, BankDetails, ComplianceAndDeclarations, InvestmentMandate, InvestorKycDocument, InvestorProfile, PlatformAgreement, UboDetails} from '../models';
-import {InvestorProfileRepository, KycApplicationsRepository} from '../repositories';
+import {
+  AddressDetailsRepository,
+  AuthorizeSignatoriesRepository,
+  BankDetailsRepository,
+  ComplianceAndDeclarationsRepository,
+  InvestmentMandateRepository,
+  InvestorKycDocumentRepository,
+  InvestorPanCardsRepository,
+  InvestorProfileRepository,
+  KycApplicationsRepository,
+  OtpRepository,
+  PlatformAgreementRepository,
+  RegistrationSessionsRepository,
+  RolesRepository,
+  UboDetailsRepository,
+  UserRolesRepository,
+  UsersRepository,
+} from '../repositories';
 import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
 import {ComplianceAndDeclarationsService} from '../services/compliance-and-declarations.service';
 import {InvestorKycDocumentService} from '../services/investor-kyc-document.service';
 import {InvestmentMandateService} from '../services/investment-mandate.service';
 import {KycService} from '../services/kyc.service';
+import {MediaService} from '../services/media.service';
 import {PlatformAgreementService} from '../services/platform-agreement.service';
 import {SessionService} from '../services/session.service';
 import {AuthorizeSignatoriesService} from '../services/signatories.service';
@@ -35,6 +62,34 @@ export class InvestorProfileController {
     private kycApplicationsRepository: KycApplicationsRepository,
     @repository(InvestorProfileRepository)
     private investorProfileRepository: InvestorProfileRepository,
+    @repository(InvestorPanCardsRepository)
+    private investorPanCardsRepository: InvestorPanCardsRepository,
+    @repository(InvestorKycDocumentRepository)
+    private investorKycDocumentRepository: InvestorKycDocumentRepository,
+    @repository(AddressDetailsRepository)
+    private addressDetailsRepository: AddressDetailsRepository,
+    @repository(BankDetailsRepository)
+    private bankDetailsRepository: BankDetailsRepository,
+    @repository(UboDetailsRepository)
+    private uboDetailsRepository: UboDetailsRepository,
+    @repository(AuthorizeSignatoriesRepository)
+    private authorizeSignatoriesRepository: AuthorizeSignatoriesRepository,
+    @repository(ComplianceAndDeclarationsRepository)
+    private complianceAndDeclarationsRepository: ComplianceAndDeclarationsRepository,
+    @repository(InvestmentMandateRepository)
+    private investmentMandateRepository: InvestmentMandateRepository,
+    @repository(PlatformAgreementRepository)
+    private platformAgreementRepository: PlatformAgreementRepository,
+    @repository(UserRolesRepository)
+    private userRolesRepository: UserRolesRepository,
+    @repository(RolesRepository)
+    private rolesRepository: RolesRepository,
+    @repository(RegistrationSessionsRepository)
+    private registrationSessionsRepository: RegistrationSessionsRepository,
+    @repository(OtpRepository)
+    private otpRepository: OtpRepository,
+    @repository(UsersRepository)
+    private usersRepository: UsersRepository,
     @inject('service.kyc.service')
     private kycService: KycService,
     @inject('service.session.service')
@@ -55,6 +110,8 @@ export class InvestorProfileController {
     private investmentMandateService: InvestmentMandateService,
     @inject('service.platformAgreementService.service')
     private platformAgreementService: PlatformAgreementService,
+    @inject('service.media.service')
+    private mediaService: MediaService,
   ) { }
 
   private getInvestorStepperConfig(investorKycType?: string): {
@@ -151,6 +208,346 @@ export class InvestorProfileController {
     }
 
     return progress;
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @del('/investor-profiles/{profileId}/purge')
+  async purgeInstitutionalInvestorProfile(
+    @param.path.string('profileId') profileId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    profileId: string;
+    userDeleted: boolean;
+    deleted: {
+      investorProfile: number;
+      investorPanCards: number;
+      investorDocuments: number;
+      addressDetails: number;
+      bankDetails: number;
+      uboDetails: number;
+      signatories: number;
+      complianceDeclarations: number;
+      investmentMandates: number;
+      platformAgreements: number;
+      kycApplications: number;
+      investorUserRoles: number;
+      registrationSessions: number;
+      otpEntries: number;
+    };
+  }> {
+    const tx =
+      await this.investorProfileRepository.dataSource.beginTransaction({
+        isolationLevel: IsolationLevel.READ_COMMITTED,
+      });
+
+    try {
+      const investorProfile = await this.investorProfileRepository.findOne(
+        {
+          where: {
+            id: profileId,
+            isDeleted: false,
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!investorProfile) {
+        throw new HttpErrors.NotFound('Investor profile not found');
+      }
+
+      if (investorProfile.investorKycType !== 'institutional') {
+        throw new HttpErrors.BadRequest(
+          'Purge is only supported for institutional investor profiles',
+        );
+      }
+
+      const investorUser = await this.usersRepository.findById(
+        investorProfile.usersId,
+        undefined,
+        {transaction: tx},
+      );
+
+      const investorPanCards = await this.investorPanCardsRepository.find(
+        {
+          where: {investorProfileId: profileId},
+        },
+        {transaction: tx},
+      );
+
+      const investorDocuments = await this.investorKycDocumentRepository.find(
+        {
+          where: {usersId: investorProfile.usersId},
+        },
+        {transaction: tx},
+      );
+
+      const addressDetails = await this.addressDetailsRepository.find(
+        {
+          where: {
+            identifierId: profileId,
+            roleValue: 'investor',
+          },
+        },
+        {transaction: tx},
+      );
+
+      const bankDetails = await this.bankDetailsRepository.find(
+        {
+          where: {
+            usersId: investorProfile.usersId,
+            roleValue: 'investor',
+          },
+        },
+        {transaction: tx},
+      );
+
+      const uboDetails = await this.uboDetailsRepository.find(
+        {
+          where: {
+            usersId: investorProfile.usersId,
+            identifierId: profileId,
+            roleValue: 'investor',
+          },
+        },
+        {transaction: tx},
+      );
+
+      const signatories = await this.authorizeSignatoriesRepository.find(
+        {
+          where: {
+            usersId: investorProfile.usersId,
+            identifierId: profileId,
+            roleValue: 'investor',
+          },
+        },
+        {transaction: tx},
+      );
+
+      const platformAgreements = await this.platformAgreementRepository.find(
+        {
+          where: {
+            usersId: investorProfile.usersId,
+            identifierId: profileId,
+            roleValue: 'investor',
+          },
+        },
+        {transaction: tx},
+      );
+
+      const mediaIds = Array.from(
+        new Set(
+          [
+            investorProfile.investorLogo,
+            ...investorPanCards.map(pan => pan.panCardDocumentId),
+            ...investorDocuments.map(doc => doc.documentsFileId),
+            ...addressDetails.map(address => address.addressProofId),
+            ...bankDetails.map(bank => bank.bankAccountProofId),
+            ...uboDetails.map(ubo => ubo.panCardId),
+            ...signatories.flatMap(signatory => [
+              signatory.panCardFileId,
+              signatory.boardResolutionFileId,
+            ]),
+            ...platformAgreements.map(agreement => agreement.mediaId),
+          ].filter((id): id is string => !!id),
+        ),
+      );
+
+      const deletedSignatories =
+        await this.authorizeSignatoriesRepository.deleteAll(
+          {
+            usersId: investorProfile.usersId,
+            identifierId: profileId,
+            roleValue: 'investor',
+          },
+          {transaction: tx},
+        );
+
+      const deletedComplianceDeclarations =
+        await this.complianceAndDeclarationsRepository.deleteAll(
+          {
+            usersId: investorProfile.usersId,
+            identifierId: profileId,
+            roleValue: 'investor',
+          },
+          {transaction: tx},
+        );
+
+      const deletedInvestmentMandates =
+        await this.investmentMandateRepository.deleteAll(
+          {
+            usersId: investorProfile.usersId,
+            identifierId: profileId,
+            roleValue: 'investor',
+          },
+          {transaction: tx},
+        );
+
+      const deletedPlatformAgreements =
+        await this.platformAgreementRepository.deleteAll(
+          {
+            usersId: investorProfile.usersId,
+            identifierId: profileId,
+            roleValue: 'investor',
+          },
+          {transaction: tx},
+        );
+
+      const deletedUboDetails = await this.uboDetailsRepository.deleteAll(
+        {
+          usersId: investorProfile.usersId,
+          identifierId: profileId,
+          roleValue: 'investor',
+        },
+        {transaction: tx},
+      );
+
+      const deletedBankDetails = await this.bankDetailsRepository.deleteAll(
+        {
+          usersId: investorProfile.usersId,
+          roleValue: 'investor',
+        },
+        {transaction: tx},
+      );
+
+      const deletedAddressDetails = await this.addressDetailsRepository.deleteAll(
+        {
+          identifierId: profileId,
+          roleValue: 'investor',
+        },
+        {transaction: tx},
+      );
+
+      const deletedInvestorDocuments =
+        await this.investorKycDocumentRepository.deleteAll(
+          {
+            usersId: investorProfile.usersId,
+          },
+          {transaction: tx},
+        );
+
+      const deletedInvestorPanCards =
+        await this.investorPanCardsRepository.deleteAll(
+          {
+            investorProfileId: profileId,
+          },
+          {transaction: tx},
+        );
+
+      const deletedKycApplications =
+        await this.kycApplicationsRepository.deleteAll(
+          {
+            usersId: investorProfile.usersId,
+            identifierId: profileId,
+            roleValue: 'investor',
+          },
+          {transaction: tx},
+        );
+
+      const investorRole = await this.rolesRepository.findOne(
+        {
+          where: {value: 'investor', isDeleted: false},
+        },
+        {transaction: tx},
+      );
+
+      const deletedInvestorUserRoles = investorRole
+        ? await this.userRolesRepository.deleteAll(
+          {
+            usersId: investorProfile.usersId,
+            rolesId: investorRole.id,
+          },
+          {transaction: tx},
+        )
+        : {count: 0};
+
+      const deletedRegistrationSessions =
+        await this.registrationSessionsRepository.deleteAll(
+          {
+            and: [
+              {roleValue: 'investor'},
+              {
+                or: [
+                  {email: investorUser.email},
+                  {phoneNumber: investorUser.phone},
+                ],
+              },
+            ],
+          },
+          {transaction: tx},
+        );
+
+      const deletedOtpEntries = await this.otpRepository.deleteAll(
+        {
+          or: [
+            {identifier: investorUser.email},
+            {identifier: investorUser.phone},
+          ],
+        },
+        {transaction: tx},
+      );
+
+      const deletedInvestorProfile = await this.investorProfileRepository.deleteAll(
+        {id: profileId},
+        {transaction: tx},
+      );
+
+      const remainingUserRoles = await this.userRolesRepository.count(
+        {
+          usersId: investorProfile.usersId,
+        },
+        {transaction: tx},
+      );
+
+      const remainingKycApplications =
+        await this.kycApplicationsRepository.count(
+          {
+            usersId: investorProfile.usersId,
+          },
+          {transaction: tx},
+        );
+
+      let userDeleted = false;
+
+      if (remainingUserRoles.count === 0 && remainingKycApplications.count === 0) {
+        await this.usersRepository.deleteById(investorProfile.usersId, {
+          transaction: tx,
+        });
+        userDeleted = true;
+      }
+
+      await tx.commit();
+
+      await this.mediaService.updateMediaUsedStatus(mediaIds, false);
+
+      return {
+        success: true,
+        message:
+          'Institutional investor profile and related records deleted successfully',
+        profileId,
+        userDeleted,
+        deleted: {
+          investorProfile: deletedInvestorProfile.count,
+          investorPanCards: deletedInvestorPanCards.count,
+          investorDocuments: deletedInvestorDocuments.count,
+          addressDetails: deletedAddressDetails.count,
+          bankDetails: deletedBankDetails.count,
+          uboDetails: deletedUboDetails.count,
+          signatories: deletedSignatories.count,
+          complianceDeclarations: deletedComplianceDeclarations.count,
+          investmentMandates: deletedInvestmentMandates.count,
+          platformAgreements: deletedPlatformAgreements.count,
+          kycApplications: deletedKycApplications.count,
+          investorUserRoles: deletedInvestorUserRoles.count,
+          registrationSessions: deletedRegistrationSessions.count,
+          otpEntries: deletedOtpEntries.count,
+        },
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
   }
 
   private async validateInvestorReviewSubmission(investor: InvestorProfile) {

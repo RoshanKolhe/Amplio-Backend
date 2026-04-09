@@ -11,7 +11,7 @@ export class CompanyDataMapperService {
   private validatePanAndName(
     panNumber: string,
     entityName: string,
-    entityLabel: 'company' | 'merchant',
+    entityLabel: 'company' | 'merchant' | 'investor',
   ) {
     const companyKyc =
       indianOilJson?.CorporateDirectory?.CompanyKYC;
@@ -114,6 +114,13 @@ export class CompanyDataMapperService {
     return {
       ...this.validatePanAndName(panNumber, merchantName, 'merchant'),
       message: 'Merchant PAN and name matched',
+    };
+  }
+
+    async investorPanValidation(panNumber: string, investorName: string) {
+    return {
+      ...this.validatePanAndName(panNumber, investorName, 'investor'),
+      message: 'Investor PAN and name matched',
     };
   }
 
