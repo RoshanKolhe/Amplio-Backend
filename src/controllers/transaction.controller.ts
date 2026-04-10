@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {authenticate, AuthenticationBindings} from '@loopback/authentication';
 import {inject} from '@loopback/core';
 import {Filter, repository} from '@loopback/repository';
@@ -10,9 +11,9 @@ import {
   response,
 } from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
+import {authorize} from '../authorization';
 import {Transaction} from '../models';
 import {PspRepository, TransactionRepository} from '../repositories';
-import {authorize} from '../authorization';
 
 function getDisplayStatus(transaction: Transaction) {
   if (!transaction.settlementDate || transaction.status !== 'captured') {
@@ -115,6 +116,7 @@ export class TransactionController {
   ): Promise<Transaction[]> {
     const transactions = await this.transactionRepository.find({
       ...filter,
+      order: filter?.order ?? ['createdAt DESC'],
       include: [
         ...(filter?.include ?? []), // preserve if any
         {
@@ -218,12 +220,12 @@ async requestReceivableAmount(
   }
 
   const totalNetAmount = todayTransactions.reduce(
-    (sum, t) => sum + (t.netAmount || 0),
+    (sum, t) => sum + (t.netAmount ?? 0),
     0,
   );
 
   const totalRequested = todayTransactions.reduce(
-    (sum, t) => sum + (t.requestReceivableAmount || 0),
+    (sum, t) => sum + (t.requestReceivableAmount ?? 0),
     0,
   );
 
@@ -241,7 +243,7 @@ async requestReceivableAmount(
     if (remaining <= 0) break;
 
     const txnAvailable =
-      (txn.netAmount || 0) - (txn.requestReceivableAmount || 0);
+      (txn.netAmount ?? 0) - (txn.requestReceivableAmount ?? 0);
 
     if (txnAvailable <= 0) continue;
 
@@ -249,7 +251,7 @@ async requestReceivableAmount(
 
     await this.transactionRepository.updateById(txn.id, {
       requestReceivableAmount:
-        (txn.requestReceivableAmount || 0) + deduct,
+        (txn.requestReceivableAmount ?? 0) + deduct,
     });
 
     remaining -= deduct;
