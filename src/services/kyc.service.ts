@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
@@ -8,6 +9,7 @@ import {
   CompanyKycDocumentRepository,
   CompanyPanCardsRepository,
   CompanyProfilesRepository,
+  InvestorKycDocumentRepository,
   InvestorPanCardsRepository,
   InvestorProfileRepository,
   KycApplicationsRepository,
@@ -17,9 +19,13 @@ import {
   TrusteeProfilesRepository,
 } from '../repositories';
 import {CompanyKycDocumentRequirementsService} from './company-kyc-document-requirements.service';
+import {InvestorKycDocumentRequirementsService} from './investor-kyc-document-requirements.service';
 import {MerchantKycDocumentService} from './merchant-kyc-document.service';
 import {UboDetailsService} from './ubo-details.service';
 import {PspService} from './psp.service';
+import {ComplianceAndDeclarationsService} from './compliance-and-declarations.service';
+import {InvestmentMandateService} from './investment-mandate.service';
+import {PlatformAgreementService} from './platform-agreement.service';
 
 export class KycService {
   constructor(
@@ -37,6 +43,8 @@ export class KycService {
     private trusteePanCardsRepository: TrusteePanCardsRepository,
     @repository(InvestorPanCardsRepository)
     private investorPanCardsRepository: InvestorPanCardsRepository,
+    @repository(InvestorKycDocumentRepository)
+    private investorKycDocumentRepository: InvestorKycDocumentRepository,
     @repository(CompanyKycDocumentRepository)
     private companyKycDocumentRepository: CompanyKycDocumentRepository,
     @repository(AddressDetailsRepository)
@@ -47,12 +55,20 @@ export class KycService {
     private authorizeSignatoriesRepository: AuthorizeSignatoriesRepository,
     @inject('service.companyKycDocumentRequirementsService.service')
     private companyKycDocumentRequirementsService: CompanyKycDocumentRequirementsService,
+    @inject('service.investorKycDocumentRequirementsService.service')
+    private investorKycDocumentRequirementsService: InvestorKycDocumentRequirementsService,
     @repository(MerchantPanCardRepository)
     private merchantPanCardsRepository: MerchantPanCardRepository,
     @repository(MerchantProfilesRepository)
     private merchantProfileRepository: MerchantProfilesRepository,
     @inject('service.merchantKycDocumentService.service')
     private merchantKycDocumentService: MerchantKycDocumentService,
+    @inject('service.complianceAndDeclarationsService.service')
+    private complianceAndDeclarationsService: ComplianceAndDeclarationsService,
+    @inject('service.investmentMandateService.service')
+    private investmentMandateService: InvestmentMandateService,
+    @inject('service.platformAgreementService.service')
+    private platformAgreementService: PlatformAgreementService,
     @inject('service.uboDetailsService.service')
     private uboDetailsService: UboDetailsService,
     @inject('service.pspService.service')
@@ -339,6 +355,229 @@ export class KycService {
     }
   }
 
+  private async ensureInvestorSectionsApproved(
+    investorId: string,
+    tx: any,
+  ): Promise<void> {
+    const investorProfile = await this.investorProfileRepository.findOne(
+      {
+        where: {
+          and: [{id: investorId}, {isDeleted: false}],
+        },
+      },
+      {transaction: tx},
+    );
+
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor profile not found');
+    }
+
+    const notApprovedSections: string[] = [];
+    const isInstitutional = investorProfile.investorKycType === 'institutional';
+
+    try {
+      const bankDetails = await this.bankDetailsRepository.find(
+        {
+          where: {
+            and: [
+              {usersId: investorProfile.usersId},
+              {roleValue: 'investor'},
+              {isActive: true},
+              {isDeleted: false},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!bankDetails.length || bankDetails.some(bank => bank.status !== 1)) {
+        notApprovedSections.push('bank details');
+      }
+    } catch {
+      notApprovedSections.push('bank details');
+    }
+
+    if (!isInstitutional) {
+      if (notApprovedSections.length) {
+        throw new HttpErrors.BadRequest(
+          `Cannot approve investor profile. These KYC sections are not approved: ${notApprovedSections.join(', ')}`,
+        );
+      }
+      return;
+    }
+
+    try {
+      const requiredDocuments =
+        await this.investorKycDocumentRequirementsService.fetchRequiredDocuments(
+          investorProfile.usersId,
+        );
+      const mandatoryDocuments = requiredDocuments.filter(
+        document => document.isMandatory,
+      );
+
+      const uploadedDocuments = await this.investorKycDocumentRepository.find(
+        {
+          where: {
+            and: [
+              {usersId: investorProfile.usersId},
+              {
+                investorKycDocumentRequirementsId: {
+                  inq: mandatoryDocuments.map(doc => doc.id),
+                },
+              },
+              {isActive: true},
+              {isDeleted: false},
+            ],
+          },
+          order: ['createdAt DESC'],
+        },
+        {transaction: tx},
+      );
+
+      const latestStatusByRequirementId = new Map<string, number>();
+      for (const document of uploadedDocuments) {
+        if (
+          !latestStatusByRequirementId.has(
+            document.investorKycDocumentRequirementsId,
+          )
+        ) {
+          latestStatusByRequirementId.set(
+            document.investorKycDocumentRequirementsId,
+            document.status,
+          );
+        }
+      }
+
+      const hasPendingOrRejectedRequiredDocument =
+        !mandatoryDocuments.length ||
+        mandatoryDocuments.some(
+          requiredDocument =>
+            latestStatusByRequirementId.get(requiredDocument.id) !== 1,
+        );
+
+      if (hasPendingOrRejectedRequiredDocument) {
+        notApprovedSections.push('documents');
+      }
+    } catch {
+      notApprovedSections.push('documents');
+    }
+
+    try {
+      const addressDetails = await this.addressDetailsRepository.find(
+        {
+          where: {
+            and: [
+              {roleValue: 'investor'},
+              {identifierId: investorId},
+              {isActive: true},
+              {isDeleted: false},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (
+        !addressDetails.length ||
+        addressDetails.some(address => address.status !== 1)
+      ) {
+        notApprovedSections.push('address');
+      }
+    } catch {
+      notApprovedSections.push('address');
+    }
+
+    try {
+      const ubos = await this.uboDetailsService.fetchUbosDetails(
+        investorProfile.usersId,
+        'investor',
+        investorProfile.id,
+      );
+
+      if (!ubos.ubos.length || ubos.ubos.some(ubo => ubo.status !== 1)) {
+        notApprovedSections.push('ubo');
+      }
+    } catch {
+      notApprovedSections.push('ubo');
+    }
+
+    try {
+      const signatories = await this.authorizeSignatoriesRepository.find(
+        {
+          where: {
+            and: [
+              {identifierId: investorId},
+              {roleValue: 'investor'},
+              {isActive: true},
+              {isDeleted: false},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (
+        !signatories.length ||
+        signatories.some(signatory => signatory.status !== 1)
+      ) {
+        notApprovedSections.push('signatories');
+      }
+    } catch {
+      notApprovedSections.push('signatories');
+    }
+
+    try {
+      const complianceDeclaration =
+        await this.complianceAndDeclarationsService.fetchUserComplianceDeclaration(
+          investorProfile.usersId,
+          'investor',
+          investorProfile.id,
+        );
+
+      if (!complianceDeclaration.complianceDeclaration) {
+        notApprovedSections.push('compliance declarations');
+      }
+    } catch {
+      notApprovedSections.push('compliance declarations');
+    }
+
+    try {
+      const investmentMandate =
+        await this.investmentMandateService.fetchUserInvestmentMandate(
+          investorProfile.usersId,
+          'investor',
+          investorProfile.id,
+        );
+
+      if (!investmentMandate.investmentMandate) {
+        notApprovedSections.push('investment mandate');
+      }
+    } catch {
+      notApprovedSections.push('investment mandate');
+    }
+
+    try {
+      const platformAgreement =
+        await this.platformAgreementService.fetchUserPlatformAgreement(
+          investorProfile.usersId,
+          'investor',
+          investorProfile.id,
+        );
+
+      if (!platformAgreement.platformAgreement?.isConsent) {
+        notApprovedSections.push('platform agreement');
+      }
+    } catch {
+      notApprovedSections.push('platform agreement');
+    }
+
+    if (notApprovedSections.length) {
+      throw new HttpErrors.BadRequest(
+        `Cannot approve investor profile. These KYC sections are not approved: ${notApprovedSections.join(', ')}`,
+      );
+    }
+  }
+
   async handleCompanyKycApplication(
     applicationId: string,
     companyId: string,
@@ -499,6 +738,10 @@ export class KycService {
 
       if (!investorPanCard || !investorPanCard.id) {
         throw new HttpErrors.NotFound('Unable to fetch pan card details');
+      }
+
+      if (status === 2) {
+        await this.ensureInvestorSectionsApproved(investorId, tx);
       }
 
       // update kyc application

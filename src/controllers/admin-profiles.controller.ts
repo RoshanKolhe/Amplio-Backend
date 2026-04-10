@@ -1,13 +1,18 @@
 import {authenticate} from '@loopback/authentication';
 import {inject} from '@loopback/core';
 import {Filter, repository} from '@loopback/repository';
-import {get, HttpErrors, param, patch, requestBody} from '@loopback/rest';
+import {get, HttpErrors, param, patch, requestBody, SchemaObject} from '@loopback/rest';
 import {authorize} from '../authorization';
 import {
   AddressDetails,
   AuthorizeSignatories,
   BankDetails,
   CompanyKycDocument,
+  ComplianceAndDeclarations,
+  InvestmentMandate,
+  InvestorKycDocument,
+  PlatformAgreement,
+  UboDetails,
   UserUploadedDocuments,
 } from '../models';
 import {
@@ -20,6 +25,81 @@ import {AddressDetailsService} from '../services/address-details.service';
 import {AuthorizeSignatoriesService} from '../services/signatories.service';
 import {UserUploadedDocumentsService} from '../services/user-documents.service';
 import {CompanyKycDocumentService} from '../services/company-kyc-document.service';
+import {InvestorKycDocumentService} from '../services/investor-kyc-document.service';
+import {UboDetailsService} from '../services/ubo-details.service';
+import {ComplianceAndDeclarationsService} from '../services/compliance-and-declarations.service';
+import {InvestmentMandateService} from '../services/investment-mandate.service';
+import {PlatformAgreementService} from '../services/platform-agreement.service';
+
+const investorAuthorizeSignatoryVerificationRequestSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: 'object',
+      required: ['status', 'signatoryId'],
+      properties: {
+        status: {type: 'number', enum: [1]},
+        signatoryId: {type: 'string'},
+        reason: {type: 'string'},
+        rejectReason: {type: 'string'},
+      },
+    },
+    {
+      type: 'object',
+      required: ['status', 'signatoryId', 'rejectReason'],
+      properties: {
+        status: {type: 'number', enum: [2]},
+        signatoryId: {type: 'string'},
+        reason: {type: 'string'},
+        rejectReason: {type: 'string', minLength: 1},
+      },
+    },
+    {
+      type: 'object',
+      required: ['status', 'signatoryId', 'reason'],
+      properties: {
+        status: {type: 'number', enum: [2]},
+        signatoryId: {type: 'string'},
+        reason: {type: 'string', minLength: 1},
+        rejectReason: {type: 'string'},
+      },
+    },
+  ],
+};
+
+const investorAddressVerificationRequestSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: 'object',
+      required: ['investorId', 'status'],
+      properties: {
+        investorId: {type: 'string'},
+        status: {type: 'number', enum: [1]},
+        reason: {type: 'string'},
+        rejectReason: {type: 'string'},
+      },
+    },
+    {
+      type: 'object',
+      required: ['investorId', 'status', 'rejectReason'],
+      properties: {
+        investorId: {type: 'string'},
+        status: {type: 'number', enum: [2]},
+        reason: {type: 'string'},
+        rejectReason: {type: 'string', minLength: 1},
+      },
+    },
+    {
+      type: 'object',
+      required: ['investorId', 'status', 'reason'],
+      properties: {
+        investorId: {type: 'string'},
+        status: {type: 'number', enum: [2]},
+        reason: {type: 'string', minLength: 1},
+        rejectReason: {type: 'string'},
+      },
+    },
+  ],
+};
 
 export class AdminProfilesController {
   constructor(
@@ -31,6 +111,8 @@ export class AdminProfilesController {
     private investorProfileRepository: InvestorProfileRepository,
     @inject('service.companyKycDocumentService.service')
     private companyKycDocumentService: CompanyKycDocumentService,
+    @inject('service.investorKycDocumentService.service')
+    private investorKycDocumentService: InvestorKycDocumentService,
     @inject('service.userUploadedDocuments.service')
     private userUploadDocumentsService: UserUploadedDocumentsService,
     @inject('service.bankDetails.service')
@@ -39,7 +121,14 @@ export class AdminProfilesController {
     private authorizeSignatoriesService: AuthorizeSignatoriesService,
     @inject('service.AddressDetails.service')
     private addressDetailsService: AddressDetailsService,
-
+    @inject('service.uboDetailsService.service')
+    private uboDetailsService: UboDetailsService,
+    @inject('service.complianceAndDeclarationsService.service')
+    private complianceAndDeclarationsService: ComplianceAndDeclarationsService,
+    @inject('service.investmentMandateService.service')
+    private investmentMandateService: InvestmentMandateService,
+    @inject('service.platformAgreementService.service')
+    private platformAgreementService: PlatformAgreementService,
   ) {}
 
   // ------------------------------------------------Trustee Profile API's-------------------------------------------------
@@ -699,6 +788,62 @@ export class AdminProfilesController {
 
   // ------------------------------------------------Investor Profile API's-------------------------------------------------
 
+  // fetch investor documents
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/investor-profiles/{investorId}/documents')
+  async fetchInvestorDocuments(
+    @param.path.string('investorId') investorId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    documents: InvestorKycDocument[];
+  }> {
+    const investorProfile = await this.investorProfileRepository.findOne({
+      where: {
+        and: [{id: investorId}, {isDeleted: false}],
+      },
+    });
+
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor not found');
+    }
+
+    return this.investorKycDocumentService.fetchByUser(investorProfile.usersId);
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/investor-profiles/document-verification')
+  async investorDocumentVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status', 'documentId'],
+            properties: {
+              status: {type: 'number'},
+              documentId: {type: 'string'},
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      status: number;
+      documentId: string;
+      reason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    return this.investorKycDocumentService.updateStatus(
+      body.documentId,
+      body.status,
+      body.reason ?? '',
+    );
+  }
+
   // fetch bank account
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
@@ -745,6 +890,85 @@ export class AdminProfilesController {
     };
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/investor-profiles/{investorId}/address-details')
+  async fetchInvestorAddressDetails(
+    @param.path.string('investorId') investorId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    registeredAddress: AddressDetails | null;
+    correspondenceAddress: AddressDetails | null;
+  }> {
+    const investorProfile = await this.investorProfileRepository.findOne({
+      where: {
+        and: [{id: investorId}, {isDeleted: false}],
+      },
+    });
+
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor not found');
+    }
+
+    return this.addressDetailsService.fetchUserAddressDetails(
+      investorProfile.usersId,
+      'investor',
+      investorProfile.id,
+    );
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/investor-profiles/address-verification')
+  async investorAddressVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: investorAddressVerificationRequestSchema,
+        },
+      },
+    })
+    body: {
+      investorId: string;
+      status: number;
+      reason?: string;
+      rejectReason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    const investorProfile = await this.investorProfileRepository.findOne({
+      where: {
+        id: body.investorId,
+        isDeleted: false,
+      },
+    });
+
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor not found');
+    }
+
+    const rejectionReason = body.rejectReason ?? body.reason;
+
+    if (body.status === 1) {
+      return this.addressDetailsService.approveUserAddressDetails(
+        investorProfile.usersId,
+        'investor',
+        investorProfile.id,
+      );
+    }
+
+    if (body.status === 2) {
+      return this.addressDetailsService.rejectUserAddressDetails(
+        investorProfile.usersId,
+        'investor',
+        investorProfile.id,
+        rejectionReason ?? '',
+      );
+    }
+
+    throw new HttpErrors.BadRequest('Invalid status');
+  }
+
   // super admin investor bank account approval API
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
@@ -778,6 +1002,216 @@ export class AdminProfilesController {
     );
 
     return result;
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/investor-profiles/{investorId}/authorize-signatory')
+  async fetchInvestorAuthorizeSignatories(
+    @param.path.string('investorId') investorId: string,
+    @param.filter(AuthorizeSignatories) filter?: Filter<AuthorizeSignatories>,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    signatories: AuthorizeSignatories[];
+  }> {
+    const investorProfile = await this.investorProfileRepository.findOne({
+      where: {
+        and: [{id: investorId}, {isDeleted: false}],
+      },
+    });
+
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor not found');
+    }
+
+    return this.authorizeSignatoriesService.fetchAuthorizeSignatories(
+      investorProfile.usersId,
+      'investor',
+      investorProfile.id,
+      filter,
+    );
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/investor-profiles/authorize-signatory-verification')
+  async investorAuthorizeSignatoryVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: investorAuthorizeSignatoryVerificationRequestSchema,
+        },
+      },
+    })
+    body: {
+      status: number;
+      signatoryId: string;
+      reason?: string;
+      rejectReason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    const rejectionReason = body.rejectReason ?? body.reason;
+
+    if (body.status === 2 && !rejectionReason?.trim()) {
+      throw new HttpErrors.BadRequest(
+        'rejectReason is required when rejecting a signatory',
+      );
+    }
+
+    return this.authorizeSignatoriesService.updateSignatoryStatus(
+      body.signatoryId,
+      body.status,
+      rejectionReason ?? '',
+    );
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/investor-profiles/{investorId}/ubo-details')
+  async fetchInvestorUboDetails(
+    @param.path.string('investorId') investorId: string,
+    @param.filter(UboDetails) filter?: Filter<UboDetails>,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    uboDetails: UboDetails[];
+  }> {
+    const investorProfile = await this.investorProfileRepository.findOne({
+      where: {
+        and: [{id: investorId}, {isDeleted: false}],
+      },
+    });
+
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor not found');
+    }
+
+    const uboResponse = await this.uboDetailsService.fetchUbosDetails(
+      investorProfile.usersId,
+      'investor',
+      investorProfile.id,
+      filter,
+    );
+
+    return {
+      success: true,
+      message: 'UBO details',
+      uboDetails: uboResponse.ubos,
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/investor-profiles/ubo-verification')
+  async investorUboVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status', 'uboId'],
+            properties: {
+              status: {type: 'number'},
+              uboId: {type: 'string'},
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      status: number;
+      uboId: string;
+      reason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    return this.uboDetailsService.updateUBOSStatus(
+      body.uboId,
+      body.status,
+      body.reason ?? '',
+    );
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/investor-profiles/{investorId}/compliance-declarations')
+  async fetchInvestorComplianceDeclarations(
+    @param.path.string('investorId') investorId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    complianceDeclaration: ComplianceAndDeclarations | null;
+  }> {
+    const investorProfile = await this.investorProfileRepository.findOne({
+      where: {
+        and: [{id: investorId}, {isDeleted: false}],
+      },
+    });
+
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor not found');
+    }
+
+    return this.complianceAndDeclarationsService.fetchUserComplianceDeclaration(
+      investorProfile.usersId,
+      'investor',
+      investorProfile.id,
+    );
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/investor-profiles/{investorId}/investment-mandate')
+  async fetchInvestorInvestmentMandate(
+    @param.path.string('investorId') investorId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    investmentMandate: InvestmentMandate | null;
+  }> {
+    const investorProfile = await this.investorProfileRepository.findOne({
+      where: {
+        and: [{id: investorId}, {isDeleted: false}],
+      },
+    });
+
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor not found');
+    }
+
+    return this.investmentMandateService.fetchUserInvestmentMandate(
+      investorProfile.usersId,
+      'investor',
+      investorProfile.id,
+    );
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @get('/investor-profiles/{investorId}/platform-agreement')
+  async fetchInvestorPlatformAgreement(
+    @param.path.string('investorId') investorId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    platformAgreement: PlatformAgreement | null;
+  }> {
+    const investorProfile = await this.investorProfileRepository.findOne({
+      where: {
+        and: [{id: investorId}, {isDeleted: false}],
+      },
+    });
+
+    if (!investorProfile) {
+      throw new HttpErrors.NotFound('Investor not found');
+    }
+
+    return this.platformAgreementService.fetchUserPlatformAgreement(
+      investorProfile.usersId,
+      'investor',
+      investorProfile.id,
+    );
   }
 
   // ------------------------------------------------Merchant Profile PSP API-------------------------------------------------

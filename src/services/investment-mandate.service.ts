@@ -35,21 +35,16 @@ export class InvestmentMandateService {
         },
       });
 
-    if (existingInvestmentMandate?.status === 1) {
-      throw new HttpErrors.BadRequest(
-        'Investment mandate is already approved and cannot be modified',
-      );
-    }
-
     if (existingInvestmentMandate) {
       await this.investmentMandateRepository.updateById(
         existingInvestmentMandate.id,
         {
           ...mandateData,
-          status: 0,
+          status: mandateData.status ?? 1,
           mode: 1,
           reason: undefined,
-          verifiedAt: undefined,
+          verifiedAt:
+            (mandateData.status ?? 1) === 1 ? new Date() : undefined,
         },
       );
 
@@ -67,8 +62,9 @@ export class InvestmentMandateService {
 
     const investmentMandate = await this.investmentMandateRepository.create({
       ...mandateData,
-      status: mandateData.status ?? 0,
+      status: mandateData.status ?? 1,
       mode: mandateData.mode ?? 1,
+      verifiedAt: (mandateData.status ?? 1) === 1 ? new Date() : undefined,
       isActive: mandateData.isActive ?? true,
       isDeleted: mandateData.isDeleted ?? false,
     });

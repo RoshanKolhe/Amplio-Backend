@@ -1,10 +1,45 @@
 import {authenticate} from '@loopback/authentication';
 import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
-import {HttpErrors, patch, requestBody} from '@loopback/rest';
+import {HttpErrors, patch, requestBody, SchemaObject} from '@loopback/rest';
 import {authorize} from '../authorization';
 import {KycApplicationsRepository} from '../repositories';
 import {KycService} from '../services/kyc.service';
+
+const handleKycApplicationRequestSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: 'object',
+      required: ['applicationId', 'status'],
+      properties: {
+        applicationId: {type: 'string'},
+        status: {type: 'number', enum: [2]},
+        reason: {type: 'string'},
+        rejectReason: {type: 'string'},
+      },
+    },
+    {
+      type: 'object',
+      required: ['applicationId', 'status', 'rejectReason'],
+      properties: {
+        applicationId: {type: 'string'},
+        status: {type: 'number', enum: [3]},
+        reason: {type: 'string'},
+        rejectReason: {type: 'string', minLength: 1},
+      },
+    },
+    {
+      type: 'object',
+      required: ['applicationId', 'status', 'reason'],
+      properties: {
+        applicationId: {type: 'string'},
+        status: {type: 'number', enum: [3]},
+        reason: {type: 'string', minLength: 1},
+        rejectReason: {type: 'string'},
+      },
+    },
+  ],
+};
 
 export class KycControllerController {
   constructor(
@@ -24,15 +59,7 @@ export class KycControllerController {
     @requestBody({
       content: {
         'application/json': {
-          schema: {
-            type: 'object',
-            required: ['applicationId', 'status'],
-            properties: {
-              applicationId: {type: 'string'},
-              status: {type: 'number'},
-              reason: {type: 'string'}
-            }
-          }
+          schema: handleKycApplicationRequestSchema,
         }
       }
     })
@@ -40,8 +67,16 @@ export class KycControllerController {
       applicationId: string;
       status: number;
       reason?: string;
+      rejectReason?: string;
     }
   ): Promise<{success: boolean; message: string}> {
+    const rejectionReason = body.rejectReason ?? body.reason;
+
+    if (body.status === 3 && !rejectionReason?.trim()) {
+      throw new HttpErrors.BadRequest(
+        'rejectReason is required when rejecting a KYC application',
+      );
+    }
 
     const tx = await this.kycApplicationsRepository.dataSource.beginTransaction({
       isolationLevel: 'READ COMMITTED',
@@ -73,7 +108,7 @@ export class KycControllerController {
           kycApplication.id,
           kycApplication.identifierId,
           body.status,
-          body.reason ?? '',
+          rejectionReason ?? '',
           tx
         );
 
@@ -89,7 +124,7 @@ export class KycControllerController {
           kycApplication.id,
           kycApplication.identifierId,
           body.status,
-          body.reason ?? '',
+          rejectionReason ?? '',
           tx
         );
 
@@ -105,7 +140,7 @@ export class KycControllerController {
           kycApplication.id,
           kycApplication.identifierId,
           body.status,
-          body.reason ?? '',
+          rejectionReason ?? '',
           tx
         );
 
@@ -121,7 +156,7 @@ export class KycControllerController {
           kycApplication.id,
           kycApplication.identifierId,
           body.status,
-          body.reason ?? '',
+          rejectionReason ?? '',
           tx
         );
 
