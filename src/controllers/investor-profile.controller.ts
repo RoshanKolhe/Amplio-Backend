@@ -35,8 +35,8 @@ import {
 import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
 import {ComplianceAndDeclarationsService} from '../services/compliance-and-declarations.service';
-import {InvestorKycDocumentService} from '../services/investor-kyc-document.service';
 import {InvestmentMandateService} from '../services/investment-mandate.service';
+import {InvestorKycDocumentService} from '../services/investor-kyc-document.service';
 import {KycService} from '../services/kyc.service';
 import {MediaService} from '../services/media.service';
 import {PlatformAgreementService} from '../services/platform-agreement.service';
@@ -271,7 +271,7 @@ export class InvestorProfileController {
 
       const investorPanCards = await this.investorPanCardsRepository.find(
         {
-          where: {investorProfileId: profileId},
+          where: {investorProfileId: investorProfile.id},
         },
         {transaction: tx},
       );
@@ -286,8 +286,11 @@ export class InvestorProfileController {
       const addressDetails = await this.addressDetailsRepository.find(
         {
           where: {
-            identifierId: profileId,
-            roleValue: 'investor',
+            and: [
+              {identifierId: investorProfile.id},
+              {roleValue: 'investor'},
+              {usersId: investorProfile.usersId}
+            ],
           },
         },
         {transaction: tx},
@@ -296,8 +299,10 @@ export class InvestorProfileController {
       const bankDetails = await this.bankDetailsRepository.find(
         {
           where: {
-            usersId: investorProfile.usersId,
-            roleValue: 'investor',
+            and: [
+              {usersId: investorProfile.usersId},
+              {roleValue: 'investor'},
+            ],
           },
         },
         {transaction: tx},
@@ -306,9 +311,12 @@ export class InvestorProfileController {
       const uboDetails = await this.uboDetailsRepository.find(
         {
           where: {
-            usersId: investorProfile.usersId,
-            identifierId: profileId,
-            roleValue: 'investor',
+            and: [
+              {usersId: investorProfile.usersId},
+              {identifierId: investorProfile.id},
+              {roleValue: 'investor'},
+            ]
+
           },
         },
         {transaction: tx},
@@ -317,9 +325,11 @@ export class InvestorProfileController {
       const signatories = await this.authorizeSignatoriesRepository.find(
         {
           where: {
-            usersId: investorProfile.usersId,
-            identifierId: profileId,
-            roleValue: 'investor',
+            and: [
+              {usersId: investorProfile.usersId},
+              {identifierId: investorProfile.id},
+              {roleValue: 'investor'},
+            ]
           },
         },
         {transaction: tx},
@@ -328,9 +338,11 @@ export class InvestorProfileController {
       const platformAgreements = await this.platformAgreementRepository.find(
         {
           where: {
-            usersId: investorProfile.usersId,
-            identifierId: profileId,
-            roleValue: 'investor',
+            and: [
+              {usersId: investorProfile.usersId},
+              {identifierId: investorProfile.id},
+              {roleValue: 'investor'},
+            ]
           },
         },
         {transaction: tx},
@@ -357,9 +369,11 @@ export class InvestorProfileController {
       const deletedSignatories =
         await this.authorizeSignatoriesRepository.deleteAll(
           {
-            usersId: investorProfile.usersId,
-            identifierId: profileId,
-            roleValue: 'investor',
+            and: [
+              {usersId: investorProfile.usersId},
+              {identifierId: investorProfile.id},
+              {roleValue: 'investor'},
+            ]
           },
           {transaction: tx},
         );
@@ -368,7 +382,7 @@ export class InvestorProfileController {
         await this.complianceAndDeclarationsRepository.deleteAll(
           {
             usersId: investorProfile.usersId,
-            identifierId: profileId,
+            identifierId: investorProfile.id,
             roleValue: 'investor',
           },
           {transaction: tx},
@@ -378,7 +392,7 @@ export class InvestorProfileController {
         await this.investmentMandateRepository.deleteAll(
           {
             usersId: investorProfile.usersId,
-            identifierId: profileId,
+            identifierId: investorProfile.id,
             roleValue: 'investor',
           },
           {transaction: tx},
@@ -388,7 +402,7 @@ export class InvestorProfileController {
         await this.platformAgreementRepository.deleteAll(
           {
             usersId: investorProfile.usersId,
-            identifierId: profileId,
+            identifierId: investorProfile.id,
             roleValue: 'investor',
           },
           {transaction: tx},
@@ -397,7 +411,7 @@ export class InvestorProfileController {
       const deletedUboDetails = await this.uboDetailsRepository.deleteAll(
         {
           usersId: investorProfile.usersId,
-          identifierId: profileId,
+          identifierId: investorProfile.id,
           roleValue: 'investor',
         },
         {transaction: tx},
@@ -413,7 +427,7 @@ export class InvestorProfileController {
 
       const deletedAddressDetails = await this.addressDetailsRepository.deleteAll(
         {
-          identifierId: profileId,
+          identifierId: investorProfile.id,
           roleValue: 'investor',
         },
         {transaction: tx},
@@ -430,7 +444,7 @@ export class InvestorProfileController {
       const deletedInvestorPanCards =
         await this.investorPanCardsRepository.deleteAll(
           {
-            investorProfileId: profileId,
+            investorProfileId: investorProfile.id,
           },
           {transaction: tx},
         );
@@ -439,7 +453,7 @@ export class InvestorProfileController {
         await this.kycApplicationsRepository.deleteAll(
           {
             usersId: investorProfile.usersId,
-            identifierId: profileId,
+            identifierId: investorProfile.id,
             roleValue: 'investor',
           },
           {transaction: tx},
@@ -489,7 +503,7 @@ export class InvestorProfileController {
       );
 
       const deletedInvestorProfile = await this.investorProfileRepository.deleteAll(
-        {id: profileId},
+        {id: investorProfile.id},
         {transaction: tx},
       );
 
@@ -549,6 +563,7 @@ export class InvestorProfileController {
       throw error;
     }
   }
+  
 
   private async validateInvestorReviewSubmission(investor: InvestorProfile) {
     const currentProgress = await this.getKycApplicationStatus(

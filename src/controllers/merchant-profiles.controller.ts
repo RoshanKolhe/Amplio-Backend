@@ -18,8 +18,8 @@ import {
   BankDetails,
   MerchantKycDocument,
   MerchantProfiles,
-  UboDetails,
   Psp,
+  UboDetails,
 } from '../models';
 import {
   AddressDetailsRepository,
@@ -42,9 +42,9 @@ import {BankDetailsService} from '../services/bank-details.service';
 import {KycService} from '../services/kyc.service';
 import {MediaService} from '../services/media.service';
 import {MerchantKycDocumentService} from '../services/merchant-kyc-document.service';
-import {UboDetailsService} from '../services/ubo-details.service';
 import {PspService} from '../services/psp.service';
 import {SessionService} from '../services/session.service';
+import {UboDetailsService} from '../services/ubo-details.service';
 
 export class MerchantProfilesController {
   constructor(
@@ -147,10 +147,16 @@ export class MerchantProfilesController {
         isolationLevel: IsolationLevel.READ_COMMITTED,
       });
 
+    console.log('profileId', profileId);
     try {
       const merchantProfile = await this.merchantProfilesRepository.findOne(
         {
-          where: {id: profileId, isDeleted: false},
+          where: {
+            and: [
+              {id: profileId},
+              {isDeleted: false}
+            ]
+          },
         },
         {transaction: tx},
       );
@@ -167,14 +173,18 @@ export class MerchantProfilesController {
 
       const merchantPanCards = await this.merchantPanCardRepository.find(
         {
-          where: {merchantProfilesId: profileId},
+          where: {
+            merchantProfilesId: merchantProfile.id
+          },
         },
         {transaction: tx},
       );
 
       const merchantDocuments = await this.merchantKycDocumentRepository.find(
         {
-          where: {usersId: merchantProfile.usersId},
+          where: {
+            usersId: merchantProfile.usersId
+          },
         },
         {transaction: tx},
       );
@@ -182,8 +192,11 @@ export class MerchantProfilesController {
       const addressDetails = await this.addressDetailsRepository.find(
         {
           where: {
-            identifierId: profileId,
-            roleValue: 'merchant',
+            and: [
+              {usersId: merchantProfile.usersId},
+              {identifierId: merchantProfile.id},
+              {roleValue: 'merchant'}
+            ]
           },
         },
         {transaction: tx},
@@ -192,8 +205,11 @@ export class MerchantProfilesController {
       const bankDetails = await this.bankDetailsRepository.find(
         {
           where: {
-            usersId: merchantProfile.usersId,
-            roleValue: 'merchant',
+            and: [
+              {usersId: merchantProfile.usersId},
+              {roleValue: 'merchant'},
+            ]
+
           },
         },
         {transaction: tx},
@@ -202,9 +218,12 @@ export class MerchantProfilesController {
       const uboDetails = await this.uboDetailsRepository.find(
         {
           where: {
-            usersId: merchantProfile.usersId,
-            identifierId: profileId,
-            roleValue: 'merchant',
+            and: [
+              {usersId: merchantProfile.usersId},
+              {identifierId: merchantProfile.id},
+              {roleValue: 'merchant'},
+            ]
+
           },
         },
         {transaction: tx},
@@ -214,7 +233,7 @@ export class MerchantProfilesController {
         {
           where: {
             usersId: merchantProfile.usersId,
-            merchantProfilesId: profileId,
+            merchantProfilesId: merchantProfile.id,
           },
         },
         {transaction: tx},
@@ -256,7 +275,7 @@ export class MerchantProfilesController {
       const deletedPsps = await this.pspRepository.deleteAll(
         {
           usersId: merchantProfile.usersId,
-          merchantProfilesId: profileId,
+          merchantProfilesId: merchantProfile.id,
         },
         {transaction: tx},
       );
@@ -264,7 +283,7 @@ export class MerchantProfilesController {
       const deletedUboDetails = await this.uboDetailsRepository.deleteAll(
         {
           usersId: merchantProfile.usersId,
-          identifierId: profileId,
+          identifierId: merchantProfile.id,
           roleValue: 'merchant',
         },
         {transaction: tx},
@@ -280,7 +299,7 @@ export class MerchantProfilesController {
 
       const deletedAddressDetails = await this.addressDetailsRepository.deleteAll(
         {
-          identifierId: profileId,
+          identifierId: merchantProfile.id,
           roleValue: 'merchant',
         },
         {transaction: tx},
@@ -297,7 +316,7 @@ export class MerchantProfilesController {
       const deletedMerchantPanCards =
         await this.merchantPanCardRepository.deleteAll(
           {
-            merchantProfilesId: profileId,
+            merchantProfilesId: merchantProfile.id,
           },
           {transaction: tx},
         );
@@ -305,7 +324,7 @@ export class MerchantProfilesController {
       const deletedKycApplications = await this.kycApplicationsRepository.deleteAll(
         {
           usersId: merchantProfile.usersId,
-          identifierId: profileId,
+          identifierId: merchantProfile.id,
           roleValue: 'merchant',
         },
         {transaction: tx},
@@ -355,7 +374,7 @@ export class MerchantProfilesController {
       );
 
       const deletedMerchantProfile = await this.merchantProfilesRepository.deleteAll(
-        {id: profileId},
+        {id: merchantProfile.id},
         {transaction: tx},
       );
 
@@ -408,6 +427,7 @@ export class MerchantProfilesController {
       };
     } catch (error) {
       await tx.rollback();
+      console.log('Error in purgeMerchantProfile:', error);
       throw error;
     }
   }

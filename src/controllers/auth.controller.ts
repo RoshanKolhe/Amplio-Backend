@@ -2477,6 +2477,11 @@ export class AuthController {
       if (companyWithGSTIN)
         throw new HttpErrors.BadRequest('GSTIN already registered');
 
+      await this.companyDataMapperService.investorPanValidation(
+        body.submittedPanDetails.submittedPanNumber,
+        body.submittedPanDetails.submittedInvestorName,
+      );
+
       // ----------------------------
       //  Create User
       // ----------------------------
