@@ -2,6 +2,7 @@ import {authenticate, AuthenticationBindings} from '@loopback/authentication';
 import {inject} from '@loopback/core';
 import {Filter, IsolationLevel, repository} from '@loopback/repository';
 import {
+  del,
   get,
   getModelSchemaRef,
   HttpErrors,
@@ -16,19 +17,30 @@ import {
   AddressDetails,
   AuthorizeSignatories,
   BankDetails,
+  TrusteeKycDocument,
   TrusteeProfiles,
-  UserUploadedDocuments,
 } from '../models';
 import {
+  AddressDetailsRepository,
+  AuthorizeSignatoriesRepository,
+  BankDetailsRepository,
   KycApplicationsRepository,
+  OtpRepository,
+  RegistrationSessionsRepository,
+  RolesRepository,
+  TrusteeKycDocumentRepository,
+  TrusteePanCardsRepository,
   TrusteeProfilesRepository,
+  UserRolesRepository,
+  UsersRepository,
 } from '../repositories';
+import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
 import {KycService} from '../services/kyc.service';
+import {MediaService} from '../services/media.service';
 import {SessionService} from '../services/session.service';
 import {AuthorizeSignatoriesService} from '../services/signatories.service';
-import {UserUploadedDocumentsService} from '../services/user-documents.service';
-import {AddressDetailsService} from '../services/address-details.service';
+import {TrusteeKycDocumentService} from '../services/trustee-kyc-document.service';
 
 export class TrusteeProfilesController {
   constructor(
@@ -36,8 +48,28 @@ export class TrusteeProfilesController {
     private trusteeProfilesRepository: TrusteeProfilesRepository,
     @repository(KycApplicationsRepository)
     private kycApplicationsRepository: KycApplicationsRepository,
-    @inject('service.userUploadedDocuments.service')
-    private userUploadDocumentsService: UserUploadedDocumentsService,
+    @repository(TrusteePanCardsRepository)
+    private trusteePanCardsRepository: TrusteePanCardsRepository,
+    @repository(TrusteeKycDocumentRepository)
+    private trusteeKycDocumentRepository: TrusteeKycDocumentRepository,
+    @repository(AddressDetailsRepository)
+    private addressDetailsRepository: AddressDetailsRepository,
+    @repository(BankDetailsRepository)
+    private bankDetailsRepository: BankDetailsRepository,
+    @repository(AuthorizeSignatoriesRepository)
+    private authorizeSignatoriesRepository: AuthorizeSignatoriesRepository,
+    @repository(UserRolesRepository)
+    private userRolesRepository: UserRolesRepository,
+    @repository(RolesRepository)
+    private rolesRepository: RolesRepository,
+    @repository(RegistrationSessionsRepository)
+    private registrationSessionsRepository: RegistrationSessionsRepository,
+    @repository(OtpRepository)
+    private otpRepository: OtpRepository,
+    @repository(UsersRepository)
+    private usersRepository: UsersRepository,
+    @inject('service.trusteeKycDocumentService.service')
+    private trusteeKycDocumentService: TrusteeKycDocumentService,
     @inject('service.bankDetails.service')
     private bankDetailsService: BankDetailsService,
     @inject('services.AuthorizeSignatoriesService.service')
@@ -46,9 +78,11 @@ export class TrusteeProfilesController {
     private sessionService: SessionService,
     @inject('service.kyc.service')
     private kycService: KycService,
+    @inject('service.media.service')
+    private mediaService: MediaService,
     @inject('service.AddressDetails.service')
     private addressDetailsService: AddressDetailsService,
-  ) { }
+  ) {}
 
   // trustee flow will be like => Basic info, documents, bank details, authorize signatories, bank account details, agreement, verification.
 
@@ -76,6 +110,281 @@ export class TrusteeProfilesController {
     }
 
     return progress;
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @del('/trustee-profiles/{profileId}/purge')
+  async purgeTrusteeProfile(
+    @param.path.string('profileId') profileId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    profileId: string;
+    userDeleted: boolean;
+    deleted: {
+      trusteeProfile: number;
+      trusteePanCards: number;
+      trusteeDocuments: number;
+      addressDetails: number;
+      bankDetails: number;
+      signatories: number;
+      kycApplications: number;
+      trusteeUserRoles: number;
+      registrationSessions: number;
+      otpEntries: number;
+    };
+  }> {
+    const tx = await this.trusteeProfilesRepository.dataSource.beginTransaction(
+      {
+        isolationLevel: IsolationLevel.READ_COMMITTED,
+      },
+    );
+
+    try {
+      const trusteeProfile = await this.trusteeProfilesRepository.findOne(
+        {
+          where: {
+            and: [{id: profileId}, {isDeleted: false}],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!trusteeProfile) {
+        throw new HttpErrors.NotFound('Trustee profile not found');
+      }
+
+      const trusteeUser = await this.usersRepository.findById(
+        trusteeProfile.usersId,
+        undefined,
+        {transaction: tx},
+      );
+
+      const trusteePanCards = await this.trusteePanCardsRepository.find(
+        {
+          where: {
+            trusteeProfilesId: trusteeProfile.id,
+          },
+        },
+        {transaction: tx},
+      );
+
+      const trusteeDocuments = await this.trusteeKycDocumentRepository.find(
+        {
+          where: {
+            usersId: trusteeProfile.usersId,
+          },
+        },
+        {transaction: tx},
+      );
+
+      const addressDetails = await this.addressDetailsRepository.find(
+        {
+          where: {
+            and: [
+              {usersId: trusteeProfile.usersId},
+              {identifierId: trusteeProfile.id},
+              {roleValue: 'trustee'},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      const bankDetails = await this.bankDetailsRepository.find(
+        {
+          where: {
+            and: [{usersId: trusteeProfile.usersId}, {roleValue: 'trustee'}],
+          },
+        },
+        {transaction: tx},
+      );
+
+      const signatories = await this.authorizeSignatoriesRepository.find(
+        {
+          where: {
+            and: [
+              {usersId: trusteeProfile.usersId},
+              {identifierId: trusteeProfile.id},
+              {roleValue: 'trustee'},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      const mediaIds = Array.from(
+        new Set(
+          [
+            trusteeProfile.trusteeLogoId,
+            ...trusteePanCards.map(pan => pan.panCardDocumentId),
+            ...trusteeDocuments.map(doc => doc.documentsFileId),
+            ...addressDetails.map(address => address.addressProofId),
+            ...bankDetails.map(bank => bank.bankAccountProofId),
+            ...signatories.flatMap(signatory => [
+              signatory.panCardFileId,
+              signatory.boardResolutionFileId,
+            ]),
+          ].filter((id): id is string => !!id),
+        ),
+      );
+
+      const deletedSignatories =
+        await this.authorizeSignatoriesRepository.deleteAll(
+          {
+            usersId: trusteeProfile.usersId,
+            identifierId: trusteeProfile.id,
+            roleValue: 'trustee',
+          },
+          {transaction: tx},
+        );
+
+      const deletedBankDetails = await this.bankDetailsRepository.deleteAll(
+        {
+          usersId: trusteeProfile.usersId,
+          roleValue: 'trustee',
+        },
+        {transaction: tx},
+      );
+
+      const deletedAddressDetails =
+        await this.addressDetailsRepository.deleteAll(
+          {
+            identifierId: trusteeProfile.id,
+            roleValue: 'trustee',
+          },
+          {transaction: tx},
+        );
+
+      const deletedTrusteeDocuments =
+        await this.trusteeKycDocumentRepository.deleteAll(
+          {
+            usersId: trusteeProfile.usersId,
+          },
+          {transaction: tx},
+        );
+
+      const deletedTrusteePanCards =
+        await this.trusteePanCardsRepository.deleteAll(
+          {
+            trusteeProfilesId: trusteeProfile.id,
+          },
+          {transaction: tx},
+        );
+
+      const deletedKycApplications =
+        await this.kycApplicationsRepository.deleteAll(
+          {
+            usersId: trusteeProfile.usersId,
+            identifierId: trusteeProfile.id,
+            roleValue: 'trustee',
+          },
+          {transaction: tx},
+        );
+
+      const trusteeRole = await this.rolesRepository.findOne(
+        {
+          where: {value: 'trustee', isDeleted: false},
+        },
+        {transaction: tx},
+      );
+
+      const deletedTrusteeUserRoles = trusteeRole
+        ? await this.userRolesRepository.deleteAll(
+            {
+              usersId: trusteeProfile.usersId,
+              rolesId: trusteeRole.id,
+            },
+            {transaction: tx},
+          )
+        : {count: 0};
+
+      const deletedRegistrationSessions =
+        await this.registrationSessionsRepository.deleteAll(
+          {
+            and: [
+              {roleValue: 'trustee'},
+              {
+                or: [
+                  {email: trusteeUser.email},
+                  {phoneNumber: trusteeUser.phone},
+                ],
+              },
+            ],
+          },
+          {transaction: tx},
+        );
+
+      const deletedOtpEntries = await this.otpRepository.deleteAll(
+        {
+          or: [
+            {identifier: trusteeUser.email},
+            {identifier: trusteeUser.phone},
+          ],
+        },
+        {transaction: tx},
+      );
+
+      const deletedTrusteeProfile =
+        await this.trusteeProfilesRepository.deleteAll(
+          {id: trusteeProfile.id},
+          {transaction: tx},
+        );
+
+      const remainingUserRoles = await this.userRolesRepository.count(
+        {
+          usersId: trusteeProfile.usersId,
+        },
+        {transaction: tx},
+      );
+
+      const remainingKycApplications =
+        await this.kycApplicationsRepository.count(
+          {
+            usersId: trusteeProfile.usersId,
+          },
+          {transaction: tx},
+        );
+
+      let userDeleted = false;
+
+      if (
+        remainingUserRoles.count === 0 &&
+        remainingKycApplications.count === 0
+      ) {
+        await this.usersRepository.deleteById(trusteeProfile.usersId, {
+          transaction: tx,
+        });
+        userDeleted = true;
+      }
+
+      await tx.commit();
+
+      await this.mediaService.updateMediaUsedStatus(mediaIds, false);
+
+      return {
+        success: true,
+        message: 'Trustee profile and related records deleted successfully',
+        profileId,
+        userDeleted,
+        deleted: {
+          trusteeProfile: deletedTrusteeProfile.count,
+          trusteePanCards: deletedTrusteePanCards.count,
+          trusteeDocuments: deletedTrusteeDocuments.count,
+          addressDetails: deletedAddressDetails.count,
+          bankDetails: deletedBankDetails.count,
+          signatories: deletedSignatories.count,
+          kycApplications: deletedKycApplications.count,
+          trusteeUserRoles: deletedTrusteeUserRoles.count,
+          registrationSessions: deletedRegistrationSessions.count,
+          otpEntries: deletedOtpEntries.count,
+        },
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
   }
 
   // for trustees get current progress at start...
@@ -164,7 +473,11 @@ export class TrusteeProfilesController {
     @param.path.string('usersId') usersId: string,
     @param.query.string('route') route?: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ): Promise<{success: boolean; message: string; data: any}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: any;
+  }> {
     const steppersAllowed = [
       'trustee_documents',
       'trustee_bank_details',
@@ -189,22 +502,26 @@ export class TrusteeProfilesController {
       trusteeProfile.kycApplicationsId,
     );
 
-    if (!currentProgress.includes(stepperId)) {
+    if (
+      !['trustee_kyc', 'pan_verified', 'trustee_documents'].includes(
+        stepperId,
+      ) &&
+      !currentProgress.includes(stepperId)
+    ) {
       throw new HttpErrors.BadRequest('Please complete the steps');
     }
 
-    if (stepperId === 'trustee_documents') {
-      if (!route) {
-        throw new HttpErrors.NotFound('Params are missing');
-      }
+    if (stepperId === 'trustee_kyc' || stepperId === 'pan_verified') {
+      return {
+        success: true,
+        message: 'Trustee KYC data',
+        data: trusteeProfile,
+      };
+    }
 
+    if (stepperId === 'trustee_documents') {
       const documentsResponse =
-        await this.userUploadDocumentsService.fetchDocuments(
-          trusteeProfile.usersId,
-          trusteeProfile.id,
-          'trustee',
-          route,
-        );
+        await this.trusteeKycDocumentService.fetchForKycStepper(usersId);
 
       return {
         success: true,
@@ -264,10 +581,13 @@ export class TrusteeProfilesController {
                 type: 'array',
                 items: {
                   type: 'object',
-                  required: ['documentsId', 'documentsFileId'],
+                  required: ['documentsFileId'],
                   properties: {
+                    trusteeKycDocumentRequirementsId: {type: 'string'},
                     documentsId: {type: 'string'},
                     documentsFileId: {type: 'string'},
+                    mode: {type: 'number', enum: [0, 1]},
+                    status: {type: 'number', enum: [0, 1, 2]},
                   },
                 },
               },
@@ -278,12 +598,18 @@ export class TrusteeProfilesController {
     })
     body: {
       usersId: string;
-      documents: {documentsId: string; documentsFileId: string}[];
+      documents: {
+        trusteeKycDocumentRequirementsId?: string;
+        documentsId?: string;
+        documentsFileId: string;
+        mode?: number;
+        status?: number;
+      }[];
     },
   ): Promise<{
     success: boolean;
     message: string;
-    uploadedDocuments: UserUploadedDocuments[];
+    uploadedDocuments: TrusteeKycDocument[];
     currentProgress: string[];
   }> {
     const tx = await this.trusteeProfilesRepository.dataSource.beginTransaction(
@@ -298,21 +624,29 @@ export class TrusteeProfilesController {
 
       if (!trustee) throw new HttpErrors.NotFound('Trustee not found');
 
-      const newDocs = body.documents.map(
-        doc =>
-          new UserUploadedDocuments({
-            ...doc,
-            roleValue: 'trustee',
-            identifierId: trustee.id,
-            usersId: body.usersId,
-            status: 0,
-            mode: 1,
-            isActive: true,
-            isDeleted: false,
-          }),
+      const newDocs = body.documents.map(doc => ({
+        usersId: body.usersId,
+        trusteeKycDocumentRequirementsId:
+          doc.trusteeKycDocumentRequirementsId ?? doc.documentsId ?? '',
+        documentsFileId: doc.documentsFileId,
+        mode: doc.mode ?? 1,
+        status: doc.status ?? 0,
+        isActive: true,
+        isDeleted: false,
+      }));
+
+      const invalidPayload = newDocs.find(
+        doc => !doc.trusteeKycDocumentRequirementsId,
       );
 
-      const result = await this.userUploadDocumentsService.uploadNewDocuments(
+      if (invalidPayload) {
+        throw new HttpErrors.BadRequest(
+          'trusteeKycDocumentRequirementsId is required for each document',
+        );
+      }
+
+      const result = await this.trusteeKycDocumentService.uploadDocumentsForKyc(
+        body.usersId,
         newDocs,
         tx,
       );
@@ -710,7 +1044,6 @@ export class TrusteeProfilesController {
     };
   }
 
-
   private async countTrusteeByStatus(status: number) {
     const kycIds = (
       await this.kycApplicationsRepository.find({
@@ -744,7 +1077,7 @@ export class TrusteeProfilesController {
       totalPending: number;
       totalVerified: number;
       totalUnderReview: number;
-    }
+    };
   }> {
     let rootWhere = {
       ...filter?.where,
@@ -765,6 +1098,7 @@ export class TrusteeProfilesController {
     const trustees = await this.trusteeProfilesRepository.find({
       ...filter,
       where: rootWhere,
+      order: filter?.order ?? ['createdAt DESC'],
       limit: filter?.limit ?? 10,
       skip: filter?.skip ?? 0,
       include: [
@@ -793,7 +1127,6 @@ export class TrusteeProfilesController {
     const totalVerified = await this.countTrusteeByStatus(2);
     const totalRejected = await this.countTrusteeByStatus(3);
 
-
     return {
       success: true,
       message: 'Trustee Profiles',
@@ -804,7 +1137,7 @@ export class TrusteeProfilesController {
         totalRejected: totalRejected,
         totalUnderReview: totalUnderReview,
         totalVerified: totalVerified,
-      }
+      },
     };
   }
 
@@ -1441,7 +1774,7 @@ export class TrusteeProfilesController {
   ): Promise<{
     success: boolean;
     message: string;
-    documents: UserUploadedDocuments[];
+    documents: TrusteeKycDocument[];
   }> {
     const trusteeProfile = await this.trusteeProfilesRepository.findOne({
       where: {
@@ -1453,12 +1786,9 @@ export class TrusteeProfilesController {
       throw new HttpErrors.NotFound('Trustee not found');
     }
 
-    const documentsResponse =
-      await this.userUploadDocumentsService.fetchDocumentsWithUser(
-        trusteeProfile.usersId,
-        trusteeProfile.id,
-        'trustee',
-      );
+    const documentsResponse = await this.trusteeKycDocumentService.fetchByUser(
+      trusteeProfile.usersId,
+    );
 
     return {
       success: true,
@@ -1477,7 +1807,7 @@ export class TrusteeProfilesController {
   ): Promise<{
     success: boolean;
     message: string;
-    document: UserUploadedDocuments;
+    document: TrusteeKycDocument;
   }> {
     const trusteeProfile = await this.trusteeProfilesRepository.findOne({
       where: {
@@ -1490,7 +1820,7 @@ export class TrusteeProfilesController {
     }
 
     const documentsResponse =
-      await this.userUploadDocumentsService.fetchDocumentsWithId(documentId);
+      await this.trusteeKycDocumentService.fetchById(documentId);
 
     return {
       success: true,

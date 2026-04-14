@@ -12,6 +12,7 @@ import {
   InvestmentMandate,
   InvestorKycDocument,
   PlatformAgreement,
+  TrusteeKycDocument,
   UboDetails,
   UserUploadedDocuments,
 } from '../models';
@@ -26,6 +27,7 @@ import {AuthorizeSignatoriesService} from '../services/signatories.service';
 import {UserUploadedDocumentsService} from '../services/user-documents.service';
 import {CompanyKycDocumentService} from '../services/company-kyc-document.service';
 import {InvestorKycDocumentService} from '../services/investor-kyc-document.service';
+import {TrusteeKycDocumentService} from '../services/trustee-kyc-document.service';
 import {UboDetailsService} from '../services/ubo-details.service';
 import {ComplianceAndDeclarationsService} from '../services/compliance-and-declarations.service';
 import {InvestmentMandateService} from '../services/investment-mandate.service';
@@ -113,6 +115,8 @@ export class AdminProfilesController {
     private companyKycDocumentService: CompanyKycDocumentService,
     @inject('service.investorKycDocumentService.service')
     private investorKycDocumentService: InvestorKycDocumentService,
+    @inject('service.trusteeKycDocumentService.service')
+    private trusteeKycDocumentService: TrusteeKycDocumentService,
     @inject('service.userUploadedDocuments.service')
     private userUploadDocumentsService: UserUploadedDocumentsService,
     @inject('service.bankDetails.service')
@@ -270,7 +274,7 @@ export class AdminProfilesController {
   ): Promise<{
     success: boolean;
     message: string;
-    documents: UserUploadedDocuments[];
+    documents: TrusteeKycDocument[];
   }> {
     const trusteeProfile = await this.trusteeProfilesRepository.findOne({
       where: {
@@ -282,12 +286,9 @@ export class AdminProfilesController {
       throw new HttpErrors.NotFound('Trustee not found');
     }
 
-    const documentsResponse =
-      await this.userUploadDocumentsService.fetchDocumentsWithUser(
-        trusteeProfile.usersId,
-        trusteeProfile.id,
-        'trustee',
-      );
+    const documentsResponse = await this.trusteeKycDocumentService.fetchByUser(
+      trusteeProfile.usersId,
+    );
 
     return {
       success: true,
@@ -306,7 +307,7 @@ export class AdminProfilesController {
   ): Promise<{
     success: boolean;
     message: string;
-    document: UserUploadedDocuments;
+    document: TrusteeKycDocument;
   }> {
     const trusteeProfile = await this.trusteeProfilesRepository.findOne({
       where: {
@@ -319,7 +320,7 @@ export class AdminProfilesController {
     }
 
     const documentsResponse =
-      await this.userUploadDocumentsService.fetchDocumentsWithId(documentId);
+      await this.trusteeKycDocumentService.fetchById(documentId);
 
     return {
       success: true,
@@ -359,6 +360,69 @@ export class AdminProfilesController {
     return response;
   }
 
+  /*
+   * Trustee address verification is intentionally disabled for now because
+   * trustee final approval does not currently require address approval.
+   * Keep this endpoint for future use if trustee address verification becomes
+   * part of the super-admin workflow again.
+   *
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/trustee-profiles/address-verification')
+  async trusteeAddressVerification(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['trusteeId', 'status'],
+            properties: {
+              trusteeId: {type: 'string'},
+              status: {type: 'number'}, // 1 approve, 2 reject
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      trusteeId: string;
+      status: number;
+      reason?: string;
+    },
+  ): Promise<{success: boolean; message: string}> {
+    const trusteeProfile = await this.trusteeProfilesRepository.findOne({
+      where: {
+        id: body.trusteeId,
+        isDeleted: false,
+      },
+    });
+
+    if (!trusteeProfile) {
+      throw new HttpErrors.NotFound('Trustee not found');
+    }
+
+    if (body.status === 1) {
+      return this.addressDetailsService.approveUserAddressDetails(
+        trusteeProfile.usersId,
+        'trustee',
+        trusteeProfile.id,
+      );
+    }
+
+    if (body.status === 2) {
+      return this.addressDetailsService.rejectUserAddressDetails(
+        trusteeProfile.usersId,
+        'trustee',
+        trusteeProfile.id,
+        body.reason ?? '',
+      );
+    }
+
+    throw new HttpErrors.BadRequest('Invalid status value');
+  }
+  */
+
   // super admin trustee documents approval API
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
@@ -385,7 +449,7 @@ export class AdminProfilesController {
       reason?: string;
     },
   ): Promise<{success: boolean; message: string}> {
-    const result = await this.userUploadDocumentsService.updateDocumentStatus(
+    const result = await this.trusteeKycDocumentService.updateStatus(
       body.documentId,
       body.status,
       body.reason ?? '',

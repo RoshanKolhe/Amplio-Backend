@@ -17,6 +17,8 @@ export * from './role-permissions.model';
 export * from './roles.model';
 export * from './screens.model';
 export * from './trustee-entity-types.model';
+export * from './trustee-kyc-document-requirements.model';
+export * from './trustee-kyc-document.model';
 export * from './trustee-pan-cards.model';
 export * from './trustee-profiles.model';
 export * from './user-roles.model';

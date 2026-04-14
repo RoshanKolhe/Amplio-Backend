@@ -25,6 +25,8 @@ export async function migrate(args: string[]) {
       'TrusteeProfiles',
       'TrusteeEntityTypes',
       'TrusteePanCards',
+      'TrusteeKycDocumentRequirements',
+      'TrusteeKycDocument',
       'Documents',
       'Screens',
       'DocumentScreens',

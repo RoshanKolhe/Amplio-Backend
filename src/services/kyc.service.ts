@@ -26,6 +26,7 @@ import {PspService} from './psp.service';
 import {ComplianceAndDeclarationsService} from './compliance-and-declarations.service';
 import {InvestmentMandateService} from './investment-mandate.service';
 import {PlatformAgreementService} from './platform-agreement.service';
+import {TrusteeKycDocumentService} from './trustee-kyc-document.service';
 
 export class KycService {
   constructor(
@@ -63,6 +64,8 @@ export class KycService {
     private merchantProfileRepository: MerchantProfilesRepository,
     @inject('service.merchantKycDocumentService.service')
     private merchantKycDocumentService: MerchantKycDocumentService,
+    @inject('service.trusteeKycDocumentService.service')
+    private trusteeKycDocumentService: TrusteeKycDocumentService,
     @inject('service.complianceAndDeclarationsService.service')
     private complianceAndDeclarationsService: ComplianceAndDeclarationsService,
     @inject('service.investmentMandateService.service')
@@ -578,6 +581,123 @@ export class KycService {
     }
   }
 
+  private async ensureTrusteeSectionsApproved(
+    trusteeId: string,
+    tx: any,
+  ): Promise<void> {
+    const trusteeProfile = await this.trusteeProfilesRepository.findOne(
+      {
+        where: {
+          and: [{id: trusteeId}, {isDeleted: false}],
+        },
+      },
+      {transaction: tx},
+    );
+
+    if (!trusteeProfile) {
+      throw new HttpErrors.NotFound('Trustee profile not found');
+    }
+
+    const notApprovedSections: string[] = [];
+
+    try {
+      const documentsResponse = await this.trusteeKycDocumentService.fetchByUser(
+        trusteeProfile.usersId,
+      );
+      const documents = documentsResponse.documents ?? [];
+
+      if (!documents.length || documents.some(document => document.status !== 1)) {
+        notApprovedSections.push('documents');
+      }
+    } catch {
+      notApprovedSections.push('documents');
+    }
+
+    /*
+     * Trustee address approval is intentionally not part of the final KYC
+     * approval checklist right now. Keep this validation block here so it can
+     * be restored quickly if trustee address verification becomes mandatory.
+     *
+    try {
+      const addressDetails = await this.addressDetailsRepository.find(
+        {
+          where: {
+            and: [
+              {roleValue: 'trustee'},
+              {identifierId: trusteeId},
+              {isActive: true},
+              {isDeleted: false},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (
+        !addressDetails.length ||
+        addressDetails.some(address => address.status !== 1)
+      ) {
+        notApprovedSections.push('address');
+      }
+    } catch {
+      notApprovedSections.push('address');
+    }
+    */
+
+    try {
+      const bankDetails = await this.bankDetailsRepository.find(
+        {
+          where: {
+            and: [
+              {usersId: trusteeProfile.usersId},
+              {roleValue: 'trustee'},
+              {isActive: true},
+              {isDeleted: false},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (!bankDetails.length || bankDetails.some(bank => bank.status !== 1)) {
+        notApprovedSections.push('bank details');
+      }
+    } catch {
+      notApprovedSections.push('bank details');
+    }
+
+    try {
+      const signatories = await this.authorizeSignatoriesRepository.find(
+        {
+          where: {
+            and: [
+              {identifierId: trusteeId},
+              {roleValue: 'trustee'},
+              {isActive: true},
+              {isDeleted: false},
+            ],
+          },
+        },
+        {transaction: tx},
+      );
+
+      if (
+        !signatories.length ||
+        signatories.some(signatory => signatory.status !== 1)
+      ) {
+        notApprovedSections.push('signatories');
+      }
+    } catch {
+      notApprovedSections.push('signatories');
+    }
+
+    if (notApprovedSections.length) {
+      throw new HttpErrors.BadRequest(
+        `Cannot approve trustee profile. These KYC sections are not approved: ${notApprovedSections.join(', ')}`,
+      );
+    }
+  }
+
   async handleCompanyKycApplication(
     applicationId: string,
     companyId: string,
@@ -669,6 +789,10 @@ export class KycService {
 
       if (!trusteePanCard || !trusteePanCard.id) {
         throw new HttpErrors.NotFound('Unable to fetch pan card details');
+      }
+
+      if (status === 2) {
+        await this.ensureTrusteeSectionsApproved(trusteeId, tx);
       }
 
       // update kyc application

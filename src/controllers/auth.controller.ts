@@ -1503,6 +1503,11 @@ export class AuthController {
           throw new HttpErrors.BadRequest('GSTIN already registered');
       }
 
+      await this.companyDataMapperService.trusteePanValidation(
+        body.submittedPanDetails.submittedPanNumber,
+        body.submittedPanDetails.submittedTrusteeName,
+      );
+
       // ----------------------------
       //  Create User
       // ----------------------------

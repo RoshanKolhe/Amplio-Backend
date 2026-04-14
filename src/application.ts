@@ -55,6 +55,7 @@ import {InvestmentMandateService} from './services/investment-mandate.service';
 import {MerchantKycDocumentService} from './services/merchant-kyc-document.service';
 import {MerchantKycDocumentRequirementsService} from './services/merchant-kyc-document-requirements.service';
 import {PlatformAgreementService} from './services/platform-agreement.service';
+import {TrusteeKycDocumentRequirementsService} from './services/trustee-kyc-document-requirements.service';
 import {UboDetailsService} from './services/ubo-details.service';
 import {LiquidityEngineService} from './services/liquidity-engine.service';
 import {PspService} from './services/psp.service';
@@ -64,6 +65,7 @@ import {PspRepository} from './repositories/psp.repository';
 import {TransactionRepository} from './repositories/transaction.repository';
 import {UserConsentService} from './services/user-consent.service';
 import {CompanyDataMapperService} from './services/company-brisk-data-mapper.service';
+import {TrusteeKycDocumentService} from './services/trustee-kyc-document.service';
 
 export {ApplicationConfig};
 
@@ -192,6 +194,9 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.merchantKycDocumentService.service').toClass(
       MerchantKycDocumentService,
     );
+    this.bind('service.trusteeKycDocumentRequirementsService.service').toClass(
+      TrusteeKycDocumentRequirementsService,
+    );
     this.bind('service.uboDetailsService.service').toClass(
       UboDetailsService,
     );
@@ -207,6 +212,9 @@ export class AmplioBackendApplication extends BootMixin(
     )
     this.bind('service.companyDataMapper.service').toClass(
       CompanyDataMapperService,
+    );
+    this.bind('service.trusteeKycDocumentService.service').toClass(
+      TrusteeKycDocumentService,
     );
   }
 

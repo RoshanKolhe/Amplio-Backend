@@ -29,6 +29,7 @@ export * from './ping.controller';
 export * from './roles.controller';
 export * from './screens.controller';
 export * from './trustee-entity-types.controller';
+export * from './trustee-kyc-document-requirements.controller';
 export * from './trustee-profiles.controller';
 export * from './psp-master.controller';
 export * from './psp-master-fields.controller';

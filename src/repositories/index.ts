@@ -16,6 +16,8 @@ export * from './company-sector-type.repository';
 export * from './trustee-profiles.repository';
 export * from './trustee-pan-cards.repository';
 export * from './trustee-entity-types.repository';
+export * from './trustee-kyc-document-requirements.repository';
+export * from './trustee-kyc-document.repository';
 export * from './documents.repository';
 export * from './screens.repository';
 export * from './document-screens.repository';
