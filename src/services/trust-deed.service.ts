@@ -74,6 +74,14 @@ export class TrustDeedService {
       where: {
         and: [{spvApplicationId}, {isActive: true}, {isDeleted: false}],
       },
+      include: [
+        {
+          relation: 'stampDutyAndRegistration',
+          scope: {
+            fields: ['id', 'fileUrl', 'fileName', 'fileOriginalName'],
+          },
+        },
+      ],
     });
 
     if (existing) {
@@ -88,7 +96,16 @@ export class TrustDeedService {
 
       const updatedTrustDeed = await this.trustDeedRepository.findById(
         existing.id,
-        undefined,
+        {
+          include: [
+            {
+              relation: 'stampDutyAndRegistration',
+              scope: {
+                fields: ['id', 'fileUrl', 'fileName', 'fileOriginalName'],
+              },
+            },
+          ],
+        },
         tx ? {transaction: tx} : undefined,
       );
 
@@ -113,6 +130,14 @@ export class TrustDeedService {
       where: {
         and: [{spvApplicationId}, {isActive: true}, {isDeleted: false}],
       },
+      include: [
+        {
+          relation: 'stampDutyAndRegistration',
+          scope: {
+            fields: ['id', 'fileUrl', 'fileName', 'fileOriginalName'],
+          },
+        },
+      ],
     });
 
     if (!trustDeed) {
