@@ -22,6 +22,8 @@ export async function migrate(args: string[]) {
       'KycApplications',
       'CompanySectorType',
       'CompanyEntityType',
+      'CreditRatingAgencies',
+      'CreditRatings',
       'TrusteeProfiles',
       'TrusteeEntityTypes',
       'TrusteePanCards',
@@ -71,6 +73,17 @@ export async function migrate(args: string[]) {
       'ComplianceAndDeclarations',
       'InvestmentMandate',
       'PlatformAgreement'
+      , 'SpvApplicationStatusMaster'
+      , 'SpvApplication'
+      , 'SpvApplicationCreditRating'
+      , 'Spv'
+      , 'PoolFinancials'
+      , 'PtcParameters'
+      , 'TrustDeed'
+      , 'EscrowSetup'
+      , 'IsinApplication'
+      , 'SpvKycDocument'
+      , 'SpvKycDocumentType'
     ]
   });
 

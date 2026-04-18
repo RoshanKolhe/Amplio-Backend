@@ -60,6 +60,19 @@ import {UboDetailsService} from './services/ubo-details.service';
 import {LiquidityEngineService} from './services/liquidity-engine.service';
 import {PspService} from './services/psp.service';
 import {PerfiosService} from './services/perfios.service';
+import {SpvApplicationService} from './services/spv-application.service';
+import {EscrowSetupService} from './services/escrow-setup.service';
+import {PoolFinancialsService} from './services/pool-financials.service';
+import {PtcParametersService} from './services/ptc-parameters.service';
+import {SpvKycDocumentService} from './services/spv-kyc-document.service';
+import {SpvApplicationStatusService} from './services/spv-application-status.service';
+import {SpvApplicationTransactionsService} from './services/spv-application-transactions.service';
+import {SpvApplicationCreditRatingService} from './services/spv-application-credit-rating.service';
+import {SpvKycDocumentTypeService} from './services/spv-kyc-document-type.service';
+import {SpvService} from './services/spv.service';
+import {SpvStatusDataService} from './services/spv-status-data.service';
+import {TrustDeedService} from './services/trust-deed.service';
+import {IsinApplicationService} from './services/isin-application.service';
 import {TransactionCron} from './crons/transaction.cron';
 import {PspRepository} from './repositories/psp.repository';
 import {TransactionRepository} from './repositories/transaction.repository';
@@ -207,6 +220,45 @@ export class AmplioBackendApplication extends BootMixin(
       PspService,
     );
     this.bind('service.perfios.service').toClass(PerfiosService);
+    this.bind('service.spvApplicationStatus.service').toClass(
+      SpvApplicationStatusService,
+    );
+    this.bind('service.escrowSetup.service').toClass(
+      EscrowSetupService,
+    );
+    this.bind('service.poolFinancials.service').toClass(
+      PoolFinancialsService,
+    );
+    this.bind('service.spvApplicationCreditRating.service').toClass(
+      SpvApplicationCreditRatingService,
+    );
+    this.bind('service.ptcParameters.service').toClass(
+      PtcParametersService,
+    );
+    this.bind('service.trustDeed.service').toClass(
+      TrustDeedService,
+    );
+    this.bind('service.isinApplication.service').toClass(
+      IsinApplicationService,
+    );
+    this.bind('service.spvStatusData.service').toClass(
+      SpvStatusDataService,
+    );
+    this.bind('service.spvApplication.service').toClass(
+      SpvApplicationService,
+    );
+    this.bind('service.spvKycDocument.service').toClass(
+      SpvKycDocumentService,
+    );
+    this.bind('service.spvKycDocumentType.service').toClass(
+      SpvKycDocumentTypeService,
+    );
+    this.bind('service.spvApplicationTransactions.service').toClass(
+      SpvApplicationTransactionsService,
+    );
+    this.bind('service.spv.service').toClass(
+      SpvService,
+    );
     this.bind('service.userConsentService.service').toClass(
       UserConsentService
     )
