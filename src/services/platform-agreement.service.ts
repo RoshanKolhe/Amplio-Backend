@@ -1,10 +1,8 @@
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {PlatformAgreement} from '../models';
-import {
-  BusinessKycDocumentTypeRepository,
-  PlatformAgreementRepository,
-} from '../repositories';
+import {BusinessKycDocumentTypeRepository} from '../repositories/business-kyc-document-type.repository';
+import {PlatformAgreementRepository} from '../repositories/platform-agreement.repository';
 
 const INVESTOR_PLATFORM_AGREEMENT_DOCUMENT_VALUE = 'investor_agreement';
 

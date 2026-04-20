@@ -6,6 +6,7 @@ const statusList = ["captured", "authorized", "failed"];
 const MILLISECONDS_IN_A_DAY = 1000 * 60 * 60 * 24;
 const MAX_SETTLEMENT_DAYS = 8;
 const PAISE_IN_RUPEE = 100;
+const PSP_SETTLEMENT_STATUS_T_PLUS_PREFIX = 'T_PLUS_';
 
 export function normalizePaiseToRupees(value?: number | string | null) {
   if (value === undefined || value === null || value === '') {
@@ -147,4 +148,62 @@ export function resolveSettlementDetails(
     settlementDate: resolvedSettlementDate,
     settlementMethod: generateSettlementMethod(createdAt, resolvedSettlementDate),
   };
+}
+
+export function resolvePspSettlementStatus(
+  paymentStatus?: string | null,
+  createdAt?: Date | null,
+  settlementDate?: Date | string | null,
+  referenceDate: Date = new Date(),
+) {
+  const normalizedPaymentStatus = String(paymentStatus ?? '')
+    .trim()
+    .toLowerCase();
+
+  if (['failed', 'refunded'].includes(normalizedPaymentStatus)) {
+    return 'FAILED';
+  }
+
+  if (normalizedPaymentStatus && normalizedPaymentStatus !== 'captured') {
+    return 'FAILED';
+  }
+
+  if (!createdAt) {
+    return 'PENDING';
+  }
+
+  const resolvedSettlementDate = settlementDate
+    ? new Date(settlementDate)
+    : inferSettlementDate(createdAt, referenceDate);
+
+  if (Number.isNaN(resolvedSettlementDate.getTime())) {
+    return 'PENDING';
+  }
+
+  if (referenceDate.getTime() >= resolvedSettlementDate.getTime()) {
+    return 'SETTLED';
+  }
+
+  const settlementGap = getSettlementDayGap(
+    createdAt,
+    resolvedSettlementDate,
+    365,
+  );
+
+  return `${PSP_SETTLEMENT_STATUS_T_PLUS_PREFIX}${Math.max(settlementGap, 1)}`;
+}
+
+export function isSettlementEligibleForDiscounting(
+  pspSettlementStatus?: string | null,
+) {
+  if (!pspSettlementStatus) {
+    return false;
+  }
+
+  const normalizedStatus = String(pspSettlementStatus).trim().toUpperCase();
+
+  return (
+    normalizedStatus === 'PENDING' ||
+    normalizedStatus.startsWith(PSP_SETTLEMENT_STATUS_T_PLUS_PREFIX)
+  );
 }

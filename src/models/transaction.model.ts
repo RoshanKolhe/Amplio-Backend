@@ -51,8 +51,35 @@ export class Transaction extends Entity {
 
   @property({
     type: 'string',
+    jsonSchema: {
+      enum: ['notfunded', 'fundeed'],
+    },
+    default: 'notfunded',
   })
-  status?: string; // authorized //captured //failed
+  status?: string; // platform status kept for backward compatibility
+
+  @property({
+    type: 'string',
+    jsonSchema: {
+      enum: [
+        'created',
+        'authorized',
+        'captured',
+        'failed',
+        'refunded',
+        'paid',
+      ],
+    },
+  })
+  pspStatus?: string;
+
+  @property({
+    type: 'string',
+    jsonSchema: {
+      pattern: '^(PENDING|SETTLED|FAILED|T_PLUS_[1-9][0-9]*)$',
+    },
+  })
+  pspSettlementStatus?: string;
 
   @property({
     type: 'string',
@@ -103,6 +130,25 @@ export class Transaction extends Entity {
     }
   })
   requestReceivableAmount: number;
+
+  @property({
+    type: 'number',
+    required: true,
+    default: 0,
+    postgresql: {
+      dataType: 'float'
+    }
+  })
+  releasedAmount: number;
+
+  @property({
+    type: 'string',
+    jsonSchema: {
+      pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+      errorMessage: 'eligibleBusinessDate must be YYYY-MM-DD',
+    },
+  })
+  eligibleBusinessDate?: string;
 
   @property({
     type: 'number',
@@ -195,6 +241,11 @@ export class Transaction extends Entity {
     type: 'date',
   })
   settlementDate?: Date;
+
+  @property({
+    type: 'date',
+  })
+  lastReleasedAt?: Date;
 
   @property({
     type: 'string',

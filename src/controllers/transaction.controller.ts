@@ -14,20 +14,82 @@ import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
 import {Transaction} from '../models';
 import {PspRepository, TransactionRepository} from '../repositories';
+import {isSettlementEligibleForDiscounting} from '../utils/transactions';
 
-function getDisplayStatus(transaction: Transaction) {
-  if (!transaction.settlementDate || transaction.status !== 'captured') {
+const MERCHANT_FUNDED_STATUS = 'fundeed';
+const MERCHANT_NOT_FUNDED_STATUS = 'notfunded';
+
+function getPlatformStatus(transaction: Transaction) {
+  if (
+    transaction.status === MERCHANT_FUNDED_STATUS ||
+    Number(transaction.releasedAmount ?? 0) > 0 ||
+    transaction.lastReleasedAt
+  ) {
+    return MERCHANT_FUNDED_STATUS;
+  }
+
+  return MERCHANT_NOT_FUNDED_STATUS;
+}
+
+function getPspStatus(transaction: Transaction) {
+  if (transaction.pspStatus) {
+    return transaction.pspStatus;
+  }
+
+  if (
+    transaction.status !== MERCHANT_FUNDED_STATUS &&
+    transaction.status !== MERCHANT_NOT_FUNDED_STATUS
+  ) {
     return transaction.status;
+  }
+
+  return undefined;
+}
+
+function getLegacyDisplayStatus(transaction: Transaction) {
+  const paymentStatus = getPspStatus(transaction);
+
+  if (!transaction.settlementDate || paymentStatus !== 'captured') {
+    return paymentStatus ?? transaction.status;
   }
 
   const settlementDate = new Date(transaction.settlementDate);
   const now = new Date();
 
   if (Number.isNaN(settlementDate.getTime())) {
-    return transaction.status;
+    return paymentStatus ?? transaction.status;
   }
 
-  return now.getTime() >= settlementDate.getTime() ? 'paid' : transaction.status;
+  return now.getTime() >= settlementDate.getTime() ? 'paid' : paymentStatus;
+}
+
+function remapLegacyStatusWhere(where: unknown): unknown {
+  if (Array.isArray(where)) {
+    return where.map(item => remapLegacyStatusWhere(item));
+  }
+
+  if (!where || typeof where !== 'object') {
+    return where;
+  }
+
+  const remappedWhere: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(where as Record<string, unknown>)) {
+    if (key === 'platformStatus') {
+      remappedWhere.status = remapLegacyStatusWhere(value);
+      continue;
+    }
+
+    if (key === 'status') {
+      // Keep old clients working: `where.status` still targets PSP payment status.
+      remappedWhere.pspStatus = remapLegacyStatusWhere(value);
+      continue;
+    }
+
+    remappedWhere[key] = remapLegacyStatusWhere(value);
+  }
+
+  return remappedWhere;
 }
 
 // function generateTransactions(count = 60) {
@@ -71,6 +133,21 @@ export class TransactionController {
     public pspRepository: PspRepository,
   ) { }
 
+  private async getCurrentMerchantPspIds(usersId: string) {
+    const merchantPsps = await this.pspRepository.find({
+      where: {
+        and: [
+          {usersId},
+          {isActive: true},
+          {isDeleted: false},
+        ],
+      },
+      fields: {id: true},
+    });
+
+    return merchantPsps.map(psp => psp.id);
+  }
+
   // @post('/transactions/seed')
   // @response(200, {
   //   description: 'Seed transactions',
@@ -112,10 +189,25 @@ export class TransactionController {
     description: 'Get all transactions',
   })
   async find(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @param.filter(Transaction) filter?: Filter<Transaction>,
-  ): Promise<Transaction[]> {
+  ): Promise<Array<Record<string, unknown>>> {
+    const pspIds = await this.getCurrentMerchantPspIds(currentUser.id);
+    const remappedWhere = remapLegacyStatusWhere(filter?.where);
+
+    if (!pspIds.length) {
+      return [];
+    }
+
     const transactions = await this.transactionRepository.find({
       ...filter,
+      where: {
+        and: [
+          {pspId: {inq: pspIds}},
+          {isDeleted: false},
+          ...(remappedWhere ? [remappedWhere] : []),
+        ],
+      },
       order: filter?.order ?? ['createdAt DESC'],
       include: [
         ...(filter?.include ?? []), // preserve if any
@@ -139,8 +231,17 @@ export class TransactionController {
     });
 
     return transactions.map(transaction => {
-      transaction.status = getDisplayStatus(transaction);
-      return transaction;
+      const baseTransaction =
+        typeof transaction.toJSON === 'function'
+          ? transaction.toJSON()
+          : transaction;
+
+      return {
+        ...baseTransaction,
+        platformStatus: getPlatformStatus(transaction),
+        pspStatus: getPspStatus(transaction),
+        status: getLegacyDisplayStatus(transaction),
+      };
     });
   }
 
@@ -176,33 +277,33 @@ async requestReceivableAmount(
     throw new HttpErrors.BadRequest('Invalid request amount');
   }
 
-  const merchantPsps = await this.pspRepository.find({
-    where: {
-      and: [{usersId: currentUser.id}, {isDeleted: false}],
-    },
-    fields: {id: true},
-  });
+  const pspIds = await this.getCurrentMerchantPspIds(currentUser.id);
 
-  if (!merchantPsps.length) {
+  if (!pspIds.length) {
     throw new HttpErrors.NotFound('No PSP found');
   }
 
-  const pspIds = merchantPsps.map(p => p.id);
-
   const transactions = await this.transactionRepository.find({
     where: {
-      pspId: {inq: pspIds},
-      status: 'captured',
-      isDeleted: false,
+      and: [
+        {pspId: {inq: pspIds}},
+        {isDeleted: false},
+      ],
     },
     order: ['createdAt ASC'],
   });
 
-  if (!transactions.length) {
+  const eligibleTransactions = transactions.filter(
+    transaction =>
+      isSettlementEligibleForDiscounting(transaction.pspSettlementStatus) &&
+      transaction.status !== MERCHANT_FUNDED_STATUS,
+  );
+
+  if (!eligibleTransactions.length) {
     throw new HttpErrors.NotFound('No transactions found');
   }
 
-  const todayTransactions = transactions.filter(t => {
+  const todayTransactions = eligibleTransactions.filter(t => {
     if (!t.createdAt) return false;
 
     const d = new Date(t.createdAt);

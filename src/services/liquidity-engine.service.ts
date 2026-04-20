@@ -22,8 +22,21 @@ export type LiquidityEngineResult = {
   netAmount: number;
 };
 
+type HaircutInput = {
+  totalRecieved: number;
+  settlementMethod?: string | null;
+};
 
 export class LiquidityEngineService {
+  calculateHaircut(
+    transaction: HaircutInput,
+    // Merchant-specific pricing will plug in here later.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    merchant?: unknown,
+  ) {
+    return 10;
+  }
+
   calculateLiquidity(
     totalRecieved: number,
     settlementMethod?: string | null,
@@ -38,7 +51,10 @@ export class LiquidityEngineService {
     const riskScore = 0;
     const delayRisk = 0;
     const chargebackRisk = 0;
-    const haircut = 10;
+    const haircut = this.calculateHaircut({
+      totalRecieved,
+      settlementMethod,
+    });
     const haircutAmount = (totalRecieved * haircut) / 100;
     const netAmount = Number((totalRecieved - haircutAmount).toFixed(2));
 

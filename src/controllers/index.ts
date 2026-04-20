@@ -26,6 +26,7 @@ export * from './merchant-dealership-type.controller';
 export * from './merchant-kyc-document-requirements.controller';
 export * from './merchant-kyc-document.controller';
 export * from './merchant-kyc-super-admin.controller';
+export * from './merchant-payout-config.controller';
 export * from './merchant-profiles.controller';
 export * from './ownership-types.controller';
 export * from './permissions.controller';

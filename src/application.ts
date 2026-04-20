@@ -73,12 +73,15 @@ import {SpvService} from './services/spv.service';
 import {SpvStatusDataService} from './services/spv-status-data.service';
 import {TrustDeedService} from './services/trust-deed.service';
 import {IsinApplicationService} from './services/isin-application.service';
+import {MerchantPayoutCron} from './crons/merchant-payout.cron';
 import {TransactionCron} from './crons/transaction.cron';
 import {PspRepository} from './repositories/psp.repository';
 import {TransactionRepository} from './repositories/transaction.repository';
 import {UserConsentService} from './services/user-consent.service';
 import {CompanyDataMapperService} from './services/company-brisk-data-mapper.service';
 import {TrusteeKycDocumentService} from './services/trustee-kyc-document.service';
+import {MerchantPayoutService} from './services/merchant-payout.service';
+import {MerchantPayoutExecutorService} from './services/merchant-payout-executor.service';
 
 export {ApplicationConfig};
 
@@ -86,6 +89,7 @@ export class AmplioBackendApplication extends BootMixin(
   ServiceMixin(RepositoryMixin(RestApplication)),
 ) {
   private transactionCron?: TransactionCron;
+  private merchantPayoutCron?: MerchantPayoutCron;
 
   constructor(options: ApplicationConfig = {}) {
     super(options);
@@ -268,6 +272,12 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.trusteeKycDocumentService.service').toClass(
       TrusteeKycDocumentService,
     );
+    this.bind('service.merchantPayoutService.service').toClass(
+      MerchantPayoutService,
+    );
+    this.bind('service.merchantPayoutExecutorService.service').toClass(
+      MerchantPayoutExecutorService,
+    );
   }
 
   protected configureFileUpload(destination?: string) {
@@ -289,27 +299,47 @@ export class AmplioBackendApplication extends BootMixin(
   }
 
   async startCrons() {
-    if (this.transactionCron) {
+    if (this.transactionCron && this.merchantPayoutCron) {
       return;
     }
 
-    const transactionRepository = await this.get<TransactionRepository>(
-      'repositories.TransactionRepository',
-    );
-    const pspRepository = await this.get<PspRepository>(
-      'repositories.PspRepository',
-    );
-    const liquidityEngineService = await this.get<LiquidityEngineService>(
-      'service.liquidityEngineService.service',
-    );
-    const pspService = await this.get<PspService>('service.pspService.service');
+    if (!this.transactionCron) {
+      const transactionRepository = await this.get<TransactionRepository>(
+        'repositories.TransactionRepository',
+      );
+      const pspRepository = await this.get<PspRepository>(
+        'repositories.PspRepository',
+      );
+      const liquidityEngineService = await this.get<LiquidityEngineService>(
+        'service.liquidityEngineService.service',
+      );
+      const pspService = await this.get<PspService>('service.pspService.service');
 
-    this.transactionCron = new TransactionCron(
-      transactionRepository,
-      pspRepository,
-      pspService,
-      liquidityEngineService,
-    );
-    this.transactionCron.start();
+      this.transactionCron = new TransactionCron(
+        transactionRepository,
+        pspRepository,
+        pspService,
+        liquidityEngineService,
+      );
+      this.transactionCron.start();
+      console.log('[Cron] Transaction cron started');
+    }
+
+    if (!this.merchantPayoutCron) {
+      const merchantPayoutService = await this.get<MerchantPayoutService>(
+        'service.merchantPayoutService.service',
+      );
+      const merchantPayoutExecutorService =
+        await this.get<MerchantPayoutExecutorService>(
+          'service.merchantPayoutExecutorService.service',
+        );
+
+      this.merchantPayoutCron = new MerchantPayoutCron(
+        merchantPayoutService,
+        merchantPayoutExecutorService,
+      );
+      this.merchantPayoutCron.start();
+      console.log('[Cron] Merchant payout cron started');
+    }
   }
 }
