@@ -87,9 +87,19 @@ export class IsinApplicationService {
       issueSize?: string;
       creditRating?: string;
     },
-  ): IsinApplication | null {
+  ): Partial<IsinApplication> | null {
     if (!isinApplication) {
-      return null;
+      if (
+        derivedValues.issueSize === undefined &&
+        derivedValues.creditRating === undefined
+      ) {
+        return null;
+      }
+
+      return {
+        issueSize: derivedValues.issueSize,
+        creditRating: derivedValues.creditRating,
+      };
     }
 
     return Object.assign(isinApplication, {

@@ -9,6 +9,42 @@ export class SpvService {
     private spvRepository: SpvRepository,
   ) {}
 
+  private normalizeSpvName(spvName: string): string {
+    return spvName.trim().toLowerCase();
+  }
+
+  private async ensureUniqueSpvName(
+    spvName: string,
+    currentSpvId?: string,
+    tx?: unknown,
+  ): Promise<string> {
+    const trimmedSpvName = spvName.trim();
+
+    const existingSpvs = await this.spvRepository.find(
+      {
+        where: {
+          and: [{isActive: true}, {isDeleted: false}],
+        },
+      },
+      tx ? {transaction: tx} : undefined,
+    );
+
+    const duplicateSpv = existingSpvs.find(
+      existing =>
+        existing.id !== currentSpvId &&
+        this.normalizeSpvName(existing.spvName) ===
+          this.normalizeSpvName(trimmedSpvName),
+    );
+
+    if (duplicateSpv) {
+      throw new HttpErrors.BadRequest(
+        'SPV name already exists. Please use a different SPV name.',
+      );
+    }
+
+    return trimmedSpvName;
+  }
+
   async createOrUpdateSpv(
     applicationId: string,
     spvData: Omit<Spv, 'id' | 'spvApplicationId'>,
@@ -28,8 +64,22 @@ export class SpvService {
       },
     });
 
+    const uniqueSpvName = await this.ensureUniqueSpvName(
+      spvData.spvName,
+      existingSpv?.id,
+      tx,
+    );
+    const payload = {
+      ...spvData,
+      spvName: uniqueSpvName,
+    };
+
     if (existingSpv) {
-      await this.spvRepository.updateById(existingSpv.id, spvData, tx ? {transaction: tx} : undefined);
+      await this.spvRepository.updateById(
+        existingSpv.id,
+        payload,
+        tx ? {transaction: tx} : undefined,
+      );
 
       const updatedSpv = await this.spvRepository.findById(
         existingSpv.id,
@@ -46,7 +96,7 @@ export class SpvService {
 
     const spv = await this.spvRepository.create(
       {
-        ...spvData,
+        ...payload,
         spvApplicationId: applicationId,
       },
       tx ? {transaction: tx} : undefined,

@@ -106,6 +106,31 @@ export class SpvApplicationTransactionsService {
     return currentStatus;
   }
 
+  private async syncDocumentsStepIfCompleted(
+    applicationId: string,
+    currentStatusId: string,
+    tx: unknown,
+  ) {
+    const documents =
+      await this.spvKycDocumentService.fetchDocumentsByApplicationId(
+        applicationId,
+      );
+
+    const allDocumentsCompleted =
+      documents.length > 0 && documents.every(document => document.status === 1);
+
+    if (!allDocumentsCompleted) {
+      return this.statusService.fetchApplicationStatusById(currentStatusId);
+    }
+
+    return this.syncApplicationStatus(
+      applicationId,
+      currentStatusId,
+      'documents',
+      tx,
+    );
+  }
+
   async createOrUpdateBasicInfo(
     trusteeProfileId: string,
     applicationId: string,
@@ -555,6 +580,11 @@ export class SpvApplicationTransactionsService {
         payload,
         tx,
       );
+      await this.syncDocumentsStepIfCompleted(
+        application.id,
+        application.spvApplicationStatusMasterId,
+        tx,
+      );
 
       await tx.commit();
 
@@ -591,6 +621,11 @@ export class SpvApplicationTransactionsService {
       let updatedDocument = await this.spvKycDocumentService.updateDocumentById(
         documentId,
         payload,
+        tx,
+      );
+      await this.syncDocumentsStepIfCompleted(
+        application.id,
+        application.spvApplicationStatusMasterId,
         tx,
       );
 

@@ -182,18 +182,36 @@ export class SpvApplicationService {
     const currentStatus = await this.statusService.fetchApplicationStatusById(
       application.spvApplicationStatusMasterId,
     );
+    let activeStatus = currentStatus;
+    let completedSteps: {
+      id: string;
+      label: string;
+      code: string;
+    }[] = [];
 
-    const completedSteps = await this.statusService.fetchCompletedStepsSequence(
-      currentStatus.sequenceOrder,
-    );
+    if (!currentStatus.isInitial) {
+      completedSteps = await this.statusService.fetchCompletedStepsSequence(
+        currentStatus.sequenceOrder,
+      );
+    }
+
+    try {
+      if (!currentStatus.isInitial) {
+        activeStatus = await this.statusService.fetchNextStatus(
+          currentStatus.sequenceOrder,
+        );
+      }
+    } catch (error) {
+      activeStatus = currentStatus;
+    }
 
     return {
       id: application.id,
       completedSteps,
       activeStep: {
-        id: currentStatus.id,
-        label: currentStatus.status,
-        code: currentStatus.value,
+        id: activeStatus.id,
+        label: activeStatus.status,
+        code: activeStatus.value,
       },
     };
   }
