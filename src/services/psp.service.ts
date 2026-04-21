@@ -26,6 +26,79 @@ export class PspService {
     public pspMasterFieldsRepository: PspMasterFieldsRepository,
   ) { }
 
+  private normalizeCredentialValue(value?: string) {
+    if (typeof value !== 'string') {
+      return value;
+    }
+
+    const trimmedValue = value.trim();
+    return trimmedValue.length ? trimmedValue : undefined;
+  }
+
+  private async ensureUniqueCredentials(
+    payload: Partial<Psp>,
+    pspId?: string,
+    tx?: unknown,
+  ) {
+    const duplicateChecks = [
+      {
+        field: 'apiKey' as const,
+        value: this.normalizeCredentialValue(payload.apiKey),
+        message: 'This apiKey is already used in another PSP.',
+      },
+      {
+        field: 'apiSecret' as const,
+        value: this.normalizeCredentialValue(payload.apiSecret),
+        message: 'This apiSecret is already used in another PSP.',
+      },
+    ];
+
+    for (const check of duplicateChecks) {
+      if (!check.value) {
+        continue;
+      }
+
+      const duplicatePsp = await this.pspRepository.findOne(
+        {
+          where: {
+            [check.field]: check.value,
+          },
+        },
+        tx ? {transaction: tx} : undefined,
+      );
+
+      if (duplicatePsp && duplicatePsp.id !== pspId) {
+        throw new HttpErrors.BadRequest(check.message);
+      }
+    }
+  }
+
+  private handleDuplicateCredentialError(error: unknown): never {
+    const dbError = error as {
+      code?: string;
+      detail?: string;
+      message?: string;
+    };
+
+    if (dbError?.code === '23505') {
+      const errorText = `${dbError.detail ?? ''} ${dbError.message ?? ''}`;
+
+      if (errorText.includes('apiKey')) {
+        throw new HttpErrors.BadRequest(
+          'This apiKey is already used in another PSP.',
+        );
+      }
+
+      if (errorText.includes('apiSecret')) {
+        throw new HttpErrors.BadRequest(
+          'This apiSecret is already used in another PSP.',
+        );
+      }
+    }
+
+    throw error;
+  }
+
   async fetchMerchantPsp(usersId: string, merchantProfilesId: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const psp: any[] = await this.pspRepository.find({
@@ -91,6 +164,9 @@ export class PspService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx: any,
   ) {
+    payload.apiKey = this.normalizeCredentialValue(payload.apiKey);
+    payload.apiSecret = this.normalizeCredentialValue(payload.apiSecret);
+
     if (!payload.pspMasterId) {
       throw new HttpErrors.BadRequest('pspMasterId is required');
     }
@@ -163,6 +239,8 @@ export class PspService {
       );
     }
 
+    await this.ensureUniqueCredentials(payload, pspId, tx);
+
     let psp;
 
     // ------------------------------------------------
@@ -192,17 +270,21 @@ export class PspService {
         );
       }
 
-      await this.pspRepository.updateById(
-        pspId,
-        {
-          ...payload,
-          usersId,
-          merchantProfilesId,
-          status: 0,
-          mode: 1,
-        },
-        {transaction: tx},
-      );
+      try {
+        await this.pspRepository.updateById(
+          pspId,
+          {
+            ...payload,
+            usersId,
+            merchantProfilesId,
+            status: 0,
+            mode: 1,
+          },
+          {transaction: tx},
+        );
+      } catch (error) {
+        this.handleDuplicateCredentialError(error);
+      }
 
       psp = await this.fetchPspWithRelations(pspId, tx);
 
@@ -217,18 +299,22 @@ export class PspService {
     // CREATE PSP
     // ------------------------------------------------
 
-    psp = await this.pspRepository.create(
-      {
-        ...payload,
-        usersId,
-        merchantProfilesId,
-        status: 0,
-        mode: 1,
-        isActive: true,
-        isDeleted: false,
-      },
-      {transaction: tx},
-    );
+    try {
+      psp = await this.pspRepository.create(
+        {
+          ...payload,
+          usersId,
+          merchantProfilesId,
+          status: 0,
+          mode: 1,
+          isActive: true,
+          isDeleted: false,
+        },
+        {transaction: tx},
+      );
+    } catch (error) {
+      this.handleDuplicateCredentialError(error);
+    }
 
     psp = await this.fetchPspWithRelations(psp.id, tx);
 

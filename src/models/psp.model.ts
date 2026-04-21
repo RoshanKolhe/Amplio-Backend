@@ -10,6 +10,16 @@ import {Transaction} from './transaction.model';
       table: 'psp',
       schema: 'public',
     },
+    indexes: {
+      uniquePspApiKey: {
+        keys: {apiKey: 1},
+        options: {unique: true},
+      },
+      uniquePspApiSecret: {
+        keys: {apiSecret: 1},
+        options: {unique: true},
+      },
+    },
   },
 })
 export class Psp extends Entity {
