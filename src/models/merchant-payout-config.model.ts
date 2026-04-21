@@ -47,6 +47,18 @@ export class MerchantPayoutConfig extends Entity {
 
   @property({
     type: 'number',
+    default: 200000,
+    postgresql: {
+      dataType: 'float',
+    },
+    jsonSchema: {
+      minimum: 0,
+    },
+  })
+  minimumPayoutAmount?: number;
+
+  @property({
+    type: 'number',
     postgresql: {
       dataType: 'float',
     },
@@ -153,6 +165,11 @@ export class MerchantPayoutConfig extends Entity {
     type: 'date',
   })
   lastProcessedWindowEndAt?: Date;
+
+  @property({
+    type: 'date',
+  })
+  lastManualConfigChangeAt?: Date;
 
   @property({
     type: 'string',

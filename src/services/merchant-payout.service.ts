@@ -23,6 +23,7 @@ import {isSettlementEligibleForDiscounting} from '../utils/transactions';
 type ScheduleMode = 'eod' | 'bucketed';
 type RunType =
   | 'scheduled'
+  | 'opening_sweep'
   | 'cutoff_sweep'
   | 'eod_default'
   | 'retry'
@@ -62,6 +63,7 @@ export type MerchantPayoutConfigUpsertPayload = Partial<
     MerchantPayoutConfig,
     | 'maxAllowedDailyCap'
     | 'selectedDailyCap'
+    | 'minimumPayoutAmount'
     | 'frequencyHours'
     | 'scheduleMode'
     | 'startTime'
@@ -105,6 +107,7 @@ const ENABLED_DEBUG_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const DEFAULT_FALLBACK_PLATFORM_DAILY_LIMIT = Number(
   process.env.DEFAULT_PLATFORM_DAILY_LIMIT ?? 100000,
 );
+const DEFAULT_MINIMUM_PAYOUT_AMOUNT = 200000;
 const PAYOUT_TRANSACTION_OPTIONS = {
   isolationLevel: 'READ COMMITTED',
 } as const;
@@ -170,6 +173,7 @@ export class MerchantPayoutService {
       autoPayoutEnabled: config.autoPayoutEnabled,
       autoPayoutStatus: config.autoPayoutStatus,
       effectiveDailyCap: this.resolveEffectiveDailyCap(config),
+      minimumPayoutAmount: this.resolveMinimumPayoutAmount(config),
     };
   }
 
@@ -358,6 +362,20 @@ export class MerchantPayoutService {
       );
     }
 
+    const minimumPayoutAmount = this.resolveMinimumPayoutAmount(config);
+
+    if (!Number.isFinite(minimumPayoutAmount) || minimumPayoutAmount < 0) {
+      throw new HttpErrors.BadRequest(
+        'minimumPayoutAmount must be greater than or equal to zero',
+      );
+    }
+
+    if (minimumPayoutAmount > this.resolveEffectiveDailyCap(config)) {
+      throw new HttpErrors.BadRequest(
+        'minimumPayoutAmount cannot be greater than the effective daily cap',
+      );
+    }
+
     if (this.getConfigTimezone(config) !== DEFAULT_TIMEZONE) {
       throw new HttpErrors.BadRequest(
         `Only ${DEFAULT_TIMEZONE} is supported for automated payouts right now`,
@@ -403,6 +421,11 @@ export class MerchantPayoutService {
       Number.isFinite(selectedDailyCap) && selectedDailyCap > 0
         ? Number(Math.min(selectedDailyCap, maxAllowedDailyCap).toFixed(2))
         : undefined;
+    const minimumPayoutAmount = Number(
+      payload.minimumPayoutAmount ??
+        existingConfig?.minimumPayoutAmount ??
+        DEFAULT_MINIMUM_PAYOUT_AMOUNT,
+    );
 
     const scheduleMode =
       payload.scheduleMode ?? existingConfig?.scheduleMode ?? 'eod';
@@ -440,6 +463,9 @@ export class MerchantPayoutService {
       usersId,
       maxAllowedDailyCap: Number(maxAllowedDailyCap.toFixed(2)),
       selectedDailyCap: normalizedSelectedDailyCap,
+      minimumPayoutAmount: Number(
+        Math.max(minimumPayoutAmount, 0).toFixed(2),
+      ),
       scheduleMode: scheduleMode === 'bucketed' ? 'bucketed' : 'eod',
       frequencyHours,
       startTime: payload.startTime ?? existingConfig?.startTime ?? '09:00',
@@ -455,6 +481,7 @@ export class MerchantPayoutService {
       stopRequestedAt: existingConfig?.stopRequestedAt,
       stopEffectiveAt: existingConfig?.stopEffectiveAt,
       stopReason: existingConfig?.stopReason,
+      lastManualConfigChangeAt: existingConfig?.lastManualConfigChangeAt,
       isActive: existingConfig?.isActive ?? true,
       isDeleted: false,
       createdAt: existingConfig?.createdAt ?? referenceAt,
@@ -476,6 +503,97 @@ export class MerchantPayoutService {
     return config;
   }
 
+  private resolveManualConfigChangeTimezone(
+    config: MerchantPayoutConfig | null,
+    payload?: MerchantPayoutConfigUpsertPayload,
+  ) {
+    return payload?.timezone ?? config?.timezone ?? DEFAULT_TIMEZONE;
+  }
+
+  private resolveNextManualConfigChangeAllowedAt(
+    lastManualConfigChangeAt: Date,
+    timezone: string,
+  ) {
+    const lastManualBusinessDate = this.getLocalBusinessDate(
+      lastManualConfigChangeAt,
+      timezone,
+    );
+
+    return this.buildDateInTimezone(
+      this.addDays(lastManualBusinessDate, 1),
+      '00:00',
+      timezone,
+    );
+  }
+
+  canManuallyUpdateConfigToday(
+    config: MerchantPayoutConfig,
+    referenceAt: Date = new Date(),
+  ) {
+    if (!config.lastManualConfigChangeAt) {
+      return true;
+    }
+
+    const timezone = this.getConfigTimezone(config);
+    const currentBusinessDate = this.getLocalBusinessDate(referenceAt, timezone);
+    const lastManualBusinessDate = this.getLocalBusinessDate(
+      new Date(config.lastManualConfigChangeAt),
+      timezone,
+    );
+
+    return currentBusinessDate !== lastManualBusinessDate;
+  }
+
+  getNextManualConfigChangeAllowedAt(
+    config: MerchantPayoutConfig,
+    referenceAt: Date = new Date(),
+  ) {
+    if (
+      !config.lastManualConfigChangeAt ||
+      this.canManuallyUpdateConfigToday(config, referenceAt)
+    ) {
+      return undefined;
+    }
+
+    return this.resolveNextManualConfigChangeAllowedAt(
+      new Date(config.lastManualConfigChangeAt),
+      this.getConfigTimezone(config),
+    );
+  }
+
+  private assertManualConfigUpdateAllowed(
+    existingConfig: MerchantPayoutConfig | null,
+    payload: MerchantPayoutConfigUpsertPayload,
+    referenceAt: Date,
+  ) {
+    if (!existingConfig?.lastManualConfigChangeAt) {
+      return;
+    }
+
+    const timezone = this.resolveManualConfigChangeTimezone(
+      existingConfig,
+      payload,
+    );
+    const currentBusinessDate = this.getLocalBusinessDate(referenceAt, timezone);
+    const lastManualBusinessDate = this.getLocalBusinessDate(
+      new Date(existingConfig.lastManualConfigChangeAt),
+      timezone,
+    );
+
+    if (currentBusinessDate !== lastManualBusinessDate) {
+      return;
+    }
+
+    const nextAllowedAt = this.resolveNextManualConfigChangeAllowedAt(
+      new Date(existingConfig.lastManualConfigChangeAt),
+      timezone,
+    );
+
+    throw new HttpErrors.TooManyRequests(
+      `Merchant payout config can only be changed once per day. Next update is allowed after ${nextAllowedAt.toISOString()}.`,
+    );
+  }
+
   async upsertConfigForMerchant(
     merchantProfilesId: string,
     usersId: string,
@@ -486,6 +604,7 @@ export class MerchantPayoutService {
       merchantProfilesId,
       usersId,
     );
+    this.assertManualConfigUpdateAllowed(existingConfig, payload, referenceAt);
     const normalizedConfig = this.buildConfigForUpsert(
       existingConfig,
       merchantProfilesId,
@@ -498,12 +617,14 @@ export class MerchantPayoutService {
       return this.merchantPayoutConfigRepository.create({
         ...normalizedConfig,
         id: uuidv4(),
+        lastManualConfigChangeAt: referenceAt,
       });
     }
 
     const updatableFields =
       normalizedConfig.toJSON() as Partial<MerchantPayoutConfig>;
     delete updatableFields.id;
+    updatableFields.lastManualConfigChangeAt = referenceAt;
 
     await this.merchantPayoutConfigRepository.updateById(
       existingConfig.id,
@@ -563,11 +684,17 @@ export class MerchantPayoutService {
     merchantProfile: MerchantProfiles,
     referenceAt: Date,
   ) {
+    const fallbackDailyCap = Math.max(
+      DEFAULT_FALLBACK_PLATFORM_DAILY_LIMIT,
+      DEFAULT_MINIMUM_PAYOUT_AMOUNT,
+    );
+
     return {
       merchantProfilesId: merchantProfile.id,
       usersId: merchantProfile.usersId,
-      maxAllowedDailyCap: DEFAULT_FALLBACK_PLATFORM_DAILY_LIMIT,
-      selectedDailyCap: DEFAULT_FALLBACK_PLATFORM_DAILY_LIMIT,
+      maxAllowedDailyCap: fallbackDailyCap,
+      selectedDailyCap: fallbackDailyCap,
+      minimumPayoutAmount: DEFAULT_MINIMUM_PAYOUT_AMOUNT,
       scheduleMode: 'eod',
       frequencyHours: undefined,
       startTime: '09:00',
@@ -580,6 +707,7 @@ export class MerchantPayoutService {
       autoPayoutEnabled: true,
       autoPayoutStatus: 'active',
       lastProcessedWindowEndAt: undefined,
+      lastManualConfigChangeAt: undefined,
       isActive: true,
       isDeleted: false,
       createdAt: referenceAt,
@@ -688,6 +816,10 @@ export class MerchantPayoutService {
     return Number(maxAllowedDailyCap.toFixed(2));
   }
 
+  resolveMinimumPayoutAmount(config: MerchantPayoutConfig) {
+    return Number(Math.max(Number(config.minimumPayoutAmount ?? 0), 0).toFixed(2));
+  }
+
   resolveCommitmentEndAt(config: MerchantPayoutConfig) {
     if (config.commitmentEndAt) {
       return new Date(config.commitmentEndAt);
@@ -776,18 +908,37 @@ export class MerchantPayoutService {
       businessDate,
     );
     const scheduleMode = this.getConfigScheduleMode(config);
+    const previousBusinessDate = this.addDays(businessDate, -1);
+    const previousCutoffAt = this.buildDateInTimezone(
+      previousBusinessDate,
+      config.cutoffTime,
+      this.getConfigTimezone(config),
+    );
 
     if (scheduleMode === 'eod') {
-      return [
-        {
+      const windows: MerchantPayoutWindow[] = [];
+
+      if (previousCutoffAt.getTime() < startAt.getTime()) {
+        windows.push({
           businessDate,
-          bucketStartAt: startAt,
-          bucketEndAt: cutoffAt,
-          scheduledFor: cutoffAt,
+          bucketStartAt: previousCutoffAt,
+          bucketEndAt: startAt,
+          scheduledFor: startAt,
           scheduleMode: 'eod',
-          runType: 'eod_default',
-        },
-      ];
+          runType: 'opening_sweep',
+        });
+      }
+
+      windows.push({
+        businessDate,
+        bucketStartAt: startAt,
+        bucketEndAt: cutoffAt,
+        scheduledFor: cutoffAt,
+        scheduleMode: 'eod',
+        runType: 'eod_default',
+      });
+
+      return windows;
     }
 
     const windows: MerchantPayoutWindow[] = [];
@@ -798,6 +949,18 @@ export class MerchantPayoutService {
       throw new HttpErrors.BadRequest(
         'frequencyHours must resolve to at least one minute',
       );
+    }
+
+    if (previousCutoffAt.getTime() < startAt.getTime()) {
+      windows.push({
+        businessDate,
+        bucketStartAt: previousCutoffAt,
+        bucketEndAt: startAt,
+        scheduledFor: startAt,
+        frequencyHours,
+        scheduleMode: 'bucketed',
+        runType: 'opening_sweep',
+      });
     }
 
     let cursor = new Date(startAt);
@@ -1521,7 +1684,7 @@ export class MerchantPayoutService {
     config: MerchantPayoutConfig,
   ) {
     if (batch.scheduleMode === 'eod') {
-      return true;
+      return batch.runType === 'eod_default';
     }
 
     const {cutoffAt} = this.resolveBusinessWindow(config, batch.businessDate);

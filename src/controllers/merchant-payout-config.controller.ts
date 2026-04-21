@@ -23,6 +23,8 @@ type MerchantPayoutConfigView = Record<string, unknown> & {
   resolvedCommitmentEndAt?: Date;
   canStopAutoPayout: boolean;
   hasPrimaryBankAccount: boolean;
+  canUpdateConfigToday: boolean;
+  nextManualConfigChangeAllowedAt?: Date;
 };
 
 type MerchantPayoutConfigResponse = {
@@ -44,6 +46,12 @@ const merchantPayoutConfigUpsertSchema: SchemaObject = {
       type: 'number',
       description:
         'Merchant-selected daily cap. If omitted or zero, the platform max cap is used.',
+    },
+    minimumPayoutAmount: {
+      type: 'number',
+      minimum: 0,
+      description:
+        'Minimum payout amount required before a batch is created. Use 0 to disable the minimum threshold.',
     },
     scheduleMode: {
       type: 'string',
@@ -153,6 +161,10 @@ export class MerchantPayoutConfigController {
       canStopAutoPayout:
         this.merchantPayoutService.canStopAutoPayout(config),
       hasPrimaryBankAccount: !!primaryBankAccount,
+      canUpdateConfigToday:
+        this.merchantPayoutService.canManuallyUpdateConfigToday(config),
+      nextManualConfigChangeAllowedAt:
+        this.merchantPayoutService.getNextManualConfigChangeAllowedAt(config),
     };
   }
 

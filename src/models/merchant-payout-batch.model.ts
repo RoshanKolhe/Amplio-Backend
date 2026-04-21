@@ -138,7 +138,14 @@ export class MerchantPayoutBatch extends Entity {
     required: true,
     default: 'scheduled',
     jsonSchema: {
-      enum: ['scheduled', 'cutoff_sweep', 'eod_default', 'retry', 'fallback'],
+      enum: [
+        'scheduled',
+        'opening_sweep',
+        'cutoff_sweep',
+        'eod_default',
+        'retry',
+        'fallback',
+      ],
     },
   })
   runType: string;
