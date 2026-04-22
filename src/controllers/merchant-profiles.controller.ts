@@ -28,6 +28,9 @@ import {
   BankDetailsRepository,
   KycApplicationsRepository,
   MerchantKycDocumentRepository,
+  MerchantPayoutBatchItemRepository,
+  MerchantPayoutBatchRepository,
+  MerchantPayoutConfigRepository,
   MerchantPanCardRepository,
   MerchantProfilesRepository,
   OtpRepository,
@@ -63,6 +66,12 @@ export class MerchantProfilesController {
     private addressDetailsRepository: AddressDetailsRepository,
     @repository(BankDetailsRepository)
     private bankDetailsRepository: BankDetailsRepository,
+    @repository(MerchantPayoutConfigRepository)
+    private merchantPayoutConfigRepository: MerchantPayoutConfigRepository,
+    @repository(MerchantPayoutBatchRepository)
+    private merchantPayoutBatchRepository: MerchantPayoutBatchRepository,
+    @repository(MerchantPayoutBatchItemRepository)
+    private merchantPayoutBatchItemRepository: MerchantPayoutBatchItemRepository,
     @repository(UboDetailsRepository)
     private uboDetailsRepository: UboDetailsRepository,
     @repository(PspRepository)
@@ -277,6 +286,9 @@ export class MerchantProfilesController {
       uboDetails: number;
       psps: number;
       transactions: number;
+      merchantPayoutConfigs: number;
+      merchantPayoutBatches: number;
+      merchantPayoutBatchItems: number;
       kycApplications: number;
       registrationSessions: number;
       merchantUserRoles: number;
@@ -372,7 +384,18 @@ export class MerchantProfilesController {
         {transaction: tx},
       );
 
+      const merchantPayoutBatches = await this.merchantPayoutBatchRepository.find(
+        {
+          where: {
+            usersId: merchantProfile.usersId,
+            merchantProfilesId: merchantProfile.id,
+          },
+        },
+        {transaction: tx},
+      );
+
       const pspIds = psps.map(psp => psp.id);
+      const merchantPayoutBatchIds = merchantPayoutBatches.map(batch => batch.id);
 
       const mediaIds = Array.from(
         new Set(
@@ -386,6 +409,33 @@ export class MerchantProfilesController {
           ].filter((id): id is string => !!id),
         ),
       );
+
+      const deletedMerchantPayoutBatchItems = merchantPayoutBatchIds.length
+        ? await this.merchantPayoutBatchItemRepository.deleteAll(
+            {
+              merchantPayoutBatchId: {inq: merchantPayoutBatchIds},
+            },
+            {transaction: tx},
+          )
+        : {count: 0};
+
+      const deletedMerchantPayoutBatches =
+        await this.merchantPayoutBatchRepository.deleteAll(
+          {
+            usersId: merchantProfile.usersId,
+            merchantProfilesId: merchantProfile.id,
+          },
+          {transaction: tx},
+        );
+
+      const deletedMerchantPayoutConfigs =
+        await this.merchantPayoutConfigRepository.deleteAll(
+          {
+            usersId: merchantProfile.usersId,
+            merchantProfilesId: merchantProfile.id,
+          },
+          {transaction: tx},
+        );
 
       const deletedTransactions = pspIds.length
         ? await this.transactionRepository.deleteAll(
@@ -548,6 +598,9 @@ export class MerchantProfilesController {
           uboDetails: deletedUboDetails.count,
           psps: deletedPsps.count,
           transactions: deletedTransactions.count,
+          merchantPayoutConfigs: deletedMerchantPayoutConfigs.count,
+          merchantPayoutBatches: deletedMerchantPayoutBatches.count,
+          merchantPayoutBatchItems: deletedMerchantPayoutBatchItems.count,
           kycApplications: deletedKycApplications.count,
           registrationSessions: deletedRegistrationSessions.count,
           merchantUserRoles: deletedMerchantUserRoles.count,
@@ -1220,7 +1273,7 @@ export class MerchantProfilesController {
 
         if (!latestBankAccount) {
           await tx.rollback();
-          return this.uploadMerchantBankDetails(currentUser, {
+          return await this.uploadMerchantBankDetails(currentUser, {
             usersId: currentUserId,
             bankDetails: body.bankDetails,
           });
