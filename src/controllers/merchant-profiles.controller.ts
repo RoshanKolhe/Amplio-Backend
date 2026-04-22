@@ -2223,6 +2223,47 @@ export class MerchantProfilesController {
     }
   }
 
+
+
+  @authenticate('jwt')
+@authorize({roles: ['merchant']})
+@patch('/merchant-profiles/bank-details/{accountId}/primary')
+async updatePrimaryBankAccount(
+  @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+  @param.path.string('accountId') accountId: string,
+): Promise<{success: boolean; message: string}> {
+  const tx = await this.merchantProfilesRepository.dataSource.beginTransaction(
+    {IsolationLevel: IsolationLevel.READ_COMMITTED},
+  );
+
+  try {
+    const merchantProfile = await this.merchantProfilesRepository.findOne(
+      {
+        where: {
+          and: [{usersId: currentUser.id}, {isDeleted: false}],
+        },
+      },
+      {transaction: tx},
+    );
+
+    if (!merchantProfile) {
+      throw new HttpErrors.NotFound('Merchant not found');
+    }
+
+    const bankDetailsResponse =
+      await this.bankDetailsService.markAccountAsPrimaryAccount(
+        accountId,
+        tx,
+      );
+
+    await tx.commit();
+    return bankDetailsResponse;
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  }
+}
+
   @authenticate('jwt')
   @authorize({roles: ['merchant']})
   @get('/merchant-profiles/UBO-details')

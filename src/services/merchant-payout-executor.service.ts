@@ -433,7 +433,7 @@ export class MerchantPayoutExecutorService {
         outcomes.push({
           itemId: item.id,
           success: false,
-          failureReason: 'Transaction is already funded',
+          failureReason: 'Transaction is already fundeed',
         });
         continue;
       }
@@ -446,7 +446,7 @@ export class MerchantPayoutExecutorService {
           itemId: item.id,
           success: false,
           failureReason:
-            'Transaction is marked funded without released amount',
+            'Transaction is marked fundeed without released amount',
         });
         continue;
       }

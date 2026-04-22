@@ -640,4 +640,136 @@ export class SpvApplicationTransactionsService {
       throw error;
     }
   }
+
+  async submitReview(
+    trusteeProfileId: string,
+    applicationId: string,
+  ) {
+    const tx = await this.datasource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const application =
+        await this.spvApplicationService.verifyApplicationWithTrustee(
+          trusteeProfileId,
+          applicationId,
+        );
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        application.spvApplicationStatusMasterId,
+      );
+
+      if (currentStatus.value === 'review_and_submit') {
+        await tx.commit();
+
+        return {
+          success: true,
+          message: 'SPV application already submitted for review',
+          currentStatus: {
+            id: currentStatus.id,
+            label: currentStatus.status,
+            code: currentStatus.value,
+          },
+          reviewStatus: application.status,
+        };
+      }
+
+      if (currentStatus.value !== 'isin_application') {
+        throw new HttpErrors.BadRequest(
+          `Cannot submit review from ${currentStatus.value}`,
+        );
+      }
+
+      const reviewAndSubmitStatus = await this.statusService.verifyStatusValue(
+        'review_and_submit',
+      );
+
+      await this.spvApplicationService.updateApplicationReviewSubmission(
+        application.id,
+        {
+          spvApplicationStatusMasterId: reviewAndSubmitStatus.id,
+          reason: undefined,
+          verifiedAt: undefined,
+        },
+        tx,
+      );
+
+      await tx.commit();
+
+        return {
+          success: true,
+          message: 'Review submitted successfully',
+          currentStatus: {
+            id: reviewAndSubmitStatus.id,
+            label: reviewAndSubmitStatus.status,
+            code: reviewAndSubmitStatus.value,
+          },
+          reviewStatus: application.status,
+        };
+      } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
+
+  async verifyApplicationByAdmin(
+    applicationId: string,
+    status: number,
+    reason: string,
+  ) {
+    const tx = await this.datasource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      if (![1, 2].includes(status)) {
+        throw new HttpErrors.BadRequest('Invalid status value');
+      }
+
+      if (status === 2 && !reason.trim()) {
+        throw new HttpErrors.BadRequest(
+          'Reason is required when rejecting an SPV application',
+        );
+      }
+
+      const application = await this.spvApplicationService.verifyApplicationExists(
+        applicationId,
+      );
+
+      const currentStatus = await this.statusService.fetchApplicationStatusById(
+        application.spvApplicationStatusMasterId,
+      );
+
+      if (currentStatus.value !== 'review_and_submit') {
+        throw new HttpErrors.BadRequest(
+          `SPV application can only be verified from ${'review_and_submit'} stage`,
+        );
+      }
+
+      await this.spvApplicationService.updateApplicationVerification(
+        application.id,
+        {
+          status,
+          reason: status === 2 ? reason.trim() : undefined,
+          verifiedAt: new Date(),
+        },
+        tx,
+      );
+
+      await tx.commit();
+
+      return {
+        success: true,
+        message:
+          status === 1
+            ? 'SPV application approved successfully'
+            : 'SPV application rejected successfully',
+        reviewStatus: status,
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
 }

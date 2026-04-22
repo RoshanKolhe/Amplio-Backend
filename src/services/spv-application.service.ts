@@ -158,6 +158,33 @@ export class SpvApplicationService {
     );
   }
 
+  async updateApplicationReviewSubmission(
+    applicationId: string,
+    payload: Pick<
+      SpvApplication,
+      'spvApplicationStatusMasterId' | 'reason' | 'verifiedAt'
+    >,
+    tx?: unknown,
+  ): Promise<void> {
+    await this.spvApplicationRepository.updateById(
+      applicationId,
+      payload,
+      tx ? {transaction: tx} : undefined,
+    );
+  }
+
+  async updateApplicationVerification(
+    applicationId: string,
+    payload: Pick<SpvApplication, 'status' | 'reason' | 'verifiedAt'>,
+    tx?: unknown,
+  ): Promise<void> {
+    await this.spvApplicationRepository.updateById(
+      applicationId,
+      payload,
+      tx ? {transaction: tx} : undefined,
+    );
+  }
+
   async fetchSingleApplication(
     trusteeProfileId: string,
     applicationId: string,

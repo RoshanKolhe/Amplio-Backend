@@ -74,11 +74,15 @@ import {SpvStatusDataService} from './services/spv-status-data.service';
 import {TrustDeedService} from './services/trust-deed.service';
 import {IsinApplicationService} from './services/isin-application.service';
 import {MerchantPayoutCron} from './crons/merchant-payout.cron';
+import {SpvPoolCron} from './crons/spv-pool.cron';
 import {TransactionCron} from './crons/transaction.cron';
 import {PspRepository} from './repositories/psp.repository';
+import {SpvRepository} from './repositories/spv.repository';
 import {TransactionRepository} from './repositories/transaction.repository';
+import {EscrowService} from './services/escrow.service';
 import {UserConsentService} from './services/user-consent.service';
 import {CompanyDataMapperService} from './services/company-brisk-data-mapper.service';
+import {PoolService} from './services/pool.service';
 import {TrusteeKycDocumentService} from './services/trustee-kyc-document.service';
 import {MerchantPayoutService} from './services/merchant-payout.service';
 import {MerchantPayoutExecutorService} from './services/merchant-payout-executor.service';
@@ -90,6 +94,7 @@ export class AmplioBackendApplication extends BootMixin(
 ) {
   private transactionCron?: TransactionCron;
   private merchantPayoutCron?: MerchantPayoutCron;
+  private spvPoolCron?: SpvPoolCron;
 
   constructor(options: ApplicationConfig = {}) {
     super(options);
@@ -233,6 +238,9 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.poolFinancials.service').toClass(
       PoolFinancialsService,
     );
+    this.bind('service.pool.service').toClass(
+      PoolService,
+    );
     this.bind('service.spvApplicationCreditRating.service').toClass(
       SpvApplicationCreditRatingService,
     );
@@ -244,6 +252,9 @@ export class AmplioBackendApplication extends BootMixin(
     );
     this.bind('service.isinApplication.service').toClass(
       IsinApplicationService,
+    );
+    this.bind('service.escrow.service').toClass(
+      EscrowService,
     );
     this.bind('service.spvStatusData.service').toClass(
       SpvStatusDataService,
@@ -299,7 +310,7 @@ export class AmplioBackendApplication extends BootMixin(
   }
 
   async startCrons() {
-    if (this.transactionCron && this.merchantPayoutCron) {
+    if (this.transactionCron && this.merchantPayoutCron && this.spvPoolCron) {
       return;
     }
 
@@ -310,16 +321,24 @@ export class AmplioBackendApplication extends BootMixin(
       const pspRepository = await this.get<PspRepository>(
         'repositories.PspRepository',
       );
+      const spvRepository = await this.get<SpvRepository>(
+        'repositories.SpvRepository',
+      );
       const liquidityEngineService = await this.get<LiquidityEngineService>(
         'service.liquidityEngineService.service',
       );
       const pspService = await this.get<PspService>('service.pspService.service');
+      const escrowService = await this.get<EscrowService>(
+        'service.escrow.service',
+      );
 
       this.transactionCron = new TransactionCron(
         transactionRepository,
         pspRepository,
+        spvRepository,
         pspService,
         liquidityEngineService,
+        escrowService,
       );
       this.transactionCron.start();
       console.log('[Cron] Transaction cron started');
@@ -340,6 +359,26 @@ export class AmplioBackendApplication extends BootMixin(
       );
       this.merchantPayoutCron.start();
       console.log('[Cron] Merchant payout cron started');
+    }
+
+    if (!this.spvPoolCron) {
+      const spvRepository = await this.get<SpvRepository>(
+        'repositories.SpvRepository',
+      );
+      const escrowService = await this.get<EscrowService>(
+        'service.escrow.service',
+      );
+      const poolService = await this.get<PoolService>(
+        'service.pool.service',
+      );
+
+      this.spvPoolCron = new SpvPoolCron(
+        spvRepository,
+        escrowService,
+        poolService,
+      );
+      this.spvPoolCron.start();
+      console.log('[Cron] SPV pool cron started');
     }
   }
 }

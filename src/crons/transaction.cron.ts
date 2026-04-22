@@ -3,7 +3,13 @@ import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import cron, {ScheduledTask} from 'node-cron';
 import {v4 as uuidv4} from 'uuid';
-import {PspRepository, TransactionRepository} from '../repositories';
+import {SpvWithRelations} from '../models';
+import {
+  PspRepository,
+  SpvRepository,
+  TransactionRepository,
+} from '../repositories';
+import {EscrowService} from '../services/escrow.service';
 import {LiquidityEngineService} from '../services/liquidity-engine.service';
 import {PspService} from '../services/psp.service';
 import {
@@ -49,11 +55,17 @@ export class TransactionCron {
     @repository(PspRepository)
     public pspRepository: PspRepository,
 
+    @repository(SpvRepository)
+    public spvRepository: SpvRepository,
+
     @inject('service.pspService.service')
     private pspService: PspService,
 
     @inject('service.liquidityEngineService.service')
     private liquidityEngineService: LiquidityEngineService,
+
+    @inject('service.escrow.service')
+    private escrowService: EscrowService,
   ) { }
 
   private isTransactionCronDebugEnabled() {
@@ -170,7 +182,18 @@ export class TransactionCron {
   private async findExistingTransactionForSync(psp: {
     id: string;
     pspMasterId: string;
-  }, tnsId: string) {
+  }, tnsId: string): Promise<
+    | {
+        id: string;
+        pspId: string;
+        spvId?: string;
+        status?: string;
+        releasedAmount?: number;
+        lastReleasedAt?: Date;
+        createdAt?: Date;
+      }
+    | undefined
+  > {
     const existingTransactions = await this.transactionRepository.find({
       where: {
         and: [{tnsId}, {isDeleted: false}],
@@ -178,6 +201,7 @@ export class TransactionCron {
       fields: {
         id: true,
         pspId: true,
+        spvId: true,
         status: true,
         releasedAmount: true,
         lastReleasedAt: true,
@@ -237,6 +261,44 @@ export class TransactionCron {
     return canonicalTransaction;
   }
 
+  private async resolveActiveSpvIdForPspMaster(
+    pspId: string,
+    pspMasterId: string,
+    cache: Map<string, Promise<string | undefined>>,
+  ): Promise<string | undefined> {
+    if (!cache.has(pspMasterId)) {
+      cache.set(
+        pspMasterId,
+        (async () => {
+          const spvs = (await this.spvRepository.find({
+            where: {
+              and: [{pspMasterId}, {isDeleted: false}, {isActive: true}],
+            },
+            include: [{relation: 'spvApplication'}],
+          })) as SpvWithRelations[];
+
+          const activeSpvs = spvs.filter(
+            spv => spv.spvApplication?.status === 1,
+          );
+
+          if (!activeSpvs.length) {
+            console.warn('No active SPV found for PSP:', pspId);
+            return undefined;
+          }
+
+          if (activeSpvs.length > 1) {
+            console.error('Multiple SPVs found for PSP:', pspId);
+            return undefined;
+          }
+
+          return activeSpvs[0].id;
+        })(),
+      );
+    }
+
+    return cache.get(pspMasterId)!;
+  }
+
   start() {
     if (this.job) {
       return;
@@ -258,6 +320,7 @@ export class TransactionCron {
       let totalFetchedTransactions = 0;
       let totalCreatedTransactions = 0;
       let totalUpdatedTransactions = 0;
+      const spvResolutionCache = new Map<string, Promise<string | undefined>>();
 
       for (const psp of psps) {
         let transactions: RazorpayPayment[] = [];
@@ -318,12 +381,24 @@ export class TransactionCron {
               netAmount: totalRecieved,
             };
           const amountRefund = normalizePaiseToRupees(txn.amount_refunded ?? 0);
+          const resolvedSpvId = await this.resolveActiveSpvIdForPspMaster(
+            psp.id,
+            psp.pspMasterId,
+            spvResolutionCache,
+          );
 
           const exists = await this.findExistingTransactionForSync(psp, txn.id);
+          const resolvedPspSettlementStatus = resolvePspSettlementStatus(
+            txn.status,
+            createdAt,
+            settlementDetails.settlementDate,
+            exists ? new Date() : referenceAt,
+          );
 
           if (exists) {
             const resolvedPlatformStatus = this.resolvePlatformStatus(exists);
             const updatedAt = new Date();
+            // console.log('Assigning SPV:', exists.id, psp.id, resolvedSpvId);
 
             await this.transactionRepository.updateById(exists.id, {
               orderId: txn.order_id,
@@ -337,12 +412,7 @@ export class TransactionCron {
               currency: txn.currency,
               status: resolvedPlatformStatus,
               pspStatus: txn.status,
-              pspSettlementStatus: resolvePspSettlementStatus(
-                txn.status,
-                createdAt,
-                settlementDetails.settlementDate,
-                updatedAt,
-              ),
+              pspSettlementStatus: resolvedPspSettlementStatus,
               method: txn.method,
               bank: txn.bank,
               captured: isCaptured,
@@ -356,6 +426,7 @@ export class TransactionCron {
               acquirerData: txn.acquirer_data,
               settlementMethod: settlementDetails.settlementMethod,
               settlementDate: settlementDetails.settlementDate,
+              spvId: resolvedSpvId ?? exists.spvId,
               createdAt,
               updatedAt,
             });
@@ -366,23 +437,30 @@ export class TransactionCron {
                 tnsId: txn.id,
                 pspId: psp.id,
                 pspStatus: txn.status,
-                pspSettlementStatus: resolvePspSettlementStatus(
-                  txn.status,
-                  createdAt,
-                  settlementDetails.settlementDate,
-                  updatedAt,
-                ),
+                pspSettlementStatus: resolvedPspSettlementStatus,
                 status: resolvedPlatformStatus,
                 releasedAmount: exists.releasedAmount,
                 lastReleasedAt: exists.lastReleasedAt?.toISOString(),
               },
             );
+
+            if (resolvedSpvId && resolvedPspSettlementStatus === 'SETTLED') {
+              await this.escrowService.ensureEscrowTransactionForSettledTransaction({
+                transactionId: exists.id,
+                spvId: resolvedSpvId,
+                amount: amountInRupees,
+              });
+            }
+
             updatedTransactions += 1;
             continue;
           }
 
+          const transactionId = uuidv4();
+          // console.log('Assigning SPV:', transactionId, psp.id, resolvedSpvId);
+
           await this.transactionRepository.create({
-            id: uuidv4(),
+            id: transactionId,
             tnsId: txn.id,
             orderId: txn.order_id,
             amount: amountInRupees,
@@ -395,12 +473,7 @@ export class TransactionCron {
             currency: txn.currency,
             status: MERCHANT_NOT_FUNDED_STATUS,
             pspStatus: txn.status,
-            pspSettlementStatus: resolvePspSettlementStatus(
-              txn.status,
-              createdAt,
-              settlementDetails.settlementDate,
-              referenceAt,
-            ),
+            pspSettlementStatus: resolvedPspSettlementStatus,
             method: txn.method,
             bank: txn.bank,
             captured: isCaptured,
@@ -415,6 +488,7 @@ export class TransactionCron {
             settlementMethod: settlementDetails.settlementMethod,
             settlementDate: settlementDetails.settlementDate,
             pspId: psp.id,
+            spvId: resolvedSpvId,
             createdAt,
           });
           this.logTransactionCronDebug(
@@ -423,15 +497,19 @@ export class TransactionCron {
               tnsId: txn.id,
               pspId: psp.id,
               pspStatus: txn.status,
-              pspSettlementStatus: resolvePspSettlementStatus(
-                txn.status,
-                createdAt,
-                settlementDetails.settlementDate,
-                referenceAt,
-              ),
+              pspSettlementStatus: resolvedPspSettlementStatus,
               status: MERCHANT_NOT_FUNDED_STATUS,
             },
           );
+
+          if (resolvedSpvId && resolvedPspSettlementStatus === 'SETTLED') {
+            await this.escrowService.ensureEscrowTransactionForSettledTransaction({
+              transactionId,
+              spvId: resolvedSpvId,
+              amount: amountInRupees,
+            });
+          }
+
           createdTransactions += 1;
         }
 

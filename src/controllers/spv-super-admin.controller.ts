@@ -64,4 +64,42 @@ export class SpvSuperAdminController {
       details,
     };
   }
+
+  @authenticate('jwt')
+  @authorize({roles: ['super_admin']})
+  @patch('/admin/spv-pre/applications/{applicationId}/verification')
+  async verifyApplication(
+    @param.path.string('applicationId') applicationId: string,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status'],
+            properties: {
+              status: {type: 'number', enum: [1, 2]},
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      status: number;
+      reason?: string;
+    },
+  ) {
+    const details =
+      await this.spvApplicationTransactionsService.verifyApplicationByAdmin(
+        applicationId,
+        body.status,
+        body.reason ?? '',
+      );
+
+    return {
+      success: true,
+      message: 'SPV application verification updated',
+      details,
+    };
+  }
 }

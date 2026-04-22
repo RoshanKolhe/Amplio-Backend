@@ -130,4 +130,18 @@ export class SpvService {
 
     return spv;
   }
+
+  async fetchSpvByIdOrFail(spvId: string): Promise<Spv> {
+    const spv = await this.spvRepository.findOne({
+      where: {
+        and: [{id: spvId}, {isActive: true}, {isDeleted: false}],
+      },
+    });
+
+    if (!spv) {
+      throw new HttpErrors.NotFound('SPV not found');
+    }
+
+    return spv;
+  }
 }

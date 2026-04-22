@@ -188,9 +188,9 @@ export class SpvController {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['pspPartner', 'originatorName', 'spvName'],
+            required: ['pspMasterId', 'originatorName', 'spvName'],
             properties: {
-              pspPartner: {type: 'string'},
+              pspMasterId: {type: 'string'},
               originatorName: {type: 'string'},
               spvName: {type: 'string'},
             },
@@ -802,6 +802,26 @@ export class SpvController {
     return {
       success: true,
       message: 'SPV document updated',
+      details,
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['trustee']})
+  @patch('/spv-pre/review-submit/{applicationId}')
+  async submitReview(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @param.path.string('applicationId') applicationId: string,
+  ) {
+    const trustee = await this.verifyTrustee(currentUser.id);
+    const details = await this.spvApplicationTransactionsService.submitReview(
+      trustee.id,
+      applicationId,
+    );
+
+    return {
+      success: true,
+      message: 'SPV review submitted',
       details,
     };
   }

@@ -2,8 +2,9 @@ import {Constructor, inject, Getter} from '@loopback/core';
 import {DefaultCrudRepository, repository, BelongsToAccessor} from '@loopback/repository';
 import {AmplioDataSource} from '../datasources';
 import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
-import {Transaction, TransactionRelations, Psp} from '../models';
+import {Transaction, TransactionRelations, Psp, Spv} from '../models';
 import {PspRepository} from './psp.repository';
+import {SpvRepository} from './spv.repository';
 
 export class TransactionRepository extends TimeStampRepositoryMixin<
   Transaction,
@@ -18,12 +19,17 @@ export class TransactionRepository extends TimeStampRepositoryMixin<
 >(DefaultCrudRepository) {
 
   public readonly psp: BelongsToAccessor<Psp, typeof Transaction.prototype.id>;
+  public readonly spv: BelongsToAccessor<Spv, typeof Transaction.prototype.id>;
 
   constructor(
-    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('PspRepository') protected pspRepositoryGetter: Getter<PspRepository>,
+    @inject('datasources.amplio') dataSource: AmplioDataSource,
+    @repository.getter('PspRepository') protected pspRepositoryGetter: Getter<PspRepository>,
+    @repository.getter('SpvRepository') protected spvRepositoryGetter: Getter<SpvRepository>,
   ) {
     super(Transaction, dataSource);
     this.psp = this.createBelongsToAccessorFor('psp', pspRepositoryGetter,);
     this.registerInclusionResolver('psp', this.psp.inclusionResolver);
+    this.spv = this.createBelongsToAccessorFor('spv', spvRepositoryGetter,);
+    this.registerInclusionResolver('spv', this.spv.inclusionResolver);
   }
 }

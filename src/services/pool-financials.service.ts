@@ -53,6 +53,47 @@ export class PoolFinancialsService {
     });
   }
 
+  async fetchBySpvId(spvId: string): Promise<PoolFinancials | null> {
+    return this.poolFinancialsRepository.findOne({
+      where: {
+        and: [{spvId}, {isActive: true}, {isDeleted: false}],
+      },
+    });
+  }
+
+  async attachSpv(
+    poolFinancialsId: string,
+    spvId: string,
+    tx?: unknown,
+  ): Promise<void> {
+    await this.poolFinancialsRepository.updateById(
+      poolFinancialsId,
+      {spvId},
+      tx ? {transaction: tx} : undefined,
+    );
+  }
+
+  async updateRuntimeTotals(
+    poolFinancialsId: string,
+    payload: Pick<
+      PoolFinancials,
+      'totalFunded' | 'totalSettled' | 'outstanding'
+    >,
+    tx?: unknown,
+  ): Promise<PoolFinancials> {
+    await this.poolFinancialsRepository.updateById(
+      poolFinancialsId,
+      payload,
+      tx ? {transaction: tx} : undefined,
+    );
+
+    return this.poolFinancialsRepository.findById(
+      poolFinancialsId,
+      undefined,
+      tx ? {transaction: tx} : undefined,
+    );
+  }
+
   async fetchByApplicationIdOrFail(spvApplicationId: string): Promise<PoolFinancials> {
     const record = await this.fetchByApplicationId(spvApplicationId);
 

@@ -2188,7 +2188,7 @@ export class MerchantPayoutService {
         );
 
         this.logMerchantPayoutCronDebug(
-          '[MerchantPayoutCron] Transaction marked as funded after payout success',
+          '[MerchantPayoutCron] Transaction marked as fundeed after payout success',
           {
             batchId,
             transactionId: transaction.id,

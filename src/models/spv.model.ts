@@ -4,6 +4,7 @@ import {
   model,
   property,
 } from '@loopback/repository';
+import {PspMaster} from './psp-master.model';
 import {SpvApplication} from './spv-application.model';
 
 @model({
@@ -30,11 +31,8 @@ export class Spv extends Entity {
   })
   legalStructure: string;
 
-  @property({
-    type: 'string',
-    required: true,
-  })
-  pspPartner: string;
+  @belongsTo(() => PspMaster)
+  pspMasterId: string;
 
   @property({
     type: 'string',
@@ -88,6 +86,7 @@ export class Spv extends Entity {
 
 export interface SpvRelations {
   spvApplication?: SpvApplication;
+  pspMaster?: PspMaster;
 }
 
 export type SpvWithRelations = Spv & SpvRelations;

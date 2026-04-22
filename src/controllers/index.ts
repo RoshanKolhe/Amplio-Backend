@@ -31,6 +31,7 @@ export * from './merchant-profiles.controller';
 export * from './ownership-types.controller';
 export * from './permissions.controller';
 export * from './ping.controller';
+export * from './pool.controller';
 export * from './psp-master-fields.controller';
 export * from './psp-master.controller';
 export * from './roles.controller';

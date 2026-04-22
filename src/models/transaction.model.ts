@@ -1,5 +1,6 @@
 import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {Psp} from './psp.model';
+import {Spv} from './spv.model';
 
 @model({
   settings: {
@@ -254,6 +255,20 @@ export class Transaction extends Entity {
 
   @belongsTo(() => Psp)
   pspId: string;
+
+  @belongsTo(() => Spv)
+  spvId?: string;
+
+  @property({
+    type: 'boolean',
+    default: false,
+  })
+  isInPool?: boolean;
+
+  @property({
+    type: 'date',
+  })
+  poolAddedAt?: Date;
 
   @property({
     type: 'boolean',

@@ -1,5 +1,6 @@
 import {Entity, model, property, belongsTo} from '@loopback/repository';
 import {SpvApplication} from './spv-application.model';
+import {Spv} from './spv.model';
 
 @model()
 export class PoolFinancials extends Entity {
@@ -56,6 +57,33 @@ export class PoolFinancials extends Entity {
   reserveAmount?: number;
 
   @property({
+    type: 'number',
+    default: 0,
+    postgresql: {
+      dataType: 'float'
+    }
+  })
+  totalFunded?: number;
+
+  @property({
+    type: 'number',
+    default: 0,
+    postgresql: {
+      dataType: 'float'
+    }
+  })
+  totalSettled?: number;
+
+  @property({
+    type: 'number',
+    default: 0,
+    postgresql: {
+      dataType: 'float'
+    }
+  })
+  outstanding?: number;
+
+  @property({
     type: 'string'
   })
   dailyCutoffTime?: string;
@@ -91,6 +119,9 @@ export class PoolFinancials extends Entity {
 
   @belongsTo(() => SpvApplication)
   spvApplicationId: string;
+
+  @belongsTo(() => Spv)
+  spvId?: string;
 
   constructor(data?: Partial<PoolFinancials>) {
     super(data);

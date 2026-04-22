@@ -7,13 +7,17 @@ import {
   HttpErrors,
   param,
   patch,
+  post,
   requestBody,
   response,
 } from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
+import {v4 as uuidv4} from 'uuid';
 import {authorize} from '../authorization';
 import {Transaction} from '../models';
 import {PspRepository, TransactionRepository} from '../repositories';
+import {EscrowService} from '../services/escrow.service';
+import {PoolService} from '../services/pool.service';
 import {isSettlementEligibleForDiscounting} from '../utils/transactions';
 
 const MERCHANT_FUNDED_STATUS = 'fundeed';
@@ -131,6 +135,10 @@ export class TransactionController {
     public transactionRepository: TransactionRepository,
     @repository(PspRepository)
     public pspRepository: PspRepository,
+    @inject('service.pool.service')
+    private poolService: PoolService,
+    @inject('service.escrow.service')
+    private escrowService: EscrowService,
   ) { }
 
   private async getCurrentMerchantPspIds(usersId: string) {
@@ -366,4 +374,134 @@ async requestReceivableAmount(
     availableBalance: availableBalance - requestReceivableAmount,
   };
 }
+
+  @authenticate('jwt')
+  @post('/transactions/funded')
+  @response(200, {
+    description: 'Create a fundeed transaction and attempt pool inclusion',
+  })
+  async createFundedTransaction(
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['tnsId', 'amount', 'spvId', 'pspId'],
+            properties: {
+              tnsId: {type: 'string'},
+              amount: {type: 'number'},
+              spvId: {type: 'string'},
+              pspId: {type: 'string'},
+              orderId: {type: 'string'},
+              currency: {type: 'string'},
+              method: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      tnsId: string;
+      amount: number;
+      spvId: string;
+      pspId: string;
+      orderId?: string;
+      currency?: string;
+      method?: string;
+    },
+  ): Promise<Record<string, unknown>> {
+    if (Number(body.amount) <= 0) {
+      throw new HttpErrors.BadRequest('Transaction amount must be greater than zero');
+    }
+
+    const psp = await this.pspRepository.findById(body.pspId).catch(() => undefined);
+
+    if (!psp || psp.isDeleted || !psp.isActive) {
+      throw new HttpErrors.BadRequest('Active PSP not found');
+    }
+
+    const transaction = await this.transactionRepository.create({
+      id: uuidv4(),
+      tnsId: body.tnsId,
+      amount: Number(body.amount),
+      totalRecieved: Number(body.amount),
+      currency: body.currency ?? 'INR',
+      status: MERCHANT_FUNDED_STATUS,
+      pspStatus: 'captured',
+      pspSettlementStatus: 'PENDING',
+      orderId: body.orderId,
+      method: body.method,
+      amountRefund: 0,
+      haircut: 0,
+      netAmount: Number(body.amount),
+      requestReceivableAmount: 0,
+      releasedAmount: Number(body.amount),
+      captured: true,
+      lastReleasedAt: new Date(),
+      pspId: body.pspId,
+      spvId: body.spvId,
+      isInPool: false,
+      isActive: true,
+      isDeleted: false,
+    });
+
+    const poolResult = await this.poolService.addFundedTransactionToPool(
+      transaction.id,
+      body.spvId,
+    );
+    const persistedTransaction = await this.transactionRepository.findById(
+      transaction.id,
+    );
+
+    return {
+      success: true,
+      message: poolResult.added
+        ? 'Fundeed transaction added to pool'
+        : 'Fundeed transaction created but not added to pool',
+      transaction: persistedTransaction,
+      poolResult,
+    };
+  }
+
+  @authenticate('jwt')
+  @post('/transactions/settled')
+  @response(200, {
+    description: 'Simulate escrow settlement for a transaction',
+  })
+  async settleTransactionViaEscrow(
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['transactionId', 'spvId', 'amount'],
+            properties: {
+              transactionId: {type: 'string'},
+              spvId: {type: 'string'},
+              amount: {type: 'number'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      transactionId: string;
+      spvId: string;
+      amount: number;
+    },
+  ): Promise<Record<string, unknown>> {
+    const result = await this.escrowService.recordEscrowTransaction(body);
+    const transaction = await this.transactionRepository.findById(body.transactionId);
+
+    return {
+      success: true,
+      message: result.settlementApplied
+        ? 'Escrow matched and transaction marked settled'
+        : 'Escrow recorded but transaction is still pending settlement',
+      escrowTransaction: result.escrowTransaction,
+      transaction,
+    };
+  }
 }
