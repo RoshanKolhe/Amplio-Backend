@@ -8,6 +8,11 @@ import {
   PspMasterRepository,
   PspRepository,
 } from '../repositories';
+import {
+  decryptSecretValue,
+  encryptSecretValue,
+  maskSecretValue,
+} from '../utils/psp-secrets';
 
 type RazorpayPaymentsResponse = {
   items?: Record<string, unknown>[];
@@ -25,6 +30,7 @@ export class PspService {
     @repository(PspMasterFieldsRepository)
     public pspMasterFieldsRepository: PspMasterFieldsRepository,
   ) { }
+
 
   private normalizeCredentialValue(value?: string) {
     if (typeof value !== 'string') {
@@ -58,16 +64,34 @@ export class PspService {
         continue;
       }
 
-      const duplicatePsp = await this.pspRepository.findOne(
+      const existingPsps = await this.pspRepository.find(
         {
           where: {
-            [check.field]: check.value,
+            isDeleted: false,
+          },
+          fields: {
+            id: true,
+            apiKey: true,
+            apiSecret: true,
           },
         },
         tx ? {transaction: tx} : undefined,
       );
 
-      if (duplicatePsp && duplicatePsp.id !== pspId) {
+      const duplicatePsp = existingPsps.find(existingPsp => {
+        if (existingPsp.id === pspId) {
+          return false;
+        }
+
+        const credentialValue =
+          check.field === 'apiKey'
+            ? decryptSecretValue(existingPsp.apiKey)
+            : decryptSecretValue(existingPsp.apiSecret);
+
+        return credentialValue === check.value;
+      });
+
+      if (duplicatePsp) {
         throw new HttpErrors.BadRequest(check.message);
       }
     }
@@ -99,6 +123,46 @@ export class PspService {
     throw error;
   }
 
+  private encryptSensitiveFields(payload: Partial<Psp>) {
+    return {
+      ...payload,
+      apiKey: encryptSecretValue(payload.apiKey),
+      apiSecret: encryptSecretValue(payload.apiSecret),
+      webhookSecret: encryptSecretValue(payload.webhookSecret),
+      publishableKey: encryptSecretValue(payload.publishableKey),
+    };
+  }
+
+  private decryptSensitiveFields(psp: Psp) {
+    return {
+      ...psp,
+      apiKey: decryptSecretValue(psp.apiKey),
+      apiSecret: decryptSecretValue(psp.apiSecret),
+      webhookSecret: decryptSecretValue(psp.webhookSecret),
+      publishableKey: decryptSecretValue(psp.publishableKey),
+    };
+  }
+
+  private sanitizePspForResponse<T extends Psp & {pspMaster?: unknown}>(psp: T) {
+    const serializedPsp =
+      typeof psp.toJSON === 'function'
+        ? (psp.toJSON() as Record<string, unknown>)
+        : ({...psp} as Record<string, unknown>);
+
+    delete serializedPsp.usersId;
+    delete serializedPsp.merchantProfilesId;
+
+    return {
+      ...serializedPsp,
+      apiKey: maskSecretValue(String(serializedPsp.apiKey ?? '')),
+      apiSecret: maskSecretValue(String(serializedPsp.apiSecret ?? '')),
+      webhookSecret: maskSecretValue(String(serializedPsp.webhookSecret ?? '')),
+      publishableKey: maskSecretValue(
+        String(serializedPsp.publishableKey ?? ''),
+      ),
+    } as T;
+  }
+
   async fetchMerchantPsp(usersId: string, merchantProfilesId: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const psp: any[] = await this.pspRepository.find({
@@ -128,7 +192,7 @@ export class PspService {
     return {
       success: true,
       message: 'Merchant PSP fetched',
-      psp,
+      psp: psp.map(item => this.sanitizePspForResponse(item)),
     };
   }
 
@@ -242,6 +306,7 @@ export class PspService {
     await this.ensureUniqueCredentials(payload, pspId, tx);
 
     let psp;
+    const encryptedPayload = this.encryptSensitiveFields(payload);
 
     // ------------------------------------------------
     // UPDATE EXISTING PSP
@@ -274,7 +339,7 @@ export class PspService {
         await this.pspRepository.updateById(
           pspId,
           {
-            ...payload,
+            ...encryptedPayload,
             usersId,
             merchantProfilesId,
             status: 0,
@@ -291,7 +356,7 @@ export class PspService {
       return {
         success: true,
         message: 'Merchant PSP updated',
-        psp,
+        psp: this.sanitizePspForResponse(psp),
       };
     }
 
@@ -302,7 +367,7 @@ export class PspService {
     try {
       psp = await this.pspRepository.create(
         {
-          ...payload,
+          ...encryptedPayload,
           usersId,
           merchantProfilesId,
           status: 0,
@@ -321,7 +386,7 @@ export class PspService {
     return {
       success: true,
       message: 'Merchant PSP created',
-      psp,
+      psp: this.sanitizePspForResponse(psp),
     };
   }
 
@@ -391,13 +456,14 @@ export class PspService {
   async fetchTransactions(
     psp: Psp & {pspMaster?: {value?: string}},
   ): Promise<Record<string, unknown>[]> {
+    const decryptedCredentials = this.decryptSensitiveFields(psp);
     const provider = await this.getPspProviderValue(psp);
 
     if (provider !== 'razorpay') {
       return [];
     }
 
-    if (!psp.apiKey || !psp.apiSecret) {
+    if (!decryptedCredentials.apiKey || !decryptedCredentials.apiSecret) {
       throw new HttpErrors.BadRequest(
         `API credentials are missing for PSP ${psp.id}`,
       );
@@ -408,13 +474,13 @@ export class PspService {
     let skip = 0;
 
     try {
-      while (true) {
+      for (;;) {
         const response = await axios.get<RazorpayPaymentsResponse>(
           'https://api.razorpay.com/v1/payments',
           {
             auth: {
-              username: psp.apiKey,
-              password: psp.apiSecret,
+              username: decryptedCredentials.apiKey,
+              password: decryptedCredentials.apiSecret,
             },
             params: {
               count: pageSize,

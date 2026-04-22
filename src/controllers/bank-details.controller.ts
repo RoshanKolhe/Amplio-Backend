@@ -1,20 +1,21 @@
-import {authenticate} from '@loopback/authentication';
+import {authenticate, AuthenticationBindings} from '@loopback/authentication';
 import {inject} from '@loopback/core';
 import {Filter, FilterExcludingWhere, repository} from '@loopback/repository';
 import {
   get,
   getModelSchemaRef,
+  HttpErrors,
   param,
   patch,
   post,
   requestBody,
   response,
 } from '@loopback/rest';
+import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
 import {BankDetails} from '../models';
 import {BankDetailsRepository} from '../repositories';
 import {BankDetailsService} from '../services/bank-details.service';
-import {PerfiosService} from '../services/perfios.service';
 
 export class BankDetailsController {
   constructor(
@@ -22,10 +23,13 @@ export class BankDetailsController {
     public bankDetailsRepository: BankDetailsRepository,
     @inject('service.bankDetails.service')
     private bankDetailsService: BankDetailsService,
-    @inject('service.perfios.service')
-    private perfiosService: PerfiosService,
   ) {}
 
+  @authenticate('jwt')
+  @authorize({
+    roles: ['super_admin', 'company', 'trustee', 'investor', 'merchant'],
+    allowedScopes: ['kyc_onboarding'],
+  })
   @get('/bank-details/get-by-ifsc/{ifscCode}')
   async fetchBankInfo(
     @param.path.string('ifscCode') ifscCode: string,
@@ -38,8 +42,11 @@ export class BankDetailsController {
     };
   }
 
-  // @authenticate('jwt')
-  // @authorize({roles: ['super_admin', 'company', 'trustee', 'investor', 'merchant']})
+  @authenticate('jwt')
+  @authorize({
+    roles: ['super_admin', 'company', 'trustee', 'investor', 'merchant'],
+    allowedScopes: ['kyc_onboarding'],
+  })
   @post('/bank-details/verify-account')
   @response(200, {
     description: 'Verify bank account with Perfios',
@@ -57,13 +64,14 @@ export class BankDetailsController {
     },
   })
   async verifyAccount(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       required: true,
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['accountNumber', 'ifscCode', 'accountHolderName', 'usersId'],
+            required: ['accountNumber', 'ifscCode', 'accountHolderName'],
             properties: {
               accountNumber: {type: 'string'},
               ifscCode: {type: 'string'},
@@ -79,14 +87,36 @@ export class BankDetailsController {
       accountNumber: string;
       ifscCode: string;
       accountHolderName: string;
-      usersId: string;
+      usersId?: string;
       roleValue?: string;
     },
   ): Promise<object> {
-    const roleValue = body.roleValue ?? 'merchant';
-    
+    if (body.usersId && body.usersId !== currentUser.id) {
+      throw new HttpErrors.Forbidden(
+        'You can only verify bank accounts for your own user',
+      );
+    }
+
+    const supportedRoleValues = ['merchant', 'company', 'trustee', 'investor'];
+    const requestedRoleValue = body.roleValue?.trim();
+    const roleValue =
+      requestedRoleValue && requestedRoleValue.length > 0
+        ? requestedRoleValue
+        : (currentUser.roles.find((role: string) =>
+            supportedRoleValues.includes(role),
+          ) ?? 'merchant');
+
+    if (!currentUser.roles.includes(roleValue) && roleValue !== 'merchant') {
+      throw new HttpErrors.Forbidden(
+        'You can only verify bank accounts for your own role',
+      );
+    }
+
     return this.bankDetailsService.verifyWithPerfios({
-      ...body,
+      accountNumber: body.accountNumber,
+      ifscCode: body.ifscCode,
+      accountHolderName: body.accountHolderName,
+      usersId: currentUser.id,
       roleValue,
     });
   }

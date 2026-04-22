@@ -104,9 +104,10 @@ const ACTIVE_BATCH_STATUSES = [
 const MAX_LOOKBACK_DAYS = 7;
 const RETRY_BACKOFF_MS = 5 * 60 * 1000;
 const ENABLED_DEBUG_VALUES = new Set(['1', 'true', 'yes', 'on']);
-const DEFAULT_FALLBACK_PLATFORM_DAILY_LIMIT = Number(
-  process.env.DEFAULT_PLATFORM_DAILY_LIMIT ?? 100000,
-);
+const MAX_ALLOWED_DAILY_CAP_AMOUNT = 1000000;
+// Until the AI-led statement analysis is integrated, the platform controls
+// maxAllowedDailyCap and keeps it fixed at 10 lakh for merchant onboarding.
+const DEFAULT_PLATFORM_CONTROLLED_DAILY_CAP = MAX_ALLOWED_DAILY_CAP_AMOUNT;
 const DEFAULT_MINIMUM_PAYOUT_AMOUNT = 200000;
 const PAYOUT_TRANSACTION_OPTIONS = {
   isolationLevel: 'READ COMMITTED',
@@ -344,6 +345,12 @@ export class MerchantPayoutService {
       );
     }
 
+    if (config.maxAllowedDailyCap > MAX_ALLOWED_DAILY_CAP_AMOUNT) {
+      throw new HttpErrors.BadRequest(
+        `maxAllowedDailyCap cannot exceed ${MAX_ALLOWED_DAILY_CAP_AMOUNT}`,
+      );
+    }
+
     const window = this.resolveBusinessWindow(
       config,
       this.getLocalBusinessDate(new Date(), this.getConfigTimezone(config)),
@@ -400,12 +407,18 @@ export class MerchantPayoutService {
     referenceAt: Date,
   ) {
     const maxAllowedDailyCap = Number(
-      payload.maxAllowedDailyCap ?? existingConfig?.maxAllowedDailyCap,
+      existingConfig?.maxAllowedDailyCap ?? DEFAULT_PLATFORM_CONTROLLED_DAILY_CAP,
     );
 
     if (!Number.isFinite(maxAllowedDailyCap) || maxAllowedDailyCap <= 0) {
       throw new HttpErrors.BadRequest(
         'maxAllowedDailyCap must be greater than zero',
+      );
+    }
+
+    if (maxAllowedDailyCap > MAX_ALLOWED_DAILY_CAP_AMOUNT) {
+      throw new HttpErrors.BadRequest(
+        `maxAllowedDailyCap cannot exceed ${MAX_ALLOWED_DAILY_CAP_AMOUNT}`,
       );
     }
 
@@ -416,11 +429,30 @@ export class MerchantPayoutService {
     const rawSelectedDailyCap = hasSelectedDailyCapInPayload
       ? payload.selectedDailyCap
       : existingConfig?.selectedDailyCap;
-    const selectedDailyCap = Number(rawSelectedDailyCap ?? 0);
-    const normalizedSelectedDailyCap =
-      Number.isFinite(selectedDailyCap) && selectedDailyCap > 0
-        ? Number(Math.min(selectedDailyCap, maxAllowedDailyCap).toFixed(2))
-        : undefined;
+    let normalizedSelectedDailyCap: number | undefined;
+
+    if (rawSelectedDailyCap !== undefined && rawSelectedDailyCap !== null) {
+      const selectedDailyCap = Number(rawSelectedDailyCap);
+
+      if (!Number.isFinite(selectedDailyCap)) {
+        throw new HttpErrors.BadRequest(
+          'selectedDailyCap must be a valid number',
+        );
+      }
+
+      if (selectedDailyCap < 0) {
+        throw new HttpErrors.BadRequest(
+          'selectedDailyCap cannot be negative',
+        );
+      }
+
+      if (selectedDailyCap > 0) {
+        normalizedSelectedDailyCap = Number(
+          Math.min(selectedDailyCap, maxAllowedDailyCap).toFixed(2),
+        );
+      }
+    }
+
     const minimumPayoutAmount = Number(
       payload.minimumPayoutAmount ??
         existingConfig?.minimumPayoutAmount ??
@@ -463,9 +495,7 @@ export class MerchantPayoutService {
       usersId,
       maxAllowedDailyCap: Number(maxAllowedDailyCap.toFixed(2)),
       selectedDailyCap: normalizedSelectedDailyCap,
-      minimumPayoutAmount: Number(
-        Math.max(minimumPayoutAmount, 0).toFixed(2),
-      ),
+      minimumPayoutAmount: Number(Math.max(minimumPayoutAmount, 0).toFixed(2)),
       scheduleMode: scheduleMode === 'bucketed' ? 'bucketed' : 'eod',
       frequencyHours,
       startTime: payload.startTime ?? existingConfig?.startTime ?? '09:00',
@@ -535,7 +565,10 @@ export class MerchantPayoutService {
     }
 
     const timezone = this.getConfigTimezone(config);
-    const currentBusinessDate = this.getLocalBusinessDate(referenceAt, timezone);
+    const currentBusinessDate = this.getLocalBusinessDate(
+      referenceAt,
+      timezone,
+    );
     const lastManualBusinessDate = this.getLocalBusinessDate(
       new Date(config.lastManualConfigChangeAt),
       timezone,
@@ -574,7 +607,10 @@ export class MerchantPayoutService {
       existingConfig,
       payload,
     );
-    const currentBusinessDate = this.getLocalBusinessDate(referenceAt, timezone);
+    const currentBusinessDate = this.getLocalBusinessDate(
+      referenceAt,
+      timezone,
+    );
     const lastManualBusinessDate = this.getLocalBusinessDate(
       new Date(existingConfig.lastManualConfigChangeAt),
       timezone,
@@ -673,7 +709,11 @@ export class MerchantPayoutService {
   }
 
   private resolveFrequencyMinutes(frequencyHours?: number) {
-    if (!Number.isFinite(frequencyHours) || !frequencyHours || frequencyHours <= 0) {
+    if (
+      !Number.isFinite(frequencyHours) ||
+      !frequencyHours ||
+      frequencyHours <= 0
+    ) {
       return undefined;
     }
 
@@ -684,16 +724,13 @@ export class MerchantPayoutService {
     merchantProfile: MerchantProfiles,
     referenceAt: Date,
   ) {
-    const fallbackDailyCap = Math.max(
-      DEFAULT_FALLBACK_PLATFORM_DAILY_LIMIT,
-      DEFAULT_MINIMUM_PAYOUT_AMOUNT,
-    );
+    const normalizedFallbackDailyCap = DEFAULT_PLATFORM_CONTROLLED_DAILY_CAP;
 
     return {
       merchantProfilesId: merchantProfile.id,
       usersId: merchantProfile.usersId,
-      maxAllowedDailyCap: fallbackDailyCap,
-      selectedDailyCap: fallbackDailyCap,
+      maxAllowedDailyCap: normalizedFallbackDailyCap,
+      selectedDailyCap: normalizedFallbackDailyCap,
       minimumPayoutAmount: DEFAULT_MINIMUM_PAYOUT_AMOUNT,
       scheduleMode: 'eod',
       frequencyHours: undefined,
@@ -817,7 +854,9 @@ export class MerchantPayoutService {
   }
 
   resolveMinimumPayoutAmount(config: MerchantPayoutConfig) {
-    return Number(Math.max(Number(config.minimumPayoutAmount ?? 0), 0).toFixed(2));
+    return Number(
+      Math.max(Number(config.minimumPayoutAmount ?? 0), 0).toFixed(2),
+    );
   }
 
   resolveCommitmentEndAt(config: MerchantPayoutConfig) {
@@ -1319,10 +1358,16 @@ export class MerchantPayoutService {
         .reduce((sum, candidate) => sum + candidate.availableAmount, 0)
         .toFixed(2),
     );
-    const allocations = this.allocateTransactions(candidates, availableDailyCap);
+    const allocations = this.allocateTransactions(
+      candidates,
+      availableDailyCap,
+    );
     const releasedAmount = Number(
       allocations
-        .reduce((sum, allocation) => sum + Number(allocation.allocatedAmount ?? 0), 0)
+        .reduce(
+          (sum, allocation) => sum + Number(allocation.allocatedAmount ?? 0),
+          0,
+        )
         .toFixed(2),
     );
     const totalFundedAmount = Number(
@@ -1884,7 +1929,10 @@ export class MerchantPayoutService {
 
     for (const baseConfig of configs) {
       try {
-        const config = await this.applyPendingStopIfDue(baseConfig, referenceAt);
+        const config = await this.applyPendingStopIfDue(
+          baseConfig,
+          referenceAt,
+        );
 
         if (!this.shouldProcessConfig(config)) {
           this.logMerchantPayoutCronDebug(
@@ -1977,7 +2025,9 @@ export class MerchantPayoutService {
           {
             ...this.getConfigDebugContext(config),
             dueWindowCount: dueWindows.length,
-            dueWindows: dueWindows.map(window => this.getWindowDebugContext(window)),
+            dueWindows: dueWindows.map(window =>
+              this.getWindowDebugContext(window),
+            ),
           },
         );
 
@@ -2142,9 +2192,8 @@ export class MerchantPayoutService {
           {
             batchId,
             transactionId: transaction.id,
-            previousPlatformStatus: this.resolvePlatformFundingStatus(
-              transaction,
-            ),
+            previousPlatformStatus:
+              this.resolvePlatformFundingStatus(transaction),
             currentStatus: MERCHANT_FUNDED_STATUS,
             pspStatus: transaction.pspStatus ?? transaction.status,
             releasedAmount: updatedReleasedAmount,

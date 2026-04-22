@@ -110,7 +110,6 @@ export class PerfiosService {
         errorMessage,
       );
 
-      // throw new HttpErrors.BadRequest(errorMessage);
       return {
         success: true,
         message:

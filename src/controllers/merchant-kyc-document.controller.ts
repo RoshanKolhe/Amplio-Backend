@@ -1,6 +1,7 @@
-import {authenticate} from '@loopback/authentication';
+import {authenticate, AuthenticationBindings} from '@loopback/authentication';
 import {inject} from '@loopback/core';
-import {get, param, patch, post, requestBody, response} from '@loopback/rest';
+import {get, HttpErrors, param, patch, post, requestBody, response} from '@loopback/rest';
+import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
 import {MerchantKycDocument} from '../models';
 import {
@@ -21,6 +22,7 @@ export class MerchantKycDocumentController {
     description: 'Upload merchant KYC document',
   })
   async uploadDocument(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       required: true,
       content: {
@@ -55,7 +57,19 @@ export class MerchantKycDocumentController {
     message: string;
     document: MerchantKycDocument;
   }> {
-    return this.merchantKycDocumentService.uploadDocument(body);
+    if (body.usersId && body.usersId !== currentUser.id) {
+      throw new HttpErrors.Forbidden(
+        'You can only upload documents for your own merchant account',
+      );
+    }
+
+    return this.merchantKycDocumentService.uploadDocument(
+      {
+        ...body,
+        usersId: currentUser.id,
+      },
+      currentUser.id,
+    );
   }
 
   @authenticate('jwt')
@@ -65,13 +79,20 @@ export class MerchantKycDocumentController {
     description: 'Fetch merchant KYC documents by merchant profile',
   })
   async fetchByMerchantProfile(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @param.path.string('usersId') usersId: string,
   ): Promise<{
     success: boolean;
     message: string;
     documents: MerchantKycDocument[];
   }> {
-    return this.merchantKycDocumentService.fetchByUser(usersId);
+    if (usersId !== currentUser.id) {
+      throw new HttpErrors.Forbidden(
+        'You can only fetch documents for your own merchant account',
+      );
+    }
+
+    return this.merchantKycDocumentService.fetchByUser(usersId, currentUser.id);
   }
 
   @authenticate('jwt')

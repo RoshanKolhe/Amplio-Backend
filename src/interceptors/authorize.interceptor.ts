@@ -1,4 +1,7 @@
-import {AuthenticationBindings} from '@loopback/authentication';
+import {
+  AUTHENTICATION_METADATA_KEY,
+  AuthenticationBindings,
+} from '@loopback/authentication';
 import {
   Getter,
   Interceptor,
@@ -16,11 +19,10 @@ import {CurrentUser} from '../types';
 
 @globalInterceptor('authorization', {tags: {name: 'authorize'}})
 export class AuthorizeInterceptor implements Provider<Interceptor> {
-
   constructor(
     @inject.getter(AuthenticationBindings.CURRENT_USER)
     private getCurrentUser: Getter<CurrentUser>,
-  ) { }
+  ) {}
 
   value(): Interceptor {
     return this.intercept.bind(this);
@@ -31,26 +33,37 @@ export class AuthorizeInterceptor implements Provider<Interceptor> {
     next: () => ValueOrPromise<InvocationResult>,
   ) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const authMeta: any = MetadataInspector.getMethodMetadata(
+    const authorizeMeta: any = MetadataInspector.getMethodMetadata(
       'authorization.metadata',
       context.target!.constructor.prototype,
       context.methodName,
     );
 
-    if (!authMeta) {
-      return next();
-    }
+    const authenticationMeta = MetadataInspector.getMethodMetadata(
+      AUTHENTICATION_METADATA_KEY,
+      context.target!.constructor.prototype,
+      context.methodName,
+    );
 
-    const requiredRoles = authMeta.roles ?? [];
-    const requiredPermissions = authMeta.permissions ?? [];
-
-    if (!requiredRoles.length && !requiredPermissions.length) {
+    if (!authorizeMeta && !authenticationMeta) {
       return next();
     }
 
     const currentUser = await this.getCurrentUser();
     if (!currentUser) {
       throw new HttpErrors.Unauthorized('User not authenticated');
+    }
+
+    const requiredRoles = authorizeMeta?.roles ?? [];
+    const requiredPermissions = authorizeMeta?.permissions ?? [];
+    const allowedScopes = authorizeMeta?.allowedScopes ?? [];
+
+    if (currentUser.scope && !allowedScopes.includes(currentUser.scope)) {
+      throw new HttpErrors.Forbidden('Forbidden: Token scope not allowed');
+    }
+
+    if (!requiredRoles.length && !requiredPermissions.length) {
+      return next();
     }
 
     // SUPER ADMIN BYPASS
@@ -68,7 +81,10 @@ export class AuthorizeInterceptor implements Provider<Interceptor> {
 
     // PERMISSION CHECK
     if (requiredPermissions.length > 0) {
-      const matched = intersection(currentUser.permissions, requiredPermissions);
+      const matched = intersection(
+        currentUser.permissions,
+        requiredPermissions,
+      );
       if (matched.length === 0) {
         throw new HttpErrors.Forbidden('Forbidden: Permission not allowed');
       }

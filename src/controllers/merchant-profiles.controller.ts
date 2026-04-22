@@ -9,7 +9,9 @@ import {
   param,
   patch,
   post,
+  Request,
   requestBody,
+  RestBindings,
 } from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
@@ -43,6 +45,7 @@ import {KycService} from '../services/kyc.service';
 import {MediaService} from '../services/media.service';
 import {MerchantKycDocumentService} from '../services/merchant-kyc-document.service';
 import {PspService} from '../services/psp.service';
+import {JWTService} from '../services/jwt-service';
 import {SessionService} from '../services/session.service';
 import {UboDetailsService} from '../services/ubo-details.service';
 
@@ -78,6 +81,8 @@ export class MerchantProfilesController {
     private usersRepository: UsersRepository,
     @inject('service.session.service')
     private sessionService: SessionService,
+    @inject('service.jwt.service')
+    private jwtService: JWTService,
     @inject('service.merchantKycDocumentService.service')
     private merchantKycDocumentService: MerchantKycDocumentService,
     @inject('service.bankDetails.service')
@@ -92,7 +97,7 @@ export class MerchantProfilesController {
     private kycService: KycService,
     @inject('service.media.service')
     private mediaService: MediaService,
-  ) { }
+  ) {}
 
   async getKycApplicationStatus(applicationId: string): Promise<string[]> {
     const kycApplication =
@@ -115,6 +120,142 @@ export class MerchantProfilesController {
     }
 
     return progress;
+  }
+
+  private assertUuid(value: string | undefined, fieldName: string) {
+    if (
+      !value ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value,
+      )
+    ) {
+      throw new HttpErrors.BadRequest(`Invalid ${fieldName}`);
+    }
+  }
+
+  private ensureCurrentUserMatchesRequestedUser(
+    currentUser: UserProfile,
+    requestedUsersId?: string,
+  ) {
+    if (requestedUsersId && requestedUsersId !== currentUser.id) {
+      throw new HttpErrors.Forbidden(
+        'You can only access your own merchant onboarding data',
+      );
+    }
+
+    return currentUser.id;
+  }
+
+  private async getCurrentMerchantProfileForUser(
+    currentUser: UserProfile,
+    tx?: unknown,
+  ) {
+    const merchantProfile = await this.merchantProfilesRepository.findOne(
+      {
+        where: {
+          and: [{usersId: currentUser.id}, {isDeleted: false}],
+        },
+      },
+      tx ? {transaction: tx} : undefined,
+    );
+
+    if (!merchantProfile) {
+      throw new HttpErrors.NotFound('Merchant not found');
+    }
+
+    return merchantProfile;
+  }
+
+  private extractBearerToken(authorizationHeader?: string) {
+    const normalizedHeader = String(authorizationHeader ?? '').trim();
+
+    if (!normalizedHeader) {
+      return undefined;
+    }
+
+    const [scheme, token] = normalizedHeader.split(' ');
+
+    if (scheme?.toLowerCase() !== 'bearer' || !token) {
+      throw new HttpErrors.Unauthorized('Invalid authorization header format');
+    }
+
+    return token.trim();
+  }
+
+  private buildMerchantKycProgressProfile(
+    merchantProfile: MerchantProfiles & {
+      merchantDealershipType?: {id: string; label: string; value: string};
+      kycApplications?: {
+        id: string;
+        status: number;
+        verifiedAt?: Date;
+        reason?: string;
+      };
+    },
+  ) {
+    return {
+      id: merchantProfile.id,
+      usersId: merchantProfile.usersId,
+      companyName: merchantProfile.companyName,
+      CIN: merchantProfile.CIN,
+      GSTIN: merchantProfile.GSTIN,
+      udyamRegistrationNumber: merchantProfile.udyamRegistrationNumber,
+      dateOfIncorporation: merchantProfile.dateOfIncorporation,
+      cityOfIncorporation: merchantProfile.cityOfIncorporation,
+      stateOfIncorporation: merchantProfile.stateOfIncorporation,
+      countryOfIncorporation: merchantProfile.countryOfIncorporation,
+      merchantDealershipTypeId: merchantProfile.merchantDealershipTypeId,
+      kycApplicationsId: merchantProfile.kycApplicationsId,
+      isActive: merchantProfile.isActive,
+      isBusinessKycComplete: merchantProfile.isBusinessKycComplete,
+      merchantDealershipType: merchantProfile.merchantDealershipType ?? null,
+      kycApplications: merchantProfile.kycApplications ?? null,
+    };
+  }
+
+  private async authorizeMerchantKycReadAccess(
+    usersId: string,
+    sessionId?: string,
+    authorizationHeader?: string,
+  ) {
+    const bearerToken = this.extractBearerToken(authorizationHeader);
+
+    if (bearerToken) {
+      const currentUser = await this.jwtService.verifyToken(bearerToken);
+
+      if (!currentUser.roles.includes('merchant')) {
+        throw new HttpErrors.Forbidden(
+          'Only merchant users can access merchant KYC data',
+        );
+      }
+
+      if (
+        currentUser.scope &&
+        currentUser.scope !== 'kyc_onboarding'
+      ) {
+        throw new HttpErrors.Forbidden('Forbidden: Token scope not allowed');
+      }
+
+      return this.ensureCurrentUserMatchesRequestedUser(currentUser, usersId);
+    }
+
+    if (sessionId) {
+      this.assertUuid(sessionId, 'sessionId');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response: any = await this.sessionService.fetchProfile(sessionId);
+
+      if (!response?.profile?.id || response.profile.id !== usersId) {
+        throw new HttpErrors.Forbidden(
+          'You can only access your own merchant onboarding data',
+        );
+      }
+
+      return response.profile.id;
+    }
+
+    throw new HttpErrors.Unauthorized(
+      'Authentication or a verified session is required',
+    );
   }
 
   @authenticate('jwt')
@@ -152,10 +293,7 @@ export class MerchantProfilesController {
       const merchantProfile = await this.merchantProfilesRepository.findOne(
         {
           where: {
-            and: [
-              {id: profileId},
-              {isDeleted: false}
-            ]
+            and: [{id: profileId}, {isDeleted: false}],
           },
         },
         {transaction: tx},
@@ -174,7 +312,7 @@ export class MerchantProfilesController {
       const merchantPanCards = await this.merchantPanCardRepository.find(
         {
           where: {
-            merchantProfilesId: merchantProfile.id
+            merchantProfilesId: merchantProfile.id,
           },
         },
         {transaction: tx},
@@ -183,7 +321,7 @@ export class MerchantProfilesController {
       const merchantDocuments = await this.merchantKycDocumentRepository.find(
         {
           where: {
-            usersId: merchantProfile.usersId
+            usersId: merchantProfile.usersId,
           },
         },
         {transaction: tx},
@@ -195,8 +333,8 @@ export class MerchantProfilesController {
             and: [
               {usersId: merchantProfile.usersId},
               {identifierId: merchantProfile.id},
-              {roleValue: 'merchant'}
-            ]
+              {roleValue: 'merchant'},
+            ],
           },
         },
         {transaction: tx},
@@ -205,11 +343,7 @@ export class MerchantProfilesController {
       const bankDetails = await this.bankDetailsRepository.find(
         {
           where: {
-            and: [
-              {usersId: merchantProfile.usersId},
-              {roleValue: 'merchant'},
-            ]
-
+            and: [{usersId: merchantProfile.usersId}, {roleValue: 'merchant'}],
           },
         },
         {transaction: tx},
@@ -222,8 +356,7 @@ export class MerchantProfilesController {
               {usersId: merchantProfile.usersId},
               {identifierId: merchantProfile.id},
               {roleValue: 'merchant'},
-            ]
-
+            ],
           },
         },
         {transaction: tx},
@@ -241,17 +374,6 @@ export class MerchantProfilesController {
 
       const pspIds = psps.map(psp => psp.id);
 
-      const kycApplications = await this.kycApplicationsRepository.find(
-        {
-          where: {
-            usersId: merchantProfile.usersId,
-            identifierId: profileId,
-            roleValue: 'merchant',
-          },
-        },
-        {transaction: tx},
-      );
-
       const mediaIds = Array.from(
         new Set(
           [
@@ -267,9 +389,9 @@ export class MerchantProfilesController {
 
       const deletedTransactions = pspIds.length
         ? await this.transactionRepository.deleteAll(
-          {pspId: {inq: pspIds}},
-          {transaction: tx},
-        )
+            {pspId: {inq: pspIds}},
+            {transaction: tx},
+          )
         : {count: 0};
 
       const deletedPsps = await this.pspRepository.deleteAll(
@@ -297,13 +419,14 @@ export class MerchantProfilesController {
         {transaction: tx},
       );
 
-      const deletedAddressDetails = await this.addressDetailsRepository.deleteAll(
-        {
-          identifierId: merchantProfile.id,
-          roleValue: 'merchant',
-        },
-        {transaction: tx},
-      );
+      const deletedAddressDetails =
+        await this.addressDetailsRepository.deleteAll(
+          {
+            identifierId: merchantProfile.id,
+            roleValue: 'merchant',
+          },
+          {transaction: tx},
+        );
 
       const deletedMerchantDocuments =
         await this.merchantKycDocumentRepository.deleteAll(
@@ -321,14 +444,15 @@ export class MerchantProfilesController {
           {transaction: tx},
         );
 
-      const deletedKycApplications = await this.kycApplicationsRepository.deleteAll(
-        {
-          usersId: merchantProfile.usersId,
-          identifierId: merchantProfile.id,
-          roleValue: 'merchant',
-        },
-        {transaction: tx},
-      );
+      const deletedKycApplications =
+        await this.kycApplicationsRepository.deleteAll(
+          {
+            usersId: merchantProfile.usersId,
+            identifierId: merchantProfile.id,
+            roleValue: 'merchant',
+          },
+          {transaction: tx},
+        );
 
       const merchantRole = await this.rolesRepository.findOne(
         {
@@ -339,12 +463,12 @@ export class MerchantProfilesController {
 
       const deletedMerchantUserRoles = merchantRole
         ? await this.userRolesRepository.deleteAll(
-          {
-            usersId: merchantProfile.usersId,
-            rolesId: merchantRole.id,
-          },
-          {transaction: tx},
-        )
+            {
+              usersId: merchantProfile.usersId,
+              rolesId: merchantRole.id,
+            },
+            {transaction: tx},
+          )
         : {count: 0};
 
       const deletedRegistrationSessions =
@@ -373,10 +497,11 @@ export class MerchantProfilesController {
         {transaction: tx},
       );
 
-      const deletedMerchantProfile = await this.merchantProfilesRepository.deleteAll(
-        {id: merchantProfile.id},
-        {transaction: tx},
-      );
+      const deletedMerchantProfile =
+        await this.merchantProfilesRepository.deleteAll(
+          {id: merchantProfile.id},
+          {transaction: tx},
+        );
 
       const remainingUserRoles = await this.userRolesRepository.count(
         {
@@ -385,16 +510,20 @@ export class MerchantProfilesController {
         {transaction: tx},
       );
 
-      const remainingKycApplications = await this.kycApplicationsRepository.count(
-        {
-          usersId: merchantProfile.usersId,
-        },
-        {transaction: tx},
-      );
+      const remainingKycApplications =
+        await this.kycApplicationsRepository.count(
+          {
+            usersId: merchantProfile.usersId,
+          },
+          {transaction: tx},
+        );
 
       let userDeleted = false;
 
-      if (remainingUserRoles.count === 0 && remainingKycApplications.count === 0) {
+      if (
+        remainingUserRoles.count === 0 &&
+        remainingKycApplications.count === 0
+      ) {
         await this.usersRepository.deleteById(merchantProfile.usersId, {
           transaction: tx,
         });
@@ -439,8 +568,10 @@ export class MerchantProfilesController {
     success: boolean;
     message: string;
     currentProgress: string[];
-    profile: MerchantProfiles | null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    profile: any;
   }> {
+    this.assertUuid(sessionId, 'sessionId');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const response: any = await this.sessionService.fetchProfile(sessionId);
 
@@ -449,39 +580,14 @@ export class MerchantProfilesController {
         where: {
           and: [{usersId: response.profile.id}, {isDeleted: false}],
         },
+        order: ['createdAt DESC'],
         include: [
-          {
-            relation: 'merchantPanCard',
-            scope: {
-              include: [
-                {
-                  relation: 'media',
-                  scope: {
-                    fields: {
-                      fileUrl: true,
-                      id: true,
-                      fileOriginalName: true,
-                      fileType: true,
-                    },
-                  },
-                },
-              ],
-            },
-          },
           {relation: 'merchantDealershipType'},
-          {
-            relation: 'users',
-            scope: {fields: {id: true, phone: true, email: true}},
-          },
           {
             relation: 'kycApplications',
             scope: {
               fields: {id: true, status: true, verifiedAt: true, reason: true},
             },
-          },
-          {
-            relation: 'media',
-            scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
           },
         ],
       });
@@ -503,7 +609,17 @@ export class MerchantProfilesController {
         success: true,
         message: 'New Profile',
         currentProgress,
-        profile: merchantProfile,
+        profile: this.buildMerchantKycProgressProfile(
+          merchantProfile as MerchantProfiles & {
+            merchantDealershipType?: {id: string; label: string; value: string};
+            kycApplications?: {
+              id: string;
+              status: number;
+              verifiedAt?: Date;
+              reason?: string;
+            };
+          },
+        ),
       };
     }
 
@@ -519,6 +635,8 @@ export class MerchantProfilesController {
   async getMerchantProfileKycData(
     @param.path.string('stepperId') stepperId: string,
     @param.path.string('usersId') usersId: string,
+    @param.query.string('sessionId') sessionId?: string,
+    @inject(RestBindings.Http.REQUEST) request?: Request,
   ): Promise<{
     success: boolean;
     message: string;
@@ -530,6 +648,13 @@ export class MerchantProfilesController {
       value: string;
     } | null;
   }> {
+    this.assertUuid(usersId, 'usersId');
+    await this.authorizeMerchantKycReadAccess(
+      usersId,
+      sessionId,
+      request?.headers.authorization,
+    );
+
     const steppersAllowed = [
       'merchant_kyc',
       'pan_verified',
@@ -548,6 +673,7 @@ export class MerchantProfilesController {
       where: {
         and: [{usersId}, {isDeleted: false}],
       },
+      order: ['createdAt DESC'],
       include: [
         {
           relation: 'merchantPanCard',
@@ -626,34 +752,34 @@ export class MerchantProfilesController {
         }
       ).merchantDealershipType
         ? {
-          id: (
-            merchantProfile as MerchantProfiles & {
-              merchantDealershipType: {
-                id: string;
-                label: string;
-                value: string;
-              };
-            }
-          ).merchantDealershipType.id,
-          label: (
-            merchantProfile as MerchantProfiles & {
-              merchantDealershipType: {
-                id: string;
-                label: string;
-                value: string;
-              };
-            }
-          ).merchantDealershipType.label,
-          value: (
-            merchantProfile as MerchantProfiles & {
-              merchantDealershipType: {
-                id: string;
-                label: string;
-                value: string;
-              };
-            }
-          ).merchantDealershipType.value,
-        }
+            id: (
+              merchantProfile as MerchantProfiles & {
+                merchantDealershipType: {
+                  id: string;
+                  label: string;
+                  value: string;
+                };
+              }
+            ).merchantDealershipType.id,
+            label: (
+              merchantProfile as MerchantProfiles & {
+                merchantDealershipType: {
+                  id: string;
+                  label: string;
+                  value: string;
+                };
+              }
+            ).merchantDealershipType.label,
+            value: (
+              merchantProfile as MerchantProfiles & {
+                merchantDealershipType: {
+                  id: string;
+                  label: string;
+                  value: string;
+                };
+              }
+            ).merchantDealershipType.value,
+          }
         : null;
 
       const documentsResponse =
@@ -697,12 +823,11 @@ export class MerchantProfilesController {
     }
 
     if (stepperId === 'merchant_ubo_details') {
-      const uboDetailsResponse =
-        await this.uboDetailsService.fetchUboDetails(
-          merchantProfile.usersId,
-          merchantProfile.id,
-          'merchant'
-        );
+      const uboDetailsResponse = await this.uboDetailsService.fetchUboDetails(
+        merchantProfile.usersId,
+        merchantProfile.id,
+        'merchant',
+      );
 
       return {
         success: true,
@@ -730,14 +855,17 @@ export class MerchantProfilesController {
     };
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
   @post('/merchant-profiles/kyc-upload-documents')
   async uploadMerchantKYCDocuments(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'documents'],
+            required: ['documents'],
             properties: {
               usersId: {type: 'string'},
               documents: {
@@ -760,7 +888,7 @@ export class MerchantProfilesController {
       },
     })
     body: {
-      usersId: string;
+      usersId?: string;
       documents: {
         merchantKycDocumentRequirementsId?: string;
         documentsId?: string;
@@ -775,6 +903,10 @@ export class MerchantProfilesController {
     uploadedDocuments: MerchantKycDocument[];
     currentProgress: string[];
   }> {
+    const currentUserId = this.ensureCurrentUserMatchesRequestedUser(
+      currentUser,
+      body.usersId,
+    );
     const tx =
       await this.merchantProfilesRepository.dataSource.beginTransaction({
         IsolationLevel: IsolationLevel.READ_COMMITTED,
@@ -782,14 +914,14 @@ export class MerchantProfilesController {
 
     try {
       const merchant = await this.merchantProfilesRepository.findOne(
-        {where: {usersId: body.usersId, isDeleted: false}},
+        {where: {usersId: currentUserId, isDeleted: false}},
         {transaction: tx},
       );
 
       if (!merchant) throw new HttpErrors.NotFound('Merchant not found');
 
       const newDocs = body.documents.map(doc => ({
-        usersId: body.usersId,
+        usersId: currentUserId,
         merchantKycDocumentRequirementsId:
           doc.merchantKycDocumentRequirementsId ?? doc.documentsId ?? '',
         documentsFileId: doc.documentsFileId,
@@ -811,9 +943,10 @@ export class MerchantProfilesController {
 
       const result =
         await this.merchantKycDocumentService.uploadDocumentsForKyc(
-          body.usersId,
+          currentUserId,
           newDocs,
           tx,
+          currentUser.id,
         );
 
       const currentProgress = await this.updateKycProgress(
@@ -830,14 +963,17 @@ export class MerchantProfilesController {
     }
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
   @patch('/merchant-profiles/kyc-upload-documents')
   async patchMerchantKYCDocuments(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'documents'],
+            required: ['documents'],
             properties: {
               usersId: {type: 'string'},
               documents: {
@@ -860,7 +996,7 @@ export class MerchantProfilesController {
       },
     })
     body: {
-      usersId: string;
+      usersId?: string;
       documents: {
         merchantKycDocumentRequirementsId?: string;
         documentsId?: string;
@@ -875,17 +1011,20 @@ export class MerchantProfilesController {
     uploadedDocuments: MerchantKycDocument[];
     currentProgress: string[];
   }> {
-    return this.uploadMerchantKYCDocuments(body);
+    return this.uploadMerchantKYCDocuments(currentUser, body);
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
   @post('/merchant-profiles/kyc-bank-details')
   async uploadMerchantBankDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'bankDetails'],
+            required: ['bankDetails'],
             properties: {
               usersId: {type: 'string'},
               bankDetails: {
@@ -921,7 +1060,7 @@ export class MerchantProfilesController {
       },
     })
     body: {
-      usersId: string;
+      usersId?: string;
       bankDetails: {
         bankName: string;
         bankShortCode: string;
@@ -938,18 +1077,22 @@ export class MerchantProfilesController {
   ): Promise<{
     success: boolean;
     message: string;
-    account: BankDetails;
+    account: BankDetails | null;
     currentProgress: string[];
   }> {
+    const currentUserId = this.ensureCurrentUserMatchesRequestedUser(
+      currentUser,
+      body.usersId,
+    );
     const merchant = await this.merchantProfilesRepository.findOne({
-      where: {usersId: body.usersId, isDeleted: false},
+      where: {usersId: currentUserId, isDeleted: false},
     });
 
     if (!merchant) throw new HttpErrors.NotFound('Merchant not found');
 
     const bankData = new BankDetails({
       ...body.bankDetails,
-      usersId: body.usersId,
+      usersId: currentUserId,
       mode: 1,
       status: 0,
       roleValue: 'merchant',
@@ -965,16 +1108,20 @@ export class MerchantProfilesController {
     return {...result, currentProgress};
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
   @patch('/merchant-profiles/kyc-bank-details')
   async patchMerchantKycBankDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'bankDetails'],
+            required: ['bankDetails'],
             properties: {
               usersId: {type: 'string'},
+              accountId: {type: 'string'},
               bankDetails: {
                 type: 'object',
                 required: [
@@ -1008,7 +1155,8 @@ export class MerchantProfilesController {
       },
     })
     body: {
-      usersId: string;
+      usersId?: string;
+      accountId?: string;
       bankDetails: {
         bankName: string;
         bankShortCode: string;
@@ -1025,20 +1173,104 @@ export class MerchantProfilesController {
   ): Promise<{
     success: boolean;
     message: string;
-    account: BankDetails;
+    account: BankDetails | null;
     currentProgress: string[];
   }> {
-    return this.uploadMerchantBankDetails(body);
+    const currentUserId = this.ensureCurrentUserMatchesRequestedUser(
+      currentUser,
+      body.usersId,
+    );
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        IsolationLevel: IsolationLevel.READ_COMMITTED,
+      });
+
+    try {
+      const merchant = await this.merchantProfilesRepository.findOne(
+        {
+          where: {usersId: currentUserId, isDeleted: false},
+        },
+        {transaction: tx},
+      );
+
+      if (!merchant) {
+        throw new HttpErrors.NotFound('Merchant not found');
+      }
+
+      let accountId = body.accountId?.trim();
+      if (accountId) {
+        this.assertUuid(accountId, 'accountId');
+      }
+
+      if (!accountId) {
+        const latestBankAccount = await this.bankDetailsRepository.findOne(
+          {
+            where: {
+              and: [
+                {usersId: currentUserId},
+                {roleValue: 'merchant'},
+                {isActive: true},
+                {isDeleted: false},
+              ],
+            },
+            order: ['createdAt DESC'],
+          },
+          {transaction: tx},
+        );
+
+        if (!latestBankAccount) {
+          await tx.rollback();
+          return this.uploadMerchantBankDetails(currentUser, {
+            usersId: currentUserId,
+            bankDetails: body.bankDetails,
+          });
+        }
+
+        accountId = latestBankAccount.id;
+      }
+
+      const bankDetailsResponse =
+        await this.bankDetailsService.updateBankAccountInfo(
+          accountId,
+          new BankDetails({
+            ...body.bankDetails,
+            usersId: currentUserId,
+            roleValue: 'merchant',
+            status: 0,
+            mode: 1,
+          }),
+          tx,
+          {
+            usersId: currentUserId,
+            roleValue: 'merchant',
+          },
+        );
+
+      const currentProgress = await this.updateKycProgress(
+        merchant.kycApplicationsId,
+        'merchant_bank_details',
+      );
+
+      await tx.commit();
+
+      return {...bankDetailsResponse, currentProgress};
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
   @post('/merchant-profiles/kyc-ubo-details')
   async uploadMerchantKycUboDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'uboDetails'],
+            required: ['uboDetails'],
             properties: {
               usersId: {type: 'string'},
               uboDetails: {
@@ -1083,7 +1315,7 @@ export class MerchantProfilesController {
       },
     })
     body: {
-      usersId: string;
+      usersId?: string;
       uboDetails: Array<{
         fullName: string;
         email: string;
@@ -1113,6 +1345,10 @@ export class MerchantProfilesController {
     }>;
     currentProgress: string[];
   }> {
+    const currentUserId = this.ensureCurrentUserMatchesRequestedUser(
+      currentUser,
+      body.usersId,
+    );
     const tx =
       await this.merchantProfilesRepository.dataSource.beginTransaction({
         IsolationLevel: IsolationLevel.READ_COMMITTED,
@@ -1121,7 +1357,7 @@ export class MerchantProfilesController {
     try {
       const merchant = await this.merchantProfilesRepository.findOne(
         {
-          where: {usersId: body.usersId, isDeleted: false},
+          where: {usersId: currentUserId, isDeleted: false},
         },
         {transaction: tx},
       );
@@ -1134,7 +1370,7 @@ export class MerchantProfilesController {
         uboDetail =>
           new UboDetails({
             ...uboDetail,
-            usersId: body.usersId,
+            usersId: currentUserId,
             roleValue: 'merchant',
             identifierId: merchant.id,
             mode: 1,
@@ -1144,11 +1380,10 @@ export class MerchantProfilesController {
           }),
       );
 
-      const result =
-        await this.uboDetailsService.createUboDetails(
-          uboDetailsData,
-          tx,
-        );
+      const result = await this.uboDetailsService.createUboDetails(
+        uboDetailsData,
+        tx,
+      );
 
       const currentProgress = await this.updateKycProgress(
         merchant.kycApplicationsId,
@@ -1162,7 +1397,7 @@ export class MerchantProfilesController {
         message: result.message,
         createdUboDetails: result.createdUboDetails,
         erroredUboDetails: result.erroredUboDetails,
-        currentProgress
+        currentProgress,
       };
     } catch (err) {
       await tx.rollback();
@@ -1170,14 +1405,17 @@ export class MerchantProfilesController {
     }
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
   @patch('/merchant-profiles/kyc-ubo-details')
   async patchMerchantKycUboDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'uboId', 'uboDetail'],
+            required: ['uboId', 'uboDetail'],
             properties: {
               usersId: {type: 'string'},
               uboId: {type: 'string'},
@@ -1188,7 +1426,7 @@ export class MerchantProfilesController {
       },
     })
     body: {
-      usersId: string;
+      usersId?: string;
       uboId: string;
       uboDetail: Partial<UboDetails>;
     },
@@ -1197,6 +1435,11 @@ export class MerchantProfilesController {
     message: string;
     uboDetail: UboDetails | null;
   }> {
+    this.assertUuid(body.uboId, 'uboId');
+    const currentUserId = this.ensureCurrentUserMatchesRequestedUser(
+      currentUser,
+      body.usersId,
+    );
 
     const tx =
       await this.merchantProfilesRepository.dataSource.beginTransaction({
@@ -1204,12 +1447,20 @@ export class MerchantProfilesController {
       });
 
     try {
-      const result =
-        await this.uboDetailsService.updateUboDetail(
-          body.uboId,
-          body.uboDetail,
-          tx,
-        );
+      const merchant = await this.getCurrentMerchantProfileForUser(
+        currentUser,
+        tx,
+      );
+      const result = await this.uboDetailsService.updateUboDetail(
+        body.uboId,
+        body.uboDetail,
+        tx,
+        {
+          usersId: currentUserId,
+          identifierId: merchant.id,
+          roleValue: 'merchant',
+        },
+      );
 
       await tx.commit();
 
@@ -1220,14 +1471,17 @@ export class MerchantProfilesController {
     }
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
   @post('/merchant-profiles/kyc-psp')
   async createMerchantPsp(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'psp'],
+            required: ['psp'],
             properties: {
               usersId: {type: 'string'},
               psp: {type: 'object'},
@@ -1237,7 +1491,7 @@ export class MerchantProfilesController {
       },
     })
     body: {
-      usersId: string;
+      usersId?: string;
       psp: Partial<Psp>;
     },
   ): Promise<{
@@ -1246,6 +1500,10 @@ export class MerchantProfilesController {
     psp: Psp;
     currentProgress: string[];
   }> {
+    const currentUserId = this.ensureCurrentUserMatchesRequestedUser(
+      currentUser,
+      body.usersId,
+    );
     const tx =
       await this.merchantProfilesRepository.dataSource.beginTransaction({
         IsolationLevel: IsolationLevel.READ_COMMITTED,
@@ -1255,7 +1513,7 @@ export class MerchantProfilesController {
       const merchant = await this.merchantProfilesRepository.findOne(
         {
           where: {
-            usersId: body.usersId,
+            usersId: currentUserId,
             isDeleted: false,
           },
         },
@@ -1268,7 +1526,7 @@ export class MerchantProfilesController {
 
       const result = await this.pspService.upsertMerchantPsp(
         merchant.id,
-        body.usersId,
+        currentUserId,
         body.psp,
         undefined,
         tx,
@@ -1293,14 +1551,17 @@ export class MerchantProfilesController {
     }
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
   @patch('/merchant-profiles/kyc-psp')
   async updateMerchantPsp(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'pspId', 'psp'],
+            required: ['pspId', 'psp'],
             properties: {
               usersId: {type: 'string'},
               pspId: {type: 'string'},
@@ -1311,7 +1572,7 @@ export class MerchantProfilesController {
       },
     })
     body: {
-      usersId: string;
+      usersId?: string;
       pspId: string;
       psp: Partial<Psp>;
     },
@@ -1321,6 +1582,11 @@ export class MerchantProfilesController {
     psp: Psp;
     currentProgress: string[];
   }> {
+    this.assertUuid(body.pspId, 'pspId');
+    const currentUserId = this.ensureCurrentUserMatchesRequestedUser(
+      currentUser,
+      body.usersId,
+    );
     const tx =
       await this.merchantProfilesRepository.dataSource.beginTransaction({
         isolationLevel: IsolationLevel.READ_COMMITTED,
@@ -1330,7 +1596,7 @@ export class MerchantProfilesController {
       const merchant = await this.merchantProfilesRepository.findOne(
         {
           where: {
-            usersId: body.usersId,
+            usersId: currentUserId,
             isDeleted: false,
           },
         },
@@ -1343,9 +1609,9 @@ export class MerchantProfilesController {
 
       const result = await this.pspService.upsertMerchantPsp(
         merchant.id,
-        body.usersId,
+        currentUserId,
         body.psp,
-        body.pspId, // pass PSP ID for update
+        body.pspId,
         tx,
       );
 
@@ -1368,14 +1634,17 @@ export class MerchantProfilesController {
     }
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
   @post('/merchant-profiles/kyc-address-details')
   async uploadMerchantKycAddressDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'registeredAddress'],
+            required: ['registeredAddress'],
             properties: {
               usersId: {type: 'string'},
               registeredAddress: getModelSchemaRef(AddressDetails, {
@@ -1390,7 +1659,7 @@ export class MerchantProfilesController {
       },
     })
     body: {
-      usersId: string;
+      usersId?: string;
       registeredAddress: Partial<AddressDetails>;
       correspondenceAddress?: Partial<AddressDetails>;
     },
@@ -1401,8 +1670,12 @@ export class MerchantProfilesController {
     correspondenceAddress: AddressDetails | null;
     currentProgress: string[];
   }> {
+    const currentUserId = this.ensureCurrentUserMatchesRequestedUser(
+      currentUser,
+      body.usersId,
+    );
     const merchant = await this.merchantProfilesRepository.findOne({
-      where: {usersId: body.usersId, isDeleted: false},
+      where: {usersId: currentUserId, isDeleted: false},
     });
 
     if (!merchant) throw new HttpErrors.NotFound('Merchant not found');
@@ -1413,7 +1686,7 @@ export class MerchantProfilesController {
         addressType: 'registered',
         mode: 1,
         status: 0,
-        usersId: body.usersId,
+        usersId: currentUserId,
         identifierId: merchant.id,
         roleValue: 'merchant',
       },
@@ -1425,7 +1698,7 @@ export class MerchantProfilesController {
         addressType: 'correspondence',
         mode: 1,
         status: 0,
-        usersId: body.usersId,
+        usersId: currentUserId,
         identifierId: merchant.id,
         roleValue: 'merchant',
       });
@@ -1444,14 +1717,17 @@ export class MerchantProfilesController {
     return {...response, currentProgress};
   }
 
+  @authenticate('jwt')
+  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
   @patch('/merchant-profiles/kyc-address-details')
   async patchMerchantKycAddressDetails(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @requestBody({
       content: {
         'application/json': {
           schema: {
             type: 'object',
-            required: ['usersId', 'registeredAddress'],
+            required: ['registeredAddress'],
             properties: {
               usersId: {type: 'string'},
               registeredAddress: getModelSchemaRef(AddressDetails, {
@@ -1466,7 +1742,7 @@ export class MerchantProfilesController {
       },
     })
     body: {
-      usersId: string;
+      usersId?: string;
       registeredAddress: Partial<AddressDetails>;
       correspondenceAddress?: Partial<AddressDetails>;
     },
@@ -1477,7 +1753,7 @@ export class MerchantProfilesController {
     correspondenceAddress: AddressDetails | null;
     currentProgress: string[];
   }> {
-    return this.uploadMerchantKycAddressDetails(body);
+    return this.uploadMerchantKycAddressDetails(currentUser, body);
   }
 
   @authenticate('jwt')
@@ -1561,7 +1837,6 @@ export class MerchantProfilesController {
     ).count;
   }
 
-
   @authenticate('jwt')
   @authorize({roles: ['super_admin']})
   @get('/merchant-profiles')
@@ -1578,7 +1853,7 @@ export class MerchantProfilesController {
       totalPending: number;
       totalVerified: number;
       totalUnderReview: number;
-    }
+    };
   }> {
     let rootWhere = {
       ...filter?.where,
@@ -1617,10 +1892,11 @@ export class MerchantProfilesController {
         },
       ],
       order: filter?.order ?? ['createdAt DESC'],
-
     });
 
-    const totalCount = (await this.merchantProfilesRepository.count(filter?.where)).count;
+    const totalCount = (
+      await this.merchantProfilesRepository.count(filter?.where)
+    ).count;
     const totalPending = await this.countByStatus(0);
     const totalUnderReview = await this.countByStatus(1);
     const totalVerified = await this.countByStatus(2);
@@ -1635,7 +1911,7 @@ export class MerchantProfilesController {
         totalRejected: totalRejected,
         totalUnderReview: totalUnderReview,
         totalVerified: totalVerified,
-      }
+      },
     };
   }
 
@@ -1691,7 +1967,6 @@ export class MerchantProfilesController {
       data: merchant,
     };
   }
-
 
   // for merchant bank details upload
   @authenticate('jwt')
@@ -1763,7 +2038,6 @@ export class MerchantProfilesController {
       },
     });
 
-
     if (!merchant) throw new HttpErrors.NotFound('Merchant not found');
 
     const bankData = new BankDetails({
@@ -1817,6 +2091,7 @@ export class MerchantProfilesController {
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
     @param.path.string('accountId') accountId: string,
   ): Promise<{success: boolean; message: string; bankDetails: BankDetails}> {
+    this.assertUuid(accountId, 'accountId');
     const merchantProfile = await this.merchantProfilesRepository.findOne({
       where: {
         and: [{usersId: currentUser.id}, {isDeleted: false}],
@@ -1828,7 +2103,10 @@ export class MerchantProfilesController {
     }
 
     const bankDetailsResponse =
-      await this.bankDetailsService.fetchUserBankAccount(accountId);
+      await this.bankDetailsService.fetchUserBankAccount(accountId, {
+        usersId: currentUser.id,
+        roleValue: 'merchant',
+      });
 
     return {
       success: true,
@@ -1853,9 +2131,11 @@ export class MerchantProfilesController {
     })
     accountData: Partial<BankDetails>,
   ): Promise<{success: boolean; message: string; account: BankDetails | null}> {
-    const tx = await this.merchantProfilesRepository.dataSource.beginTransaction(
-      {IsolationLevel: IsolationLevel.READ_COMMITTED},
-    );
+    this.assertUuid(accountId, 'accountId');
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        IsolationLevel: IsolationLevel.READ_COMMITTED,
+      });
     try {
       const merchantProfile = await this.merchantProfilesRepository.findOne(
         {
@@ -1875,6 +2155,10 @@ export class MerchantProfilesController {
           accountId,
           accountData,
           tx,
+          {
+            usersId: currentUser.id,
+            roleValue: 'merchant',
+          },
         );
 
       await tx.commit();
@@ -1886,13 +2170,12 @@ export class MerchantProfilesController {
     }
   }
 
-
   @authenticate('jwt')
   @authorize({roles: ['merchant']})
   @get('/merchant-profiles/UBO-details')
   async fetchUboDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-  ): Promise<{success: boolean, message: string, UboDetails: UboDetails[]}> {
+  ): Promise<{success: boolean; message: string; UboDetails: UboDetails[]}> {
     const merchantProfiles = await this.merchantProfilesRepository.findOne({
       where: {
         and: [{usersId: currentUser.id}, {isDeleted: false}],
@@ -1905,23 +2188,22 @@ export class MerchantProfilesController {
     const uboDetailsResponse = await this.uboDetailsService.fetchUboDetails(
       merchantProfiles?.usersId,
       merchantProfiles?.id,
-      'merchant'
+      'merchant',
     );
 
     return {
       success: true,
       message: 'UBO Details',
-      UboDetails: uboDetailsResponse.uboDetails
-    }
+      UboDetails: uboDetailsResponse.uboDetails,
+    };
   }
-
 
   @authenticate('jwt')
   @authorize({roles: ['merchant']})
   @get('/merchant-profiles/PSP-details')
   async fetchPSPDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-  ): Promise<{success: boolean, message: string, pspDetails: Psp[]}> {
+  ): Promise<{success: boolean; message: string; pspDetails: Psp[]}> {
     const merchantProfiles = await this.merchantProfilesRepository.findOne({
       where: {
         and: [{usersId: currentUser.id}, {isDeleted: false}],
@@ -1933,14 +2215,14 @@ export class MerchantProfilesController {
     }
     const pspDetails = await this.pspService.fetchMerchantPsp(
       merchantProfiles?.usersId,
-      merchantProfiles?.id
+      merchantProfiles?.id,
     );
 
     return {
       success: true,
       message: 'PSP Details',
-      pspDetails: pspDetails.psp
-    }
+      pspDetails: pspDetails.psp,
+    };
   }
 
   @authenticate('jwt')
@@ -2065,7 +2347,6 @@ export class MerchantProfilesController {
         tx,
       );
 
-
       await tx.commit();
 
       return {
@@ -2156,15 +2437,20 @@ export class MerchantProfilesController {
     message: string;
     updatedProfile: MerchantProfiles;
   }> {
-    const tx = await this.merchantProfilesRepository.dataSource.beginTransaction({
-      isolationLevel: IsolationLevel.READ_COMMITTED,
-    });
+    const tx =
+      await this.merchantProfilesRepository.dataSource.beginTransaction({
+        isolationLevel: IsolationLevel.READ_COMMITTED,
+      });
 
     try {
       const merchantProfile = await this.merchantProfilesRepository.findOne(
         {
           where: {
-            and: [{usersId: currentUser.id}, {isActive: true}, {isDeleted: false}],
+            and: [
+              {usersId: currentUser.id},
+              {isActive: true},
+              {isDeleted: false},
+            ],
           },
         },
         {transaction: tx},
@@ -2177,10 +2463,7 @@ export class MerchantProfilesController {
       const merchantPanCard = await this.merchantPanCardRepository.findOne(
         {
           where: {
-            and: [
-              {merchantProfilesId: merchantProfile.id},
-              {isDeleted: false},
-            ],
+            and: [{merchantProfilesId: merchantProfile.id}, {isDeleted: false}],
           },
         },
         {transaction: tx},
@@ -2218,12 +2501,18 @@ export class MerchantProfilesController {
         throw new HttpErrors.BadRequest('GSTIN already registered');
       }
 
+      const trimmedUdyamRegistrationNumber =
+        body.udyamRegistrationNumber?.trim();
       const normalizedUdyamRegistrationNumber =
-        body.udyamRegistrationNumber?.trim() || null;
+        trimmedUdyamRegistrationNumber &&
+        trimmedUdyamRegistrationNumber.length > 0
+          ? trimmedUdyamRegistrationNumber
+          : null;
 
       if (
         normalizedUdyamRegistrationNumber &&
-        normalizedUdyamRegistrationNumber !== merchantProfile.udyamRegistrationNumber
+        normalizedUdyamRegistrationNumber !==
+          merchantProfile.udyamRegistrationNumber
       ) {
         const duplicateUdyam = await this.merchantProfilesRepository.findOne(
           {
@@ -2387,14 +2676,18 @@ export class MerchantProfilesController {
               },
               {
                 relation: 'media',
-                scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
+                scope: {
+                  fields: {id: true, fileOriginalName: true, fileUrl: true},
+                },
               },
             ],
           },
           {transaction: tx},
         );
 
-      if (merchantProfile.merchantLogo !== updatedMerchantProfile.merchantLogo) {
+      if (
+        merchantProfile.merchantLogo !== updatedMerchantProfile.merchantLogo
+      ) {
         if (merchantProfile.merchantLogo) {
           await this.mediaService.updateMediaUsedStatus(
             [merchantProfile.merchantLogo],
@@ -2452,7 +2745,6 @@ export class MerchantProfilesController {
     message: string;
     documents: MerchantKycDocument[];
   }> {
-
     const merchantProfiles = await this.merchantProfilesRepository.findOne({
       where: {
         and: [{usersId: currentUser.id}, {isDeleted: false}],
@@ -2463,15 +2755,16 @@ export class MerchantProfilesController {
       throw HttpErrors.NotFound('Merchant not found');
     }
 
-    const documentDetails = await this.merchantKycDocumentService.fetchByUser(merchantProfiles.usersId);
+    const documentDetails = await this.merchantKycDocumentService.fetchByUser(
+      merchantProfiles.usersId,
+    );
 
     return {
       success: true,
       message: 'Documents',
-      documents: documentDetails.documents
-    }
+      documents: documentDetails.documents,
+    };
   }
-
 
   @authenticate('jwt')
   @authorize({roles: ['merchant']})
@@ -2500,6 +2793,4 @@ export class MerchantProfilesController {
       merchantProfiles.id,
     );
   }
-
 }
-

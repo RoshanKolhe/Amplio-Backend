@@ -5,7 +5,22 @@ import {get, HttpErrors, post, requestBody} from '@loopback/rest';
 import {securityId, UserProfile} from '@loopback/security';
 import _ from 'lodash';
 import {authorize} from '../authorization';
-import {CompanyPanCardsRepository, CompanyProfilesRepository, InvestorPanCardsRepository, InvestorProfileRepository, KycApplicationsRepository, MerchantPanCardRepository, MerchantProfilesRepository, OtpRepository, RegistrationSessionsRepository, RolesRepository, TrusteePanCardsRepository, TrusteeProfilesRepository, UserRolesRepository, UsersRepository} from '../repositories';
+import {
+  CompanyPanCardsRepository,
+  CompanyProfilesRepository,
+  InvestorPanCardsRepository,
+  InvestorProfileRepository,
+  KycApplicationsRepository,
+  MerchantPanCardRepository,
+  MerchantProfilesRepository,
+  OtpRepository,
+  RegistrationSessionsRepository,
+  RolesRepository,
+  TrusteePanCardsRepository,
+  TrusteeProfilesRepository,
+  UserRolesRepository,
+  UsersRepository,
+} from '../repositories';
 import {BcryptHasher} from '../services/hash.password.bcrypt';
 import {JWTService} from '../services/jwt-service';
 import {MediaService} from '../services/media.service';
@@ -55,7 +70,99 @@ export class AuthController {
     private mediaService: MediaService,
     @inject('service.companyDataMapper.service')
     private companyDataMapperService: CompanyDataMapperService,
-  ) { }
+  ) {}
+
+  private normalizeSessionId(sessionId: string) {
+    return String(sessionId ?? '').trim();
+  }
+
+  private normalizeOtpValue(otp: string | number) {
+    return String(otp ?? '').trim();
+  }
+
+  private async generateMerchantOnboardingAuth(
+    user: {
+      id: string;
+      email?: string;
+      phone?: string;
+    },
+    merchantProfilesId: string,
+  ) {
+    const accessToken = await this.jwtService.generateMerchantOnboardingToken({
+      sub: user.id,
+      id: user.id,
+      role: 'merchant',
+      roles: ['merchant'],
+      scope: 'kyc_onboarding',
+      merchantProfilesId,
+      email: user.email,
+      phone: user.phone,
+      permissions: [],
+    });
+
+    return {
+      accessToken,
+      user: {
+        id: user.id,
+        role: 'merchant' as const,
+        merchantProfilesId,
+      },
+    };
+  }
+
+  private async findActiveRegistrationSession(sessionId: string) {
+    const normalizedSessionId = this.normalizeSessionId(sessionId);
+
+    if (!normalizedSessionId) {
+      throw new HttpErrors.BadRequest('Invalid session');
+    }
+
+    const session = await this.registrationSessionsRepository.findOne({
+      where: {
+        and: [{id: normalizedSessionId}, {isActive: true}, {isDeleted: false}],
+      },
+    });
+
+    if (!session) {
+      throw new HttpErrors.BadRequest('Invalid session');
+    }
+
+    return session;
+  }
+
+  private getPendingMerchantKycStatuses(roleValue: string) {
+    return roleValue === 'merchant' ? [0, 1] : [0];
+  }
+
+  private async buildExistingMerchantRegistrationResponse(
+    user: {
+      id: string;
+      email?: string;
+      phone?: string;
+    },
+    merchantProfile: {
+      id: string;
+    },
+    kycApplication: {
+      status: number;
+      currentProgress?: string[] | null;
+    },
+  ) {
+    const merchantAuth = await this.generateMerchantOnboardingAuth(
+      user,
+      merchantProfile.id,
+    );
+
+    return {
+      success: true,
+      message: 'Merchant onboarding is already in progress',
+      kycStatus: kycApplication.status,
+      currentProgress: kycApplication.currentProgress ?? ['merchant_kyc'],
+      usersId: user.id,
+      accessToken: merchantAuth.accessToken,
+      user: merchantAuth.user,
+    };
+  }
 
   // ---------------------------------------Super Admin Auth API's------------------------------------
   @post('/auth/super-admin')
@@ -80,7 +187,7 @@ export class AuthController {
       fullName: string;
       email: string;
       phone: string;
-      password: string
+      password: string;
     },
   ): Promise<{success: boolean; message: string; userId: string}> {
     const superadminRole = await this.rolesRepository.findOne({
@@ -142,21 +249,27 @@ export class AuthController {
             properties: {
               email: {type: 'string'},
               password: {type: 'string'},
-              rememberMe: {type: 'boolean'}
-            }
-          }
-        }
-      }
+              rememberMe: {type: 'boolean'},
+            },
+          },
+        },
+      },
     })
-    body: {email: string; password: string; rememberMe: boolean}
-  ): Promise<{success: boolean; message: string; accessToken: string; user: object}> {
+    body: {
+      email: string;
+      password: string;
+      rememberMe: boolean;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    accessToken: string;
+    user: object;
+  }> {
     const userData = await this.usersRepository.findOne({
       where: {
-        and: [
-          {email: body.email},
-          {isDeleted: false}
-        ]
-      }
+        and: [{email: body.email}, {isDeleted: false}],
+      },
     });
 
     if (!userData) {
@@ -165,10 +278,16 @@ export class AuthController {
 
     const user = await this.userService.verifyCredentials(body);
 
-    const {roles, permissions} = await this.rbacService.getUserRoleAndPermissionsByRole(user.id!, 'super_admin');
+    const {roles, permissions} =
+      await this.rbacService.getUserRoleAndPermissionsByRole(
+        user.id!,
+        'super_admin',
+      );
 
     if (!roles.includes('super_admin')) {
-      throw new HttpErrors.Forbidden('Access denied. Only super_admin can login here.');
+      throw new HttpErrors.Forbidden(
+        'Access denied. Only super_admin can login here.',
+      );
     }
 
     const userProfile: UserProfile & {
@@ -185,12 +304,16 @@ export class AuthController {
     };
 
     const token = await this.jwtService.generateToken(userProfile);
-    const profile = await this.rbacService.returnSuperAdminProfile(user.id, roles, permissions);
+    const profile = await this.rbacService.returnSuperAdminProfile(
+      user.id,
+      roles,
+      permissions,
+    );
     return {
       success: true,
-      message: "Super Admin login successful",
+      message: 'Super Admin login successful',
       accessToken: token,
-      user: profile
+      user: profile,
     };
   }
 
@@ -208,16 +331,16 @@ export class AuthController {
             required: ['oldPassword', 'newPassword'],
             properties: {
               oldPassword: {type: 'string'},
-              newPassword: {type: 'string'}
-            }
-          }
-        }
-      }
+              newPassword: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       oldPassword: string;
       newPassword: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
     const user = await this.usersRepository.findById(currentUser.id);
 
@@ -226,7 +349,10 @@ export class AuthController {
     }
 
     const oldHashedPassword = user.password;
-    const isValidPassword = await this.hasher.comparePassword(body.oldPassword, oldHashedPassword!);
+    const isValidPassword = await this.hasher.comparePassword(
+      body.oldPassword,
+      oldHashedPassword!,
+    );
 
     if (!isValidPassword) {
       throw new HttpErrors.BadRequest('Invalid old password');
@@ -242,8 +368,8 @@ export class AuthController {
 
     return {
       success: true,
-      message: "Password updated successfully"
-    }
+      message: 'Password updated successfully',
+    };
   }
 
   @authenticate('jwt')
@@ -264,11 +390,9 @@ export class AuthController {
       ...userData,
       roles: currentUser?.roles,
       permissions: currentUser?.permissions || [],
-      isBusinessKycComplete:
-        companyProfile?.isBusinessKycComplete ?? false,
+      isBusinessKycComplete: companyProfile?.isBusinessKycComplete ?? false,
     };
   }
-
 
   // -----------------------------------------registration verification Otp's---------------------------
   @post('/auth/send-phone-otp')
@@ -281,52 +405,57 @@ export class AuthController {
             required: ['phone', 'role'],
             properties: {
               phone: {type: 'string'},
-              role: {type: 'string'}
-            }
-          }
-        }
-      }
+              role: {type: 'string'},
+            },
+          },
+        },
+      },
     })
     body: {
       phone: string;
       role: string;
-    }
+    },
   ): Promise<{success: boolean; message: string; sessionId: string}> {
-
     const user = await this.usersRepository.findOne({
-      where: {phone: body.phone}
+      where: {phone: body.phone},
     });
 
     const role = await this.rolesRepository.findOne({
-      where: {value: body.role}
+      where: {value: body.role},
     });
 
     if (!role) {
       if (process.env.NODE_ENV === 'dev') {
-        throw new HttpErrors.BadRequest("Invalid role received");
+        throw new HttpErrors.BadRequest('Invalid role received');
       }
-      throw new HttpErrors.InternalServerError("Something went wrong");
+      throw new HttpErrors.InternalServerError('Something went wrong');
     }
 
     if (user) {
       const isUserRole = await this.userRolesRepository.findOne({
-        where: {usersId: user.id, rolesId: role.id}
+        where: {usersId: user.id, rolesId: role.id},
       });
 
       const kycApplication = await this.kycApplicationsRepository.findOne({
-        where: {usersId: user.id, roleValue: role.value, isActive: true, isDeleted: false, status: 0}
+        where: {
+          usersId: user.id,
+          roleValue: role.value,
+          isActive: true,
+          isDeleted: false,
+          status: {inq: this.getPendingMerchantKycStatuses(role.value)},
+        },
       });
 
       if (isUserRole && !kycApplication) {
         throw new HttpErrors.BadRequest(
-          `Phone number is already registered as ${role.label}`
+          `Phone number is already registered as ${role.label}`,
         );
       }
     }
 
     await this.otpRepository.updateAll(
       {isUsed: true, expiresAt: new Date()},
-      {identifier: body.phone, type: 0}
+      {identifier: body.phone, type: 0},
     );
 
     const otp = await this.otpRepository.create({
@@ -335,14 +464,14 @@ export class AuthController {
       identifier: body.phone,
       attempts: 0,
       isUsed: false,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 min
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 min
     });
 
     if (!otp) {
       throw new HttpErrors.InternalServerError(
         process.env.NODE_ENV === 'dev'
-          ? "Failed to create otp"
-          : "Something went wrong"
+          ? 'Failed to create otp'
+          : 'Something went wrong',
       );
     }
 
@@ -352,9 +481,9 @@ export class AuthController {
           {phoneNumber: body.phone},
           {roleValue: body.role},
           {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+          {isDeleted: false},
+        ],
+      },
     });
 
     if (existingSession) {
@@ -366,7 +495,7 @@ export class AuthController {
 
       return {
         success: true,
-        message: "OTP sent successfully",
+        message: 'OTP sent successfully',
         sessionId: existingSession.id,
       };
     }
@@ -384,14 +513,14 @@ export class AuthController {
     if (!session) {
       throw new HttpErrors.InternalServerError(
         process.env.NODE_ENV === 'dev'
-          ? "Failed to create registration session"
-          : "Something went wrong"
+          ? 'Failed to create registration session'
+          : 'Something went wrong',
       );
     }
 
     return {
       success: true,
-      message: "OTP sent successfully",
+      message: 'OTP sent successfully',
       sessionId: session.id,
     };
   }
@@ -406,23 +535,22 @@ export class AuthController {
             required: ['sessionId', 'otp'],
             properties: {
               sessionId: {type: 'string'},
-              otp: {type: 'string'},
+              otp: {
+                oneOf: [{type: 'string'}, {type: 'number'}],
+              },
             },
           },
         },
       },
     })
-    body: {sessionId: string; otp: string},
+    body: {
+      sessionId: string;
+      otp: string | number;
+    },
   ): Promise<{success: boolean; message: string}> {
-    const {sessionId, otp} = body;
-
-    const session = await this.registrationSessionsRepository.findById(
-      sessionId,
-    );
-
-    if (!session) {
-      throw new HttpErrors.BadRequest('Invalid session');
-    }
+    const sessionId = this.normalizeSessionId(body.sessionId);
+    const otp = this.normalizeOtpValue(body.otp);
+    const session = await this.findActiveRegistrationSession(sessionId);
 
     if (new Date(session.expiresAt) < new Date()) {
       throw new HttpErrors.BadRequest('Session expired, please restart signup');
@@ -494,24 +622,21 @@ export class AuthController {
             properties: {
               sessionId: {type: 'string'},
               email: {type: 'string'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
     body: {
       sessionId: string;
       email: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
-
-    const session = await this.registrationSessionsRepository.findById(
-      body.sessionId,
-    );
-
-    if (!session) {
-      throw new HttpErrors.BadRequest('Invalid session');
-    }
+    const sessionId = this.normalizeSessionId(body.sessionId);
+    const normalizedEmail = String(body.email ?? '')
+      .trim()
+      .toLowerCase();
+    const session = await this.findActiveRegistrationSession(sessionId);
 
     if (new Date(session.expiresAt) < new Date()) {
       throw new HttpErrors.BadRequest('Session expired, please restart signup');
@@ -522,41 +647,46 @@ export class AuthController {
     }
 
     const user = await this.usersRepository.findOne({
-      where: {email: body.email}
+      where: {email: normalizedEmail},
     });
 
     const role = await this.rolesRepository.findOne({
-      where: {value: session.roleValue}
+      where: {value: session.roleValue},
     });
 
     if (!role) {
       if (process.env.NODE_ENV === 'dev') {
-        throw new HttpErrors.BadRequest("Invalid role received");
+        throw new HttpErrors.BadRequest('Invalid role received');
       }
-      throw new HttpErrors.InternalServerError("Something went wrong");
+      throw new HttpErrors.InternalServerError('Something went wrong');
     }
 
     if (user) {
       if (session.phoneNumber !== user.phone) {
         throw new HttpErrors.BadRequest(
-          `Email is already registered with another user`
+          `Email is already registered with another user`,
         );
       }
 
       const kycApplication = await this.kycApplicationsRepository.findOne({
-        where: {usersId: user.id, roleValue: role.value, isActive: true, isDeleted: false, status: 0}
+        where: {
+          usersId: user.id,
+          roleValue: role.value,
+          isActive: true,
+          isDeleted: false,
+          status: {inq: this.getPendingMerchantKycStatuses(role.value)},
+        },
       });
 
       const isUserRole = await this.userRolesRepository.findOne({
-        where: {usersId: user.id, rolesId: role.id}
+        where: {usersId: user.id, rolesId: role.id},
       });
 
       if (isUserRole && !kycApplication) {
         throw new HttpErrors.BadRequest(
-          `Email is already registered as ${role.label}`
+          `Email is already registered as ${role.label}`,
         );
       }
-
     }
 
     const existingPhoneUser = await this.usersRepository.findOne({
@@ -564,47 +694,47 @@ export class AuthController {
         and: [
           {phone: session.phoneNumber},
           {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+          {isDeleted: false},
+        ],
+      },
     });
 
-    if (existingPhoneUser && (existingPhoneUser.email !== body.email)) {
+    if (existingPhoneUser && existingPhoneUser.email !== normalizedEmail) {
       throw new HttpErrors.BadRequest(
-        `Phone is already registered with another email`
+        `Phone is already registered with another email`,
       );
     }
 
     await this.otpRepository.updateAll(
       {isUsed: true, expiresAt: new Date()},
-      {identifier: body.email, type: 1}
+      {identifier: normalizedEmail, type: 1},
     );
 
     const otp = await this.otpRepository.create({
       otp: '4321',
       type: 1,
-      identifier: body.email,
+      identifier: normalizedEmail,
       attempts: 0,
       isUsed: false,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 min
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 min
     });
 
     if (!otp) {
       throw new HttpErrors.InternalServerError(
         process.env.NODE_ENV === 'dev'
-          ? "Failed to create otp"
-          : "Something went wrong"
+          ? 'Failed to create otp'
+          : 'Something went wrong',
       );
     }
 
-    await this.registrationSessionsRepository.updateById(body.sessionId, {
-      email: body.email,
+    await this.registrationSessionsRepository.updateById(sessionId, {
+      email: normalizedEmail,
       emailVerified: false,
     });
 
     return {
       success: true,
-      message: "OTP sent successfully",
+      message: 'OTP sent successfully',
     };
   }
 
@@ -618,23 +748,24 @@ export class AuthController {
             required: ['sessionId', 'otp'],
             properties: {
               sessionId: {type: 'string'},
-              otp: {type: 'string'},
+              otp: {
+                oneOf: [{type: 'string'}, {type: 'number'}],
+              },
             },
           },
         },
       },
     })
-    body: {sessionId: string; otp: string; isAlreadyRegistered: boolean; kycStatus: number | null},
+    body: {
+      sessionId: string;
+      otp: string | number;
+      isAlreadyRegistered: boolean;
+      kycStatus: number | null;
+    },
   ): Promise<{success: boolean; message: string}> {
-    const {sessionId, otp} = body;
-
-    const session = await this.registrationSessionsRepository.findById(
-      sessionId,
-    );
-
-    if (!session) {
-      throw new HttpErrors.BadRequest('Invalid session');
-    }
+    const sessionId = this.normalizeSessionId(body.sessionId);
+    const otp = this.normalizeOtpValue(body.otp);
+    const session = await this.findActiveRegistrationSession(sessionId);
 
     if (new Date(session.expiresAt) < new Date()) {
       throw new HttpErrors.BadRequest('Session expired, please restart signup');
@@ -707,23 +838,20 @@ export class AuthController {
             properties: {
               email: {type: 'string'},
               role: {type: 'string'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
     body: {
       email: string;
       role: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
     const user = await this.usersRepository.findOne({
       where: {
-        and: [
-          {email: body.email},
-          {isDeleted: false}
-        ]
-      }
+        and: [{email: body.email}, {isDeleted: false}],
+      },
     });
 
     if (!user) {
@@ -731,11 +859,11 @@ export class AuthController {
     }
 
     if (user && !user.isActive) {
-      throw new HttpErrors.BadRequest("User is not active");
+      throw new HttpErrors.BadRequest('User is not active');
     }
 
     const role = await this.rolesRepository.findOne({
-      where: {value: body.role}
+      where: {value: body.role},
     });
 
     if (!role) {
@@ -743,7 +871,7 @@ export class AuthController {
     }
 
     const isUserRole = await this.userRolesRepository.findOne({
-      where: {usersId: user.id, rolesId: role.id}
+      where: {usersId: user.id, rolesId: role.id},
     });
 
     if (!isUserRole) {
@@ -752,7 +880,7 @@ export class AuthController {
 
     await this.otpRepository.updateAll(
       {isUsed: true, expiresAt: new Date()},
-      {identifier: body.email, type: 1}
+      {identifier: body.email, type: 1},
     );
 
     const otp = await this.otpRepository.create({
@@ -761,20 +889,20 @@ export class AuthController {
       identifier: body.email,
       attempts: 0,
       isUsed: false,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 min
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 min
     });
 
     if (!otp) {
       throw new HttpErrors.InternalServerError(
         process.env.NODE_ENV === 'dev'
-          ? "Failed to create otp"
-          : "Something went wrong"
+          ? 'Failed to create otp'
+          : 'Something went wrong',
       );
     }
 
     return {
       success: true,
-      message: "OTP sent successfully",
+      message: 'OTP sent successfully',
     };
   }
 
@@ -788,28 +916,31 @@ export class AuthController {
             required: ['email', 'role', 'otp', 'newPassword'],
             properties: {
               email: {type: 'string'},
-              otp: {type: 'string'},
+              otp: {
+                oneOf: [{type: 'string'}, {type: 'number'}],
+              },
               role: {type: 'string'},
               newPassword: {type: 'string'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
     body: {
       email: string;
-      otp: string;
+      otp: string | number;
       role: string;
       newPassword: string;
-    }
+    },
   ): Promise<{success: boolean; message: string}> {
+    const normalizedEmail = String(body.email ?? '')
+      .trim()
+      .toLowerCase();
+    const normalizedOtp = this.normalizeOtpValue(body.otp);
     const user = await this.usersRepository.findOne({
       where: {
-        and: [
-          {email: body.email},
-          {isDeleted: false}
-        ]
-      }
+        and: [{email: normalizedEmail}, {isDeleted: false}],
+      },
     });
 
     if (!user) {
@@ -817,11 +948,11 @@ export class AuthController {
     }
 
     if (user && !user.isActive) {
-      throw new HttpErrors.BadRequest("User is not active");
+      throw new HttpErrors.BadRequest('User is not active');
     }
 
     const role = await this.rolesRepository.findOne({
-      where: {value: body.role}
+      where: {value: body.role},
     });
 
     if (!role) {
@@ -829,7 +960,7 @@ export class AuthController {
     }
 
     const isUserRole = await this.userRolesRepository.findOne({
-      where: {usersId: user.id, rolesId: role.id}
+      where: {usersId: user.id, rolesId: role.id},
     });
 
     if (!isUserRole) {
@@ -838,7 +969,7 @@ export class AuthController {
 
     const otpEntry = await this.otpRepository.findOne({
       where: {
-        identifier: body.email,
+        identifier: normalizedEmail,
         type: 1,
         isUsed: false,
       },
@@ -864,7 +995,7 @@ export class AuthController {
       throw new HttpErrors.BadRequest('OTP expired, request a new one');
     }
 
-    if (otpEntry.otp !== body.otp) {
+    if (otpEntry.otp !== normalizedOtp) {
       await this.otpRepository.updateById(otpEntry.id, {
         attempts: otpEntry.attempts + 1,
       });
@@ -886,8 +1017,8 @@ export class AuthController {
 
     return {
       success: true,
-      message: 'Password updated'
-    }
+      message: 'Password updated',
+    };
   }
 
   // ------------------------------------------Company Registration API's------------------------------
@@ -912,37 +1043,37 @@ export class AuthController {
               'submittedPanDetails',
               'panCardDocumentId',
               'companyEntityTypeId',
-              'companySectorTypeId'
+              'companySectorTypeId',
             ],
             properties: {
               sessionId: {
                 type: 'string',
-                description: 'Registration session id'
+                description: 'Registration session id',
               },
               // password: {type: 'string'},
               companyName: {type: 'string'},
               CIN: {
                 type: 'string',
-                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$'
+                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$',
               },
               GSTIN: {
                 type: 'string',
                 minLength: 15,
-                maxLength: 15
+                maxLength: 15,
               },
               udyamRegistrationNumber: {
-                type: 'string'
+                type: 'string',
               },
               dateOfIncorporation: {
                 type: 'string',
-                pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+                pattern: '^\\d{4}-\\d{2}-\\d{2}$',
               },
               cityOfIncorporation: {type: 'string'},
               stateOfIncorporation: {type: 'string'},
               countryOfIncorporation: {type: 'string'},
               humanInteraction: {
                 type: 'boolean',
-                default: false
+                default: false,
               },
               extractedPanDetails: {
                 type: 'object',
@@ -951,9 +1082,9 @@ export class AuthController {
                   extractedCompanyName: {type: 'string'},
                   extractedPanNumber: {
                     type: 'string',
-                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
-                  }
-                }
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
+                  },
+                },
               },
               submittedPanDetails: {
                 type: 'object',
@@ -962,20 +1093,20 @@ export class AuthController {
                   submittedCompanyName: {type: 'string'},
                   submittedPanNumber: {
                     type: 'string',
-                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
-                  }
-                }
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
+                  },
+                },
               },
               panCardDocumentId: {
                 type: 'string',
-                description: 'Media ID of uploaded PAN card'
+                description: 'Media ID of uploaded PAN card',
               },
               companySectorTypeId: {type: 'string'},
               companyEntityTypeId: {type: 'string'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
     body: {
       sessionId: string;
@@ -1000,7 +1131,7 @@ export class AuthController {
       panCardDocumentId: string;
       companySectorTypeId: string;
       companyEntityTypeId: string;
-    }
+    },
   ): Promise<{
     success: boolean;
     message: string;
@@ -1008,19 +1139,22 @@ export class AuthController {
     currentProgress: string[];
     usersId: string;
   }> {
-    const tx = await this.companyProfilesRepository.dataSource.beginTransaction({
-      isolationLevel: 'READ COMMITTED',
-    });
+    const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
+      {
+        isolationLevel: 'READ COMMITTED',
+      },
+    );
     console.log('body', body);
     try {
       // ----------------------------
       //  Validate Registration Session
       // ----------------------------
-      const registrationSession = await this.registrationSessionsRepository.findById(
-        body.sessionId,
-        undefined,
-        {transaction: tx}
-      );
+      const registrationSession =
+        await this.registrationSessionsRepository.findById(
+          body.sessionId,
+          undefined,
+          {transaction: tx},
+        );
 
       if (
         !registrationSession ||
@@ -1042,13 +1176,14 @@ export class AuthController {
       // ----------------------------
       const companyWithCIN = await this.companyProfilesRepository.findOne(
         {where: {CIN: body.CIN, isDeleted: false}},
-        {transaction: tx}
+        {transaction: tx},
       );
-      if (companyWithCIN) throw new HttpErrors.BadRequest('CIN already registered');
+      if (companyWithCIN)
+        throw new HttpErrors.BadRequest('CIN already registered');
 
       const companyWithGSTIN = await this.companyProfilesRepository.findOne(
         {where: {GSTIN: body.GSTIN, isDeleted: false}},
-        {transaction: tx}
+        {transaction: tx},
       );
       if (companyWithGSTIN)
         throw new HttpErrors.BadRequest('GSTIN already registered');
@@ -1056,7 +1191,7 @@ export class AuthController {
       // ----------------------------
       //  Create User
       // ----------------------------
-      const hashedPassword = await this.hasher.hashPassword("Company@123");
+      const hashedPassword = await this.hasher.hashPassword('Company@123');
 
       let newUserProfile = await this.usersRepository.findOne({
         where: {
@@ -1064,9 +1199,9 @@ export class AuthController {
             {email: registrationSession.email},
             {phone: registrationSession.phoneNumber},
             {isActive: true},
-            {isDeleted: false}
-          ]
-        }
+            {isDeleted: false},
+          ],
+        },
       });
 
       if (!newUserProfile) {
@@ -1079,7 +1214,7 @@ export class AuthController {
             isActive: true,
             isDeleted: false,
           },
-          {transaction: tx}
+          {transaction: tx},
         );
       }
       // ----------------------------
@@ -1101,7 +1236,7 @@ export class AuthController {
           isActive: false,
           isDeleted: false,
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       // ----------------------------
@@ -1117,11 +1252,13 @@ export class AuthController {
             ],
           },
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       if (isPanExist)
-        throw new HttpErrors.BadRequest('Pan already exists with another company');
+        throw new HttpErrors.BadRequest(
+          'Pan already exists with another company',
+        );
 
       // ----------------------------
       //  Prepare PAN Data
@@ -1158,22 +1295,34 @@ export class AuthController {
             isActive: true,
             isDeleted: false,
             currentProgress: ['company_kyc'],
-            identifierId: newCompanyProfile.id
+            identifierId: newCompanyProfile.id,
           },
-          {transaction: tx}
+          {transaction: tx},
         );
 
-        await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
-        const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'company');
+        await this.mediaService.updateMediaUsedStatus(
+          [body.panCardDocumentId],
+          true,
+        );
+        const result = await this.rbacService.assignNewUserRole(
+          newUserProfile.id,
+          'company',
+        );
         if (!result.success || !result.data) {
           if (process.env.NODE_ENV === 'dev') {
-            throw new HttpErrors.InternalServerError('Error while assigning role to user');
+            throw new HttpErrors.InternalServerError(
+              'Error while assigning role to user',
+            );
           } else {
             throw new HttpErrors.InternalServerError('Internal server error');
           }
         }
 
-        await this.companyProfilesRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
+        await this.companyProfilesRepository.updateById(
+          newCompanyProfile.id,
+          {kycApplicationsId: newApplication.id},
+          {transaction: tx},
+        );
         await tx.commit();
 
         return {
@@ -1181,17 +1330,17 @@ export class AuthController {
           message: 'Registration completed',
           kycStatus: 0,
           currentProgress: newApplication.currentProgress ?? ['company_kyc'],
-          usersId: newUserProfile.id
+          usersId: newUserProfile.id,
         };
       }
 
       // ----------------------------
       //  Auto verification (No Human Interaction)
       // ----------------------------
-      if (
-        body.submittedPanDetails.submittedCompanyName !== body.companyName
-      ) {
-        throw new HttpErrors.BadRequest('PAN details do not match company name');
+      if (body.submittedPanDetails.submittedCompanyName !== body.companyName) {
+        throw new HttpErrors.BadRequest(
+          'PAN details do not match company name',
+        );
       }
 
       // // Basic validation: Submitted PAN should match Extracted PAN
@@ -1226,15 +1375,27 @@ export class AuthController {
           isDeleted: false,
           currentProgress: ['company_kyc', 'pan_verified'],
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
-      await this.companyProfilesRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
-      await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
-      const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'company');
+      await this.companyProfilesRepository.updateById(
+        newCompanyProfile.id,
+        {kycApplicationsId: newApplication.id},
+        {transaction: tx},
+      );
+      await this.mediaService.updateMediaUsedStatus(
+        [body.panCardDocumentId],
+        true,
+      );
+      const result = await this.rbacService.assignNewUserRole(
+        newUserProfile.id,
+        'company',
+      );
       if (!result.success || !result.data) {
         if (process.env.NODE_ENV === 'dev') {
-          throw new HttpErrors.InternalServerError('Error while assigning role to user');
+          throw new HttpErrors.InternalServerError(
+            'Error while assigning role to user',
+          );
         } else {
           throw new HttpErrors.InternalServerError('Internal server error');
         }
@@ -1246,10 +1407,12 @@ export class AuthController {
         success: true,
         message: 'Registration completed',
         kycStatus: 0,
-        currentProgress: newApplication.currentProgress ?? ['company_kyc', 'pan_verified'],
-        usersId: newUserProfile.id
+        currentProgress: newApplication.currentProgress ?? [
+          'company_kyc',
+          'pan_verified',
+        ],
+        usersId: newUserProfile.id,
       };
-
     } catch (error) {
       await tx.rollback();
       console.log('error while registering new company :', error);
@@ -1269,20 +1432,26 @@ export class AuthController {
               email: {type: 'string'},
               password: {type: 'string'},
               rememberMe: {type: 'boolean'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
-    body: {email: string; password: string; rememberMe: boolean}
-  ): Promise<{success: boolean; message: string; accessToken: string; user: object}> {
+    body: {
+      email: string;
+      password: string;
+      rememberMe: boolean;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    accessToken: string;
+    user: object;
+  }> {
     const userData = await this.usersRepository.findOne({
       where: {
-        and: [
-          {email: body.email},
-          {isDeleted: false}
-        ]
-      }
+        and: [{email: body.email}, {isDeleted: false}],
+      },
     });
 
     if (!userData) {
@@ -1291,12 +1460,8 @@ export class AuthController {
 
     const company = await this.companyProfilesRepository.findOne({
       where: {
-        and: [
-          {usersId: userData.id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: userData.id}, {isActive: true}, {isDeleted: false}],
+      },
     });
 
     if (!company) {
@@ -1305,10 +1470,16 @@ export class AuthController {
 
     const user = await this.userService.verifyCredentials(body);
 
-    const {roles, permissions} = await this.rbacService.getUserRoleAndPermissionsByRole(user.id!, 'company');
+    const {roles, permissions} =
+      await this.rbacService.getUserRoleAndPermissionsByRole(
+        user.id!,
+        'company',
+      );
 
     if (!roles.includes('company')) {
-      throw new HttpErrors.Forbidden('Access denied. Only company users can login here.');
+      throw new HttpErrors.Forbidden(
+        'Access denied. Only company users can login here.',
+      );
     }
 
     const userProfile: UserProfile & {
@@ -1327,12 +1498,16 @@ export class AuthController {
     };
 
     const token = await this.jwtService.generateToken(userProfile);
-    const profile = await this.rbacService.returnCompanyProfile(user.id, roles, permissions);
+    const profile = await this.rbacService.returnCompanyProfile(
+      user.id,
+      roles,
+      permissions,
+    );
     return {
       success: true,
-      message: "Company login successful",
+      message: 'Company login successful',
       accessToken: token,
-      user: profile
+      user: profile,
     };
   }
 
@@ -1365,33 +1540,33 @@ export class AuthController {
             properties: {
               sessionId: {
                 type: 'string',
-                description: 'Registration session id'
+                description: 'Registration session id',
               },
               // password: {type: 'string'},
               legalEntityName: {type: 'string'},
               CIN: {
                 type: 'string',
-                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$'
+                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$',
               },
               GSTIN: {
                 type: 'string',
                 minLength: 15,
-                maxLength: 15
+                maxLength: 15,
               },
               udyamRegistrationNumber: {
-                type: 'string'
+                type: 'string',
               },
               sebiRegistrationNumber: {
                 type: 'string',
-                pattern: '^IND\\d{9}$'
+                pattern: '^IND\\d{9}$',
               },
               sebiValidityDate: {
                 type: 'string',
-                pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+                pattern: '^\\d{4}-\\d{2}-\\d{2}$',
               },
               dateOfIncorporation: {
                 type: 'string',
-                pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+                pattern: '^\\d{4}-\\d{2}-\\d{2}$',
               },
               cityOfIncorporation: {type: 'string'},
               stateOfIncorporation: {type: 'string'},
@@ -1399,7 +1574,7 @@ export class AuthController {
 
               humanInteraction: {
                 type: 'boolean',
-                default: false
+                default: false,
               },
               extractedPanDetails: {
                 type: 'object',
@@ -1408,9 +1583,9 @@ export class AuthController {
                   extractedTrusteeName: {type: 'string'},
                   extractedPanNumber: {
                     type: 'string',
-                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
-                  }
-                }
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
+                  },
+                },
               },
               submittedPanDetails: {
                 type: 'object',
@@ -1419,20 +1594,20 @@ export class AuthController {
                   submittedTrusteeName: {type: 'string'},
                   submittedPanNumber: {
                     type: 'string',
-                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
-                  }
-                }
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
+                  },
+                },
               },
               panCardDocumentId: {
                 type: 'string',
-                description: 'Media ID of uploaded PAN card'
+                description: 'Media ID of uploaded PAN card',
               },
               trusteeEntityTypesId: {type: 'string'},
               // companyEntityTypeId: {type: 'string'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
     body: {
       sessionId: string;
@@ -1459,20 +1634,29 @@ export class AuthController {
       panCardDocumentId: string;
       trusteeEntityTypesId: string;
       // companyEntityTypeId: string;
-    }
-  ): Promise<{success: boolean; message: string; kycStatus: number; usersId: string; currentProgress: string[]}> {
-    const tx = await this.trusteeProfilesRepository.dataSource.beginTransaction({
-      isolationLevel: 'READ COMMITTED',
-    });
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    kycStatus: number;
+    usersId: string;
+    currentProgress: string[];
+  }> {
+    const tx = await this.trusteeProfilesRepository.dataSource.beginTransaction(
+      {
+        isolationLevel: 'READ COMMITTED',
+      },
+    );
     try {
       // ----------------------------
       //  Validate Registration Session
       // ----------------------------
-      const registrationSession = await this.registrationSessionsRepository.findById(
-        body.sessionId,
-        undefined,
-        {transaction: tx}
-      );
+      const registrationSession =
+        await this.registrationSessionsRepository.findById(
+          body.sessionId,
+          undefined,
+          {transaction: tx},
+        );
 
       if (
         !registrationSession ||
@@ -1490,14 +1674,15 @@ export class AuthController {
       // ----------------------------
       const companyWithCIN = await this.trusteeProfilesRepository.findOne(
         {where: {CIN: body.CIN, isDeleted: false}},
-        {transaction: tx}
+        {transaction: tx},
       );
-      if (companyWithCIN) throw new HttpErrors.BadRequest('CIN already registered');
+      if (companyWithCIN)
+        throw new HttpErrors.BadRequest('CIN already registered');
 
       if (body.GSTIN) {
         const companyWithGSTIN = await this.trusteeProfilesRepository.findOne(
           {where: {GSTIN: body.GSTIN, isDeleted: false}},
-          {transaction: tx}
+          {transaction: tx},
         );
         if (companyWithGSTIN)
           throw new HttpErrors.BadRequest('GSTIN already registered');
@@ -1511,7 +1696,7 @@ export class AuthController {
       // ----------------------------
       //  Create User
       // ----------------------------
-      const hashedPassword = await this.hasher.hashPassword("Trustee@123");
+      const hashedPassword = await this.hasher.hashPassword('Trustee@123');
 
       const newUserProfile = await this.usersRepository.create(
         {
@@ -1521,7 +1706,7 @@ export class AuthController {
           isActive: true,
           isDeleted: false,
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       // ----------------------------
@@ -1539,12 +1724,14 @@ export class AuthController {
           cityOfIncorporation: body.cityOfIncorporation,
           stateOfIncorporation: body.stateOfIncorporation,
           countryOfIncorporation: body.countryOfIncorporation,
-          ...(body.udyamRegistrationNumber && {udyamRegistrationNumber: body.udyamRegistrationNumber}),
+          ...(body.udyamRegistrationNumber && {
+            udyamRegistrationNumber: body.udyamRegistrationNumber,
+          }),
           trusteeEntityTypesId: body.trusteeEntityTypesId,
           isActive: false,
           isDeleted: false,
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       // ----------------------------
@@ -1560,11 +1747,13 @@ export class AuthController {
             ],
           },
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       if (isPanExist)
-        throw new HttpErrors.BadRequest('Pan already exists with another trustee');
+        throw new HttpErrors.BadRequest(
+          'Pan already exists with another trustee',
+        );
 
       // ----------------------------
       //  Prepare PAN Data
@@ -1601,22 +1790,34 @@ export class AuthController {
             isActive: true,
             isDeleted: false,
             currentProgress: ['trustee_kyc'],
-            identifierId: newTrusteeProfile.id
+            identifierId: newTrusteeProfile.id,
           },
-          {transaction: tx}
+          {transaction: tx},
         );
 
-        await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
-        const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'trustee');
+        await this.mediaService.updateMediaUsedStatus(
+          [body.panCardDocumentId],
+          true,
+        );
+        const result = await this.rbacService.assignNewUserRole(
+          newUserProfile.id,
+          'trustee',
+        );
         if (!result.success || !result.data) {
           if (process.env.NODE_ENV === 'dev') {
-            throw new HttpErrors.InternalServerError('Error while assigning role to user');
+            throw new HttpErrors.InternalServerError(
+              'Error while assigning role to user',
+            );
           } else {
             throw new HttpErrors.InternalServerError('Internal server error');
           }
         }
 
-        await this.trusteeProfilesRepository.updateById(newTrusteeProfile.id, {kycApplicationsId: newKycApplication.id}, {transaction: tx});
+        await this.trusteeProfilesRepository.updateById(
+          newTrusteeProfile.id,
+          {kycApplicationsId: newKycApplication.id},
+          {transaction: tx},
+        );
         console.log('result', result.data);
         await tx.commit();
 
@@ -1625,7 +1826,7 @@ export class AuthController {
           message: 'Registration completed',
           kycStatus: 0,
           usersId: newUserProfile.id,
-          currentProgress: newKycApplication.currentProgress ?? ['trustee_kyc']
+          currentProgress: newKycApplication.currentProgress ?? ['trustee_kyc'],
         };
       }
 
@@ -1635,7 +1836,9 @@ export class AuthController {
       if (
         body.submittedPanDetails.submittedTrusteeName !== body.legalEntityName
       ) {
-        throw new HttpErrors.BadRequest('PAN details do not match legal entity name');
+        throw new HttpErrors.BadRequest(
+          'PAN details do not match legal entity name',
+        );
       }
 
       // // Basic validation: Submitted PAN should match Extracted PAN
@@ -1670,30 +1873,44 @@ export class AuthController {
           isDeleted: false,
           currentProgress: ['trustee_kyc', 'pan_verified'],
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
-      await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
-      const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'trustee');
+      await this.mediaService.updateMediaUsedStatus(
+        [body.panCardDocumentId],
+        true,
+      );
+      const result = await this.rbacService.assignNewUserRole(
+        newUserProfile.id,
+        'trustee',
+      );
       if (!result.success || !result.data) {
         if (process.env.NODE_ENV === 'dev') {
-          throw new HttpErrors.InternalServerError('Error while assigning role to user');
+          throw new HttpErrors.InternalServerError(
+            'Error while assigning role to user',
+          );
         } else {
           throw new HttpErrors.InternalServerError('Internal server error');
         }
       }
 
-      await this.trusteeProfilesRepository.updateById(newTrusteeProfile.id, {kycApplicationsId: newKycApplication.id}, {transaction: tx});
+      await this.trusteeProfilesRepository.updateById(
+        newTrusteeProfile.id,
+        {kycApplicationsId: newKycApplication.id},
+        {transaction: tx},
+      );
       await tx.commit();
 
       return {
         success: true,
         message: 'Registration completed',
         kycStatus: 0,
-        currentProgress: newKycApplication.currentProgress ?? ['trustee_kyc', 'pan_verified'],
-        usersId: newUserProfile.id
+        currentProgress: newKycApplication.currentProgress ?? [
+          'trustee_kyc',
+          'pan_verified',
+        ],
+        usersId: newUserProfile.id,
       };
-
     } catch (error) {
       await tx.rollback();
       console.log('error while registering new company :', error);
@@ -1713,20 +1930,26 @@ export class AuthController {
               email: {type: 'string'},
               password: {type: 'string'},
               rememberMe: {type: 'boolean'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
-    body: {email: string; password: string; rememberMe: boolean}
-  ): Promise<{success: boolean; message: string; accessToken: string; user: object}> {
+    body: {
+      email: string;
+      password: string;
+      rememberMe: boolean;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    accessToken: string;
+    user: object;
+  }> {
     const userData = await this.usersRepository.findOne({
       where: {
-        and: [
-          {email: body.email},
-          {isDeleted: false}
-        ]
-      }
+        and: [{email: body.email}, {isDeleted: false}],
+      },
     });
 
     if (!userData) {
@@ -1735,12 +1958,8 @@ export class AuthController {
 
     const trustee = await this.trusteeProfilesRepository.findOne({
       where: {
-        and: [
-          {usersId: userData.id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: userData.id}, {isActive: true}, {isDeleted: false}],
+      },
     });
 
     if (!trustee) {
@@ -1749,10 +1968,16 @@ export class AuthController {
 
     const user = await this.userService.verifyCredentials(body);
 
-    const {roles, permissions} = await this.rbacService.getUserRoleAndPermissionsByRole(user.id!, 'trustee');
+    const {roles, permissions} =
+      await this.rbacService.getUserRoleAndPermissionsByRole(
+        user.id!,
+        'trustee',
+      );
 
     if (!roles.includes('trustee')) {
-      throw new HttpErrors.Forbidden('Access denied. Only Trustee can login here.');
+      throw new HttpErrors.Forbidden(
+        'Access denied. Only Trustee can login here.',
+      );
     }
 
     const userProfile: UserProfile & {
@@ -1769,12 +1994,16 @@ export class AuthController {
     };
 
     const token = await this.jwtService.generateToken(userProfile);
-    const profile = await this.rbacService.returnTrusteeProfile(user.id, roles, permissions);
+    const profile = await this.rbacService.returnTrusteeProfile(
+      user.id,
+      roles,
+      permissions,
+    );
     return {
       success: true,
-      message: "Trustee login successful",
+      message: 'Trustee login successful',
       accessToken: token,
-      user: profile
+      user: profile,
     };
   }
 
@@ -1795,19 +2024,19 @@ export class AuthController {
               'panCardDocumentId',
               'aadharFrontImageId',
               'aadharBackImageId',
-              'selfieId'
+              'selfieId',
             ],
             properties: {
               sessionId: {
                 type: 'string',
-                description: 'Registration session id'
+                description: 'Registration session id',
               },
               fullName: {type: 'string'},
               gender: {type: 'string'},
               kycMode: {type: 'string'},
               humanInteraction: {
                 type: 'boolean',
-                default: false
+                default: false,
               },
               extractedPanDetails: {
                 type: 'object',
@@ -1816,10 +2045,10 @@ export class AuthController {
                   extractedInvestorName: {type: 'string'},
                   extractedPanNumber: {
                     type: 'string',
-                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
                   },
-                  extractedDateOfBirth: {type: 'string'}
-                }
+                  extractedDateOfBirth: {type: 'string'},
+                },
               },
               submittedPanDetails: {
                 type: 'object',
@@ -1828,31 +2057,31 @@ export class AuthController {
                   submittedInvestorName: {type: 'string'},
                   submittedPanNumber: {
                     type: 'string',
-                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
                   },
-                  submittedDateOfBirth: {type: 'string'}
-                }
+                  submittedDateOfBirth: {type: 'string'},
+                },
               },
               panCardDocumentId: {
                 type: 'string',
-                description: 'Media ID of uploaded PAN card'
+                description: 'Media ID of uploaded PAN card',
               },
               aadharFrontImageId: {
                 type: 'string',
-                description: 'Media ID of uploaded Aadhar card front side'
+                description: 'Media ID of uploaded Aadhar card front side',
               },
               aadharBackImageId: {
                 type: 'string',
-                description: 'Media ID of uploaded Aadhar card back side'
+                description: 'Media ID of uploaded Aadhar card back side',
               },
               selfieId: {
                 type: 'string',
-                description: 'Media ID of uploaded selfie'
-              }
-            }
-          }
-        }
-      }
+                description: 'Media ID of uploaded selfie',
+              },
+            },
+          },
+        },
+      },
     })
     body: {
       sessionId: string;
@@ -1874,7 +2103,7 @@ export class AuthController {
       aadharFrontImageId: string;
       aadharBackImageId: string;
       selfieId: string;
-    }
+    },
   ): Promise<{
     success: boolean;
     message: string;
@@ -1882,18 +2111,21 @@ export class AuthController {
     currentProgress: string[];
     usersId: string;
   }> {
-    const tx = await this.investorProfileRepository.dataSource.beginTransaction({
-      isolationLevel: 'READ COMMITTED',
-    });
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction(
+      {
+        isolationLevel: 'READ COMMITTED',
+      },
+    );
     try {
       // ----------------------------
       //  Validate Registration Session
       // ----------------------------
-      const registrationSession = await this.registrationSessionsRepository.findById(
-        body.sessionId,
-        undefined,
-        {transaction: tx}
-      );
+      const registrationSession =
+        await this.registrationSessionsRepository.findById(
+          body.sessionId,
+          undefined,
+          {transaction: tx},
+        );
 
       if (
         !registrationSession ||
@@ -1909,7 +2141,7 @@ export class AuthController {
       // ----------------------------
       //  Create User
       // ----------------------------
-      const hashedPassword = await this.hasher.hashPassword("Investor@123");
+      const hashedPassword = await this.hasher.hashPassword('Investor@123');
 
       let newUserProfile = await this.usersRepository.findOne({
         where: {
@@ -1917,9 +2149,9 @@ export class AuthController {
             {email: registrationSession.email},
             {phone: registrationSession.phoneNumber},
             {isActive: true},
-            {isDeleted: false}
-          ]
-        }
+            {isDeleted: false},
+          ],
+        },
       });
 
       if (!newUserProfile) {
@@ -1931,7 +2163,7 @@ export class AuthController {
             isActive: true,
             isDeleted: false,
           },
-          {transaction: tx}
+          {transaction: tx},
         );
       }
       // ----------------------------
@@ -1950,7 +2182,7 @@ export class AuthController {
           isActive: false,
           isDeleted: false,
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       // ----------------------------
@@ -1966,11 +2198,13 @@ export class AuthController {
             ],
           },
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       if (isPanExist)
-        throw new HttpErrors.BadRequest('Pan already exists with another investor');
+        throw new HttpErrors.BadRequest(
+          'Pan already exists with another investor',
+        );
 
       // ----------------------------
       //  Prepare PAN Data
@@ -2009,22 +2243,34 @@ export class AuthController {
             isActive: true,
             isDeleted: false,
             currentProgress: ['investor_basic_info'],
-            identifierId: newInvestorProfile.id
+            identifierId: newInvestorProfile.id,
           },
-          {transaction: tx}
+          {transaction: tx},
         );
 
-        await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
-        const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'investor');
+        await this.mediaService.updateMediaUsedStatus(
+          [body.panCardDocumentId],
+          true,
+        );
+        const result = await this.rbacService.assignNewUserRole(
+          newUserProfile.id,
+          'investor',
+        );
         if (!result.success || !result.data) {
           if (process.env.NODE_ENV === 'dev') {
-            throw new HttpErrors.InternalServerError('Error while assigning role to user');
+            throw new HttpErrors.InternalServerError(
+              'Error while assigning role to user',
+            );
           } else {
             throw new HttpErrors.InternalServerError('Internal server error');
           }
         }
 
-        await this.investorProfileRepository.updateById(newInvestorProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
+        await this.investorProfileRepository.updateById(
+          newInvestorProfile.id,
+          {kycApplicationsId: newApplication.id},
+          {transaction: tx},
+        );
         await tx.commit();
 
         return {
@@ -2032,17 +2278,17 @@ export class AuthController {
           message: 'Registration completed',
           kycStatus: 0,
           currentProgress: newApplication.currentProgress ?? ['investor_kyc'],
-          usersId: newUserProfile.id
+          usersId: newUserProfile.id,
         };
       }
 
       // ----------------------------
       //  Auto verification (No Human Interaction)
       // ----------------------------
-      if (
-        body.submittedPanDetails.submittedInvestorName !== body.fullName
-      ) {
-        throw new HttpErrors.BadRequest('PAN details do not match investor name');
+      if (body.submittedPanDetails.submittedInvestorName !== body.fullName) {
+        throw new HttpErrors.BadRequest(
+          'PAN details do not match investor name',
+        );
       }
 
       // // Basic validation: Submitted PAN should match Extracted PAN
@@ -2077,15 +2323,27 @@ export class AuthController {
           isDeleted: false,
           currentProgress: ['investor_kyc', 'pan_verified'],
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
-      await this.investorProfileRepository.updateById(newInvestorProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
-      await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
-      const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'investor');
+      await this.investorProfileRepository.updateById(
+        newInvestorProfile.id,
+        {kycApplicationsId: newApplication.id},
+        {transaction: tx},
+      );
+      await this.mediaService.updateMediaUsedStatus(
+        [body.panCardDocumentId],
+        true,
+      );
+      const result = await this.rbacService.assignNewUserRole(
+        newUserProfile.id,
+        'investor',
+      );
       if (!result.success || !result.data) {
         if (process.env.NODE_ENV === 'dev') {
-          throw new HttpErrors.InternalServerError('Error while assigning role to user');
+          throw new HttpErrors.InternalServerError(
+            'Error while assigning role to user',
+          );
         } else {
           throw new HttpErrors.InternalServerError('Internal server error');
         }
@@ -2096,10 +2354,12 @@ export class AuthController {
         success: true,
         message: 'Registration completed',
         kycStatus: 0,
-        currentProgress: newApplication.currentProgress ?? ['investor_kyc', 'pan_verified'],
-        usersId: newUserProfile.id
+        currentProgress: newApplication.currentProgress ?? [
+          'investor_kyc',
+          'pan_verified',
+        ],
+        usersId: newUserProfile.id,
       };
-
     } catch (error) {
       await tx.rollback();
       console.log('error while registering new investor :', error);
@@ -2119,25 +2379,25 @@ export class AuthController {
               emailOrPhone: {type: 'string'},
               // password: {type: 'string'},
               rememberMe: {type: 'boolean'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
-    body: {emailOrPhone: string; rememberMe: boolean}
+    body: {
+      emailOrPhone: string;
+      rememberMe: boolean;
+    },
   ): Promise<{success: boolean; message: string}> {
     const userData = await this.usersRepository.findOne({
       where: {
         and: [
           {
-            or: [
-              {email: body.emailOrPhone},
-              {phone: body.emailOrPhone}
-            ]
+            or: [{email: body.emailOrPhone}, {phone: body.emailOrPhone}],
           },
-          {isDeleted: false}
-        ]
-      }
+          {isDeleted: false},
+        ],
+      },
     });
 
     if (!userData) {
@@ -2147,34 +2407,35 @@ export class AuthController {
     const isEmail = userData?.email === body.emailOrPhone;
     const investor = await this.investorProfileRepository.findOne({
       where: {
-        and: [
-          {usersId: userData.id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: userData.id}, {isActive: true}, {isDeleted: false}],
+      },
     });
 
     if (!investor) {
       throw new HttpErrors.Unauthorized('Unauthorized access');
     }
 
-    const {roles} = await this.rbacService.getUserRoleAndPermissionsByRole(userData.id, 'investor');
+    const {roles} = await this.rbacService.getUserRoleAndPermissionsByRole(
+      userData.id,
+      'investor',
+    );
 
     if (!roles.includes('investor')) {
-      throw new HttpErrors.Forbidden('Access denied. Only investors can login here.');
+      throw new HttpErrors.Forbidden(
+        'Access denied. Only investors can login here.',
+      );
     }
 
     // send otp to user...
     if (isEmail) {
       await this.otpRepository.updateAll(
         {isUsed: true, expiresAt: new Date()},
-        {identifier: body.emailOrPhone, type: 1}
+        {identifier: body.emailOrPhone, type: 1},
       );
     } else {
       await this.otpRepository.updateAll(
         {isUsed: true, expiresAt: new Date()},
-        {identifier: body.emailOrPhone, type: 0}
+        {identifier: body.emailOrPhone, type: 0},
       );
     }
 
@@ -2184,20 +2445,20 @@ export class AuthController {
       identifier: body.emailOrPhone,
       attempts: 0,
       isUsed: false,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 min
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 min
     });
 
     if (!otp) {
       throw new HttpErrors.InternalServerError(
         process.env.NODE_ENV === 'dev'
-          ? "Failed to create otp"
-          : "Something went wrong"
+          ? 'Failed to create otp'
+          : 'Something went wrong',
       );
     }
 
     return {
       success: true,
-      message: "OTP send successfully",
+      message: 'OTP send successfully',
     };
   }
 
@@ -2214,25 +2475,31 @@ export class AuthController {
               otp: {type: 'string'},
               // password: {type: 'string'},
               rememberMe: {type: 'boolean'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
-    body: {emailOrPhone: string; otp: string; rememberMe: boolean}
-  ): Promise<{success: boolean; message: string; accessToken: string; user: object}> {
+    body: {
+      emailOrPhone: string;
+      otp: string;
+      rememberMe: boolean;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    accessToken: string;
+    user: object;
+  }> {
     const userData = await this.usersRepository.findOne({
       where: {
         and: [
           {
-            or: [
-              {email: body.emailOrPhone},
-              {phone: body.emailOrPhone}
-            ]
+            or: [{email: body.emailOrPhone}, {phone: body.emailOrPhone}],
           },
-          {isDeleted: false}
-        ]
-      }
+          {isDeleted: false},
+        ],
+      },
     });
 
     if (!userData) {
@@ -2242,12 +2509,8 @@ export class AuthController {
     const isEmail = userData?.email === body.emailOrPhone;
     const investor = await this.investorProfileRepository.findOne({
       where: {
-        and: [
-          {usersId: userData.id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: userData.id}, {isActive: true}, {isDeleted: false}],
+      },
     });
 
     if (!investor) {
@@ -2295,11 +2558,16 @@ export class AuthController {
       expiresAt: new Date(),
     });
 
-
-    const {roles, permissions} = await this.rbacService.getUserRoleAndPermissionsByRole(userData.id!, 'investor');
+    const {roles, permissions} =
+      await this.rbacService.getUserRoleAndPermissionsByRole(
+        userData.id!,
+        'investor',
+      );
 
     if (!roles.includes('investor')) {
-      throw new HttpErrors.Forbidden('Access denied. Only Investors can login here.');
+      throw new HttpErrors.Forbidden(
+        'Access denied. Only Investors can login here.',
+      );
     }
 
     const userProfile: UserProfile & {
@@ -2316,16 +2584,19 @@ export class AuthController {
     };
 
     const token = await this.jwtService.generateToken(userProfile);
-    const profile = await this.rbacService.returnInvestorProfile(userData.id, roles, permissions);
+    const profile = await this.rbacService.returnInvestorProfile(
+      userData.id,
+      roles,
+      permissions,
+    );
 
     return {
       success: true,
-      message: "Investor login successful",
+      message: 'Investor login successful',
       accessToken: token,
-      user: profile
+      user: profile,
     };
   }
-
 
   @post('/auth/investor-institutional-registration')
   async investorInstitutionalRegistration(
@@ -2352,32 +2623,32 @@ export class AuthController {
             properties: {
               sessionId: {
                 type: 'string',
-                description: 'Registration session id'
+                description: 'Registration session id',
               },
               // password: {type: 'string'},
               companyName: {type: 'string'},
               CIN: {
                 type: 'string',
-                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$'
+                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$',
               },
               GSTIN: {
                 type: 'string',
                 minLength: 15,
-                maxLength: 15
+                maxLength: 15,
               },
               udyamRegistrationNumber: {
-                type: 'string'
+                type: 'string',
               },
               dateOfIncorporation: {
                 type: 'string',
-                pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+                pattern: '^\\d{4}-\\d{2}-\\d{2}$',
               },
               cityOfIncorporation: {type: 'string'},
               stateOfIncorporation: {type: 'string'},
               countryOfIncorporation: {type: 'string'},
               humanInteraction: {
                 type: 'boolean',
-                default: false
+                default: false,
               },
               extractedPanDetails: {
                 type: 'object',
@@ -2386,9 +2657,9 @@ export class AuthController {
                   extractedInvestorName: {type: 'string'},
                   extractedPanNumber: {
                     type: 'string',
-                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
-                  }
-                }
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
+                  },
+                },
               },
               submittedPanDetails: {
                 type: 'object',
@@ -2397,19 +2668,19 @@ export class AuthController {
                   submittedInvestorName: {type: 'string'},
                   submittedPanNumber: {
                     type: 'string',
-                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
-                  }
-                }
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
+                  },
+                },
               },
               panCardDocumentId: {
                 type: 'string',
-                description: 'Media ID of uploaded PAN card'
+                description: 'Media ID of uploaded PAN card',
               },
               investorTypeId: {type: 'string'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
     body: {
       sessionId: string;
@@ -2433,7 +2704,7 @@ export class AuthController {
       };
       panCardDocumentId: string;
       investorTypeId: string;
-    }
+    },
   ): Promise<{
     success: boolean;
     message: string;
@@ -2441,19 +2712,22 @@ export class AuthController {
     currentProgress: string[];
     usersId: string;
   }> {
-    const tx = await this.investorProfileRepository.dataSource.beginTransaction({
-      isolationLevel: 'READ COMMITTED',
-    });
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction(
+      {
+        isolationLevel: 'READ COMMITTED',
+      },
+    );
     console.log('body', body);
     try {
       // ----------------------------
       //  Validate Registration Session
       // ----------------------------
-      const registrationSession = await this.registrationSessionsRepository.findById(
-        body.sessionId,
-        undefined,
-        {transaction: tx}
-      );
+      const registrationSession =
+        await this.registrationSessionsRepository.findById(
+          body.sessionId,
+          undefined,
+          {transaction: tx},
+        );
 
       if (
         !registrationSession ||
@@ -2471,13 +2745,14 @@ export class AuthController {
       // ----------------------------
       const companyWithCIN = await this.investorProfileRepository.findOne(
         {where: {CIN: body.CIN, isDeleted: false}},
-        {transaction: tx}
+        {transaction: tx},
       );
-      if (companyWithCIN) throw new HttpErrors.BadRequest('CIN already registered');
+      if (companyWithCIN)
+        throw new HttpErrors.BadRequest('CIN already registered');
 
       const companyWithGSTIN = await this.investorProfileRepository.findOne(
         {where: {GSTIN: body.GSTIN, isDeleted: false}},
-        {transaction: tx}
+        {transaction: tx},
       );
       if (companyWithGSTIN)
         throw new HttpErrors.BadRequest('GSTIN already registered');
@@ -2490,7 +2765,7 @@ export class AuthController {
       // ----------------------------
       //  Create User
       // ----------------------------
-      const hashedPassword = await this.hasher.hashPassword("Investor@123");
+      const hashedPassword = await this.hasher.hashPassword('Investor@123');
 
       let newUserProfile = await this.usersRepository.findOne({
         where: {
@@ -2498,9 +2773,9 @@ export class AuthController {
             {email: registrationSession.email},
             {phone: registrationSession.phoneNumber},
             {isActive: true},
-            {isDeleted: false}
-          ]
-        }
+            {isDeleted: false},
+          ],
+        },
       });
 
       if (!newUserProfile) {
@@ -2513,7 +2788,7 @@ export class AuthController {
             isActive: true,
             isDeleted: false,
           },
-          {transaction: tx}
+          {transaction: tx},
         );
       }
       // ----------------------------
@@ -2535,7 +2810,7 @@ export class AuthController {
           isActive: false,
           isDeleted: false,
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       // ----------------------------
@@ -2551,11 +2826,13 @@ export class AuthController {
             ],
           },
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       if (isPanExist)
-        throw new HttpErrors.BadRequest('Pan already exists with another company');
+        throw new HttpErrors.BadRequest(
+          'Pan already exists with another company',
+        );
 
       // ----------------------------
       //  Prepare PAN Data
@@ -2592,40 +2869,54 @@ export class AuthController {
             isActive: true,
             isDeleted: false,
             currentProgress: ['investor_basic_info'],
-            identifierId: newCompanyProfile.id
+            identifierId: newCompanyProfile.id,
           },
-          {transaction: tx}
+          {transaction: tx},
         );
 
-        await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
-        const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'investor');
+        await this.mediaService.updateMediaUsedStatus(
+          [body.panCardDocumentId],
+          true,
+        );
+        const result = await this.rbacService.assignNewUserRole(
+          newUserProfile.id,
+          'investor',
+        );
         if (!result.success || !result.data) {
           if (process.env.NODE_ENV === 'dev') {
-            throw new HttpErrors.InternalServerError('Error while assigning role to user');
+            throw new HttpErrors.InternalServerError(
+              'Error while assigning role to user',
+            );
           } else {
             throw new HttpErrors.InternalServerError('Internal server error');
           }
         }
 
-        await this.investorProfileRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
+        await this.investorProfileRepository.updateById(
+          newCompanyProfile.id,
+          {kycApplicationsId: newApplication.id},
+          {transaction: tx},
+        );
         await tx.commit();
 
         return {
           success: true,
           message: 'Registration completed',
           kycStatus: 0,
-          currentProgress: newApplication.currentProgress ?? ['investor_basic_info'],
-          usersId: newUserProfile.id
+          currentProgress: newApplication.currentProgress ?? [
+            'investor_basic_info',
+          ],
+          usersId: newUserProfile.id,
         };
       }
 
       // ----------------------------
       //  Auto verification (No Human Interaction)
       // ----------------------------
-      if (
-        body.submittedPanDetails.submittedInvestorName !== body.companyName
-      ) {
-        throw new HttpErrors.BadRequest('PAN details do not match company name');
+      if (body.submittedPanDetails.submittedInvestorName !== body.companyName) {
+        throw new HttpErrors.BadRequest(
+          'PAN details do not match company name',
+        );
       }
 
       // // Basic validation: Submitted PAN should match Extracted PAN
@@ -2660,15 +2951,27 @@ export class AuthController {
           isDeleted: false,
           currentProgress: ['investor_basic_info', 'pan_verified'],
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
-      await this.investorProfileRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
-      await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
-      const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'investor');
+      await this.investorProfileRepository.updateById(
+        newCompanyProfile.id,
+        {kycApplicationsId: newApplication.id},
+        {transaction: tx},
+      );
+      await this.mediaService.updateMediaUsedStatus(
+        [body.panCardDocumentId],
+        true,
+      );
+      const result = await this.rbacService.assignNewUserRole(
+        newUserProfile.id,
+        'investor',
+      );
       if (!result.success || !result.data) {
         if (process.env.NODE_ENV === 'dev') {
-          throw new HttpErrors.InternalServerError('Error while assigning role to user');
+          throw new HttpErrors.InternalServerError(
+            'Error while assigning role to user',
+          );
         } else {
           throw new HttpErrors.InternalServerError('Internal server error');
         }
@@ -2680,10 +2983,12 @@ export class AuthController {
         success: true,
         message: 'Registration completed',
         kycStatus: 0,
-        currentProgress: newApplication.currentProgress ?? ['investor_basic_info', 'pan_verified'],
-        usersId: newUserProfile.id
+        currentProgress: newApplication.currentProgress ?? [
+          'investor_basic_info',
+          'pan_verified',
+        ],
+        usersId: newUserProfile.id,
       };
-
     } catch (error) {
       await tx.rollback();
       console.log('error while registering new company :', error);
@@ -2691,7 +2996,7 @@ export class AuthController {
     }
   }
 
-    @post('/auth/investor-login')
+  @post('/auth/investor-login')
   async investorLogin(
     @requestBody({
       content: {
@@ -2703,20 +3008,26 @@ export class AuthController {
               email: {type: 'string'},
               password: {type: 'string'},
               rememberMe: {type: 'boolean'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
-    body: {email: string; password: string; rememberMe: boolean}
-  ): Promise<{success: boolean; message: string; accessToken: string; user: object}> {
+    body: {
+      email: string;
+      password: string;
+      rememberMe: boolean;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    accessToken: string;
+    user: object;
+  }> {
     const userData = await this.usersRepository.findOne({
       where: {
-        and: [
-          {email: body.email},
-          {isDeleted: false}
-        ]
-      }
+        and: [{email: body.email}, {isDeleted: false}],
+      },
     });
 
     if (!userData) {
@@ -2725,12 +3036,8 @@ export class AuthController {
 
     const company = await this.investorProfileRepository.findOne({
       where: {
-        and: [
-          {usersId: userData.id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: userData.id}, {isActive: true}, {isDeleted: false}],
+      },
     });
 
     if (!company) {
@@ -2739,10 +3046,16 @@ export class AuthController {
 
     const user = await this.userService.verifyCredentials(body);
 
-    const {roles, permissions} = await this.rbacService.getUserRoleAndPermissionsByRole(user.id!, 'investor');
+    const {roles, permissions} =
+      await this.rbacService.getUserRoleAndPermissionsByRole(
+        user.id!,
+        'investor',
+      );
 
     if (!roles.includes('investor')) {
-      throw new HttpErrors.Forbidden('Access denied. Only investor users can login here.');
+      throw new HttpErrors.Forbidden(
+        'Access denied. Only investor users can login here.',
+      );
     }
 
     const userProfile: UserProfile & {
@@ -2759,15 +3072,18 @@ export class AuthController {
     };
 
     const token = await this.jwtService.generateToken(userProfile);
-    const profile = await this.rbacService.returnInvestorProfile(user.id, roles, permissions);
+    const profile = await this.rbacService.returnInvestorProfile(
+      user.id,
+      roles,
+      permissions,
+    );
     return {
       success: true,
-      message: "Investor login successful",
+      message: 'Investor login successful',
       accessToken: token,
-      user: profile
+      user: profile,
     };
   }
-
 
   // ---------------------- Merchant Profile Registration API's --------------//
 
@@ -2796,32 +3112,32 @@ export class AuthController {
             properties: {
               sessionId: {
                 type: 'string',
-                description: 'Registration session id'
+                description: 'Registration session id',
               },
               // password: {type: 'string'},
               companyName: {type: 'string'},
               CIN: {
                 type: 'string',
-                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$'
+                pattern: '^[A-Z]{1}[0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$',
               },
               GSTIN: {
                 type: 'string',
                 minLength: 15,
-                maxLength: 15
+                maxLength: 15,
               },
               udyamRegistrationNumber: {
-                type: 'string'
+                type: 'string',
               },
               dateOfIncorporation: {
                 type: 'string',
-                pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+                pattern: '^\\d{4}-\\d{2}-\\d{2}$',
               },
               cityOfIncorporation: {type: 'string'},
               stateOfIncorporation: {type: 'string'},
               countryOfIncorporation: {type: 'string'},
               humanInteraction: {
                 type: 'boolean',
-                default: false
+                default: false,
               },
               extractedPanDetails: {
                 type: 'object',
@@ -2830,9 +3146,9 @@ export class AuthController {
                   extractedMerchantName: {type: 'string'},
                   extractedPanNumber: {
                     type: 'string',
-                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
-                  }
-                }
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
+                  },
+                },
               },
               submittedPanDetails: {
                 type: 'object',
@@ -2841,19 +3157,19 @@ export class AuthController {
                   submittedMerchantName: {type: 'string'},
                   submittedPanNumber: {
                     type: 'string',
-                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$'
-                  }
-                }
+                    pattern: '^[A-Z]{5}[0-9]{4}[A-Z]{1}$',
+                  },
+                },
               },
               panCardDocumentId: {
                 type: 'string',
-                description: 'Media ID of uploaded PAN card'
+                description: 'Media ID of uploaded PAN card',
               },
               merchantDealershipTypeId: {type: 'string'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
     body: {
       sessionId: string;
@@ -2877,27 +3193,36 @@ export class AuthController {
       };
       panCardDocumentId: string;
       merchantDealershipTypeId: string;
-    }
+    },
   ): Promise<{
     success: boolean;
     message: string;
     kycStatus: number;
     currentProgress: string[];
     usersId: string;
+    accessToken: string;
+    user: {
+      id: string;
+      role: 'merchant';
+      merchantProfilesId: string;
+    };
   }> {
-    const tx = await this.merchantProfileRepository.dataSource.beginTransaction({
-      isolationLevel: 'READ COMMITTED',
-    });
+    const tx = await this.merchantProfileRepository.dataSource.beginTransaction(
+      {
+        isolationLevel: 'READ COMMITTED',
+      },
+    );
     console.log('body', body);
     try {
       // ----------------------------
       //  Validate Registration Session
       // ----------------------------
-      const registrationSession = await this.registrationSessionsRepository.findById(
-        body.sessionId,
-        undefined,
-        {transaction: tx}
-      );
+      const registrationSession =
+        await this.registrationSessionsRepository.findById(
+          body.sessionId,
+          undefined,
+          {transaction: tx},
+        );
 
       if (
         !registrationSession ||
@@ -2911,30 +3236,9 @@ export class AuthController {
       }
 
       // ----------------------------
-      //  Validate CIN & GSTIN
+      //  Create or reuse User
       // ----------------------------
-      const companyWithCIN = await this.merchantProfileRepository.findOne(
-        {where: {CIN: body.CIN, isDeleted: false}},
-        {transaction: tx}
-      );
-      if (companyWithCIN) throw new HttpErrors.BadRequest('CIN already registered');
-
-      const companyWithGSTIN = await this.merchantProfileRepository.findOne(
-        {where: {GSTIN: body.GSTIN, isDeleted: false}},
-        {transaction: tx}
-      );
-      if (companyWithGSTIN)
-        throw new HttpErrors.BadRequest('GSTIN already registered');
-
-      await this.companyDataMapperService.merchantPanValidation(
-        body.submittedPanDetails.submittedPanNumber,
-        body.submittedPanDetails.submittedMerchantName,
-      );
-
-      // ----------------------------
-      //  Create User
-      // ----------------------------
-      const hashedPassword = await this.hasher.hashPassword("Merchant@123");
+      const hashedPassword = await this.hasher.hashPassword('Merchant@123');
 
       let newUserProfile = await this.usersRepository.findOne({
         where: {
@@ -2942,9 +3246,9 @@ export class AuthController {
             {email: registrationSession.email},
             {phone: registrationSession.phoneNumber},
             {isActive: true},
-            {isDeleted: false}
-          ]
-        }
+            {isDeleted: false},
+          ],
+        },
       });
 
       if (!newUserProfile) {
@@ -2957,9 +3261,84 @@ export class AuthController {
             isActive: true,
             isDeleted: false,
           },
-          {transaction: tx}
+          {transaction: tx},
         );
       }
+
+      const existingMerchantProfile = await this.merchantProfileRepository.findOne(
+        {
+          where: {
+            and: [{usersId: newUserProfile.id}, {isDeleted: false}],
+          },
+          order: ['createdAt DESC'],
+        },
+        {transaction: tx},
+      );
+
+      if (existingMerchantProfile) {
+        const existingKycApplication =
+          await this.kycApplicationsRepository.findOne(
+            {
+              where: {
+                and: [
+                  {usersId: newUserProfile.id},
+                  {identifierId: existingMerchantProfile.id},
+                  {roleValue: 'merchant'},
+                  {isActive: true},
+                  {isDeleted: false},
+                ],
+              },
+              order: ['createdAt DESC'],
+            },
+            {transaction: tx},
+          );
+
+        if (
+          existingKycApplication &&
+          this.getPendingMerchantKycStatuses('merchant').includes(
+            existingKycApplication.status,
+          )
+        ) {
+          await tx.commit();
+
+          return this.buildExistingMerchantRegistrationResponse(
+            {
+              id: newUserProfile.id,
+              email: newUserProfile.email,
+              phone: newUserProfile.phone,
+            },
+            existingMerchantProfile,
+            existingKycApplication,
+          );
+        }
+
+        throw new HttpErrors.BadRequest(
+          'Merchant profile already exists for this user',
+        );
+      }
+
+      // ----------------------------
+      //  Validate CIN & GSTIN
+      // ----------------------------
+      const companyWithCIN = await this.merchantProfileRepository.findOne(
+        {where: {CIN: body.CIN, isDeleted: false}},
+        {transaction: tx},
+      );
+      if (companyWithCIN)
+        throw new HttpErrors.BadRequest('CIN already registered');
+
+      const companyWithGSTIN = await this.merchantProfileRepository.findOne(
+        {where: {GSTIN: body.GSTIN, isDeleted: false}},
+        {transaction: tx},
+      );
+      if (companyWithGSTIN)
+        throw new HttpErrors.BadRequest('GSTIN already registered');
+
+      await this.companyDataMapperService.merchantPanValidation(
+        body.submittedPanDetails.submittedPanNumber,
+        body.submittedPanDetails.submittedMerchantName,
+      );
+
       // ----------------------------
       //  Create Company Profile
       // ----------------------------
@@ -2978,7 +3357,7 @@ export class AuthController {
           isActive: false,
           isDeleted: false,
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       // ----------------------------
@@ -2994,11 +3373,13 @@ export class AuthController {
             ],
           },
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
       if (isPanExist)
-        throw new HttpErrors.BadRequest('Pan already exists with another company');
+        throw new HttpErrors.BadRequest(
+          'Pan already exists with another company',
+        );
 
       // ----------------------------
       //  Prepare PAN Data
@@ -3035,40 +3416,63 @@ export class AuthController {
             isActive: true,
             isDeleted: false,
             currentProgress: ['merchant_kyc'],
-            identifierId: newCompanyProfile.id
+            identifierId: newCompanyProfile.id,
           },
-          {transaction: tx}
+          {transaction: tx},
         );
 
-        await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
-        const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'merchant');
+        await this.mediaService.updateMediaUsedStatus(
+          [body.panCardDocumentId],
+          true,
+        );
+        const result = await this.rbacService.assignNewUserRole(
+          newUserProfile.id,
+          'merchant',
+        );
         if (!result.success || !result.data) {
           if (process.env.NODE_ENV === 'dev') {
-            throw new HttpErrors.InternalServerError('Error while assigning role to user');
+            throw new HttpErrors.InternalServerError(
+              'Error while assigning role to user',
+            );
           } else {
             throw new HttpErrors.InternalServerError('Internal server error');
           }
         }
 
-        await this.merchantProfileRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
+        const merchantAuth = await this.generateMerchantOnboardingAuth(
+          {
+            id: newUserProfile.id,
+            email: newUserProfile.email,
+            phone: newUserProfile.phone,
+          },
+          newCompanyProfile.id,
+        );
+
+        await this.merchantProfileRepository.updateById(
+          newCompanyProfile.id,
+          {kycApplicationsId: newApplication.id},
+          {transaction: tx},
+        );
         await tx.commit();
 
         return {
           success: true,
           message: 'Registration completed',
-          kycStatus: 0,
+          kycStatus: 1,
           currentProgress: newApplication.currentProgress ?? ['merchant_kyc'],
-          usersId: newUserProfile.id
+          usersId: newUserProfile.id,
+          accessToken: merchantAuth.accessToken,
+          user: merchantAuth.user,
         };
       }
 
       // ----------------------------
       //  Auto verification (No Human Interaction)
       // ----------------------------
-      if (
-        body.submittedPanDetails.submittedMerchantName !== body.companyName
-      ) {
-        throw new HttpErrors.BadRequest('PAN details do not match company name');
+      if (body.submittedPanDetails.submittedMerchantName !== body.companyName) {
+        throw new HttpErrors.BadRequest(
+          'PAN details do not match company name',
+        );
       }
 
       // // Basic validation: Submitted PAN should match Extracted PAN
@@ -3103,19 +3507,39 @@ export class AuthController {
           isDeleted: false,
           currentProgress: ['merchant_kyc', 'pan_verified'],
         },
-        {transaction: tx}
+        {transaction: tx},
       );
 
-      await this.merchantProfileRepository.updateById(newCompanyProfile.id, {kycApplicationsId: newApplication.id}, {transaction: tx})
-      await this.mediaService.updateMediaUsedStatus([body.panCardDocumentId], true);
-      const result = await this.rbacService.assignNewUserRole(newUserProfile.id, 'merchant');
+      await this.merchantProfileRepository.updateById(
+        newCompanyProfile.id,
+        {kycApplicationsId: newApplication.id},
+        {transaction: tx},
+      );
+      await this.mediaService.updateMediaUsedStatus(
+        [body.panCardDocumentId],
+        true,
+      );
+      const result = await this.rbacService.assignNewUserRole(
+        newUserProfile.id,
+        'merchant',
+      );
       if (!result.success || !result.data) {
         if (process.env.NODE_ENV === 'dev') {
-          throw new HttpErrors.InternalServerError('Error while assigning role to user');
+          throw new HttpErrors.InternalServerError(
+            'Error while assigning role to user',
+          );
         } else {
           throw new HttpErrors.InternalServerError('Internal server error');
         }
       }
+      const merchantAuth = await this.generateMerchantOnboardingAuth(
+        {
+          id: newUserProfile.id,
+          email: newUserProfile.email,
+          phone: newUserProfile.phone,
+        },
+        newCompanyProfile.id,
+      );
       console.log('result', result.data);
       await tx.commit();
 
@@ -3123,10 +3547,14 @@ export class AuthController {
         success: true,
         message: 'Registration completed',
         kycStatus: 0,
-        currentProgress: newApplication.currentProgress ?? ['merchant_kyc', 'pan_verified'],
-        usersId: newUserProfile.id
+        currentProgress: newApplication.currentProgress ?? [
+          'merchant_kyc',
+          'pan_verified',
+        ],
+        usersId: newUserProfile.id,
+        accessToken: merchantAuth.accessToken,
+        user: merchantAuth.user,
       };
-
     } catch (error) {
       await tx.rollback();
       console.log('error while registering new company :', error);
@@ -3146,20 +3574,26 @@ export class AuthController {
               email: {type: 'string'},
               password: {type: 'string'},
               rememberMe: {type: 'boolean'},
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     })
-    body: {email: string; password: string; rememberMe: boolean}
-  ): Promise<{success: boolean; message: string; accessToken: string; user: object}> {
+    body: {
+      email: string;
+      password: string;
+      rememberMe: boolean;
+    },
+  ): Promise<{
+    success: boolean;
+    message: string;
+    accessToken: string;
+    user: object;
+  }> {
     const userData = await this.usersRepository.findOne({
       where: {
-        and: [
-          {email: body.email},
-          {isDeleted: false}
-        ]
-      }
+        and: [{email: body.email}, {isDeleted: false}],
+      },
     });
 
     if (!userData) {
@@ -3168,12 +3602,8 @@ export class AuthController {
 
     const company = await this.merchantProfileRepository.findOne({
       where: {
-        and: [
-          {usersId: userData.id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: userData.id}, {isActive: true}, {isDeleted: false}],
+      },
     });
 
     if (!company) {
@@ -3182,10 +3612,16 @@ export class AuthController {
 
     const user = await this.userService.verifyCredentials(body);
 
-    const {roles, permissions} = await this.rbacService.getUserRoleAndPermissionsByRole(user.id!, 'merchant');
+    const {roles, permissions} =
+      await this.rbacService.getUserRoleAndPermissionsByRole(
+        user.id!,
+        'merchant',
+      );
 
     if (!roles.includes('merchant')) {
-      throw new HttpErrors.Forbidden('Access denied. Only merchant users can login here.');
+      throw new HttpErrors.Forbidden(
+        'Access denied. Only merchant users can login here.',
+      );
     }
 
     const userProfile: UserProfile & {
@@ -3202,13 +3638,16 @@ export class AuthController {
     };
 
     const token = await this.jwtService.generateToken(userProfile);
-    const profile = await this.rbacService.returnMerchantProfile(user.id, roles, permissions);
+    const profile = await this.rbacService.returnMerchantProfile(
+      user.id,
+      roles,
+      permissions,
+    );
     return {
       success: true,
-      message: "Merchant login successful",
+      message: 'Merchant login successful',
       accessToken: token,
-      user: profile
+      user: profile,
     };
   }
 }
-

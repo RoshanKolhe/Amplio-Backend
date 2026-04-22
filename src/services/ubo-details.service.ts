@@ -215,15 +215,34 @@ export class UboDetailsService {
     uboId: string,
     uboData: Partial<UboDetails>,
     tx: any,
+    owner?: {usersId: string; identifierId?: string; roleValue?: string},
   ): Promise<{
     success: boolean;
     message: string;
     uboDetail: UboDetails | null;
   }> {
+    const whereClause: Record<string, unknown>[] = [
+      {id: uboId},
+      {isActive: true},
+      {isDeleted: false},
+    ];
+
+    if (owner?.usersId) {
+      whereClause.push({usersId: owner.usersId});
+    }
+
+    if (owner?.identifierId) {
+      whereClause.push({identifierId: owner.identifierId});
+    }
+
+    if (owner?.roleValue) {
+      whereClause.push({roleValue: owner.roleValue});
+    }
+
     const uboDetail = await this.uboDetailsRepository.findOne(
       {
         where: {
-          and: [{id: uboId}, {isActive: true}, {isDeleted: false}],
+          and: whereClause,
         },
       },
       {transaction: tx},
@@ -255,7 +274,7 @@ export class UboDetailsService {
     const updatedUboDetail = await this.uboDetailsRepository.findOne(
       {
         where: {
-          and: [{id: uboId}, {isActive: true}, {isDeleted: false}],
+          and: whereClause,
         },
         include: [
           {

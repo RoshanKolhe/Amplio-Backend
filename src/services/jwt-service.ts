@@ -5,13 +5,24 @@ import {HttpErrors} from '@loopback/rest';
 import {securityId, UserProfile} from '@loopback/security';
 import * as jwt from 'jsonwebtoken';
 
+export interface MerchantOnboardingTokenPayload {
+  sub: string;
+  id: string;
+  role: 'merchant';
+  roles: ['merchant'];
+  scope: 'kyc_onboarding';
+  merchantProfilesId: string;
+  email?: string;
+  phone?: string;
+  permissions?: string[];
+}
+
 @injectable({scope: BindingScope.SINGLETON})
 export class JWTService implements TokenService {
   constructor(
     @inject('jwt.secret') private jwtSecret: string,
     @inject('jwt.expiresIn') private jwtExpiresIn: string,
-  ) { }
-
+  ) {}
 
   private async signJwt(
     payload: any,
@@ -23,13 +34,13 @@ export class JWTService implements TokenService {
         this.jwtSecret,
         {expiresIn},
         (err: any, token: string | undefined) => {
-          if (err || !token) return reject(err ?? new Error('Token generation failed'));
+          if (err || !token)
+            return reject(err ?? new Error('Token generation failed'));
           resolve(token);
         },
       );
     });
   }
-
 
   private async verifyJwt(token: string): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -40,6 +51,56 @@ export class JWTService implements TokenService {
     });
   }
 
+  private parseExpiresInToMs(expiresIn: string | number): number | undefined {
+    if (typeof expiresIn === 'number') {
+      return expiresIn * 1000;
+    }
+
+    if (typeof expiresIn !== 'string') {
+      return undefined;
+    }
+
+    const normalized = expiresIn.trim();
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (/^\d+$/.test(normalized)) {
+      return Number(normalized) * 1000;
+    }
+
+    const match = normalized.match(/^(\d+)\s*([smhd])$/i);
+    if (!match) {
+      return undefined;
+    }
+
+    const value = Number(match[1]);
+    const unit = match[2].toLowerCase();
+    const unitMsMap: Record<string, number> = {
+      s: 1000,
+      m: 60 * 1000,
+      h: 60 * 60 * 1000,
+      d: 24 * 60 * 60 * 1000,
+    };
+
+    return value * unitMsMap[unit];
+  }
+
+  private getMerchantOnboardingExpiresIn(): jwt.SignOptions['expiresIn'] {
+    const onboardingLimit = '24h' as const;
+    const configuredMs = this.parseExpiresInToMs(this.jwtExpiresIn);
+    const onboardingLimitMs = this.parseExpiresInToMs(onboardingLimit);
+
+    if (
+      configuredMs !== undefined &&
+      onboardingLimitMs !== undefined &&
+      configuredMs <= onboardingLimitMs
+    ) {
+      return this.jwtExpiresIn as jwt.SignOptions['expiresIn'];
+    }
+
+    return onboardingLimit;
+  }
 
   async generateToken(userProfile: UserProfile): Promise<string> {
     if (!userProfile) {
@@ -48,8 +109,20 @@ export class JWTService implements TokenService {
 
     return this.signJwt(
       userProfile,
-      this.jwtExpiresIn as jwt.SignOptions['expiresIn']
+      this.jwtExpiresIn as jwt.SignOptions['expiresIn'],
     );
+  }
+
+  async generateMerchantOnboardingToken(
+    payload: MerchantOnboardingTokenPayload,
+  ): Promise<string> {
+    if (!payload?.id || !payload?.merchantProfilesId) {
+      throw new HttpErrors.BadRequest(
+        'Merchant onboarding token payload is incomplete',
+      );
+    }
+
+    return this.signJwt(payload, this.getMerchantOnboardingExpiresIn());
   }
 
   async generateShortToken(userProfile: UserProfile): Promise<string> {
@@ -61,10 +134,7 @@ export class JWTService implements TokenService {
   }
 
   async generateGuarantorVerificationToken(payload: object): Promise<string> {
-    return this.signJwt(
-      payload,
-      '1d' as jwt.SignOptions['expiresIn'],
-    );
+    return this.signJwt(payload, '1d' as jwt.SignOptions['expiresIn']);
   }
 
   async verifyGuarantorVerificationToken(token: string): Promise<any> {
@@ -75,7 +145,9 @@ export class JWTService implements TokenService {
     try {
       return await this.verifyJwt(token);
     } catch (e) {
-      throw new HttpErrors.Unauthorized('Invalid or expired verification token');
+      throw new HttpErrors.Unauthorized(
+        'Invalid or expired verification token',
+      );
     }
   }
 
@@ -86,15 +158,37 @@ export class JWTService implements TokenService {
 
     try {
       const decrypted: any = await this.verifyJwt(token);
+      const userId = decrypted.id ?? decrypted.sub;
+      const roles = Array.isArray(decrypted.roles)
+        ? decrypted.roles
+        : decrypted.role
+          ? [decrypted.role]
+          : [];
+      const permissions = Array.isArray(decrypted.permissions)
+        ? decrypted.permissions
+        : [];
 
-      const userProfile: UserProfile = {
-        [securityId]: decrypted.id,
-        id: decrypted.id,
+      const userProfile: UserProfile & {
+        roles: string[];
+        permissions: string[];
+        isFirstTime: boolean;
+        role?: string;
+        scope?: string;
+        merchantProfilesId?: string;
+        phone?: string;
+        phoneNumber?: string;
+      } = {
+        [securityId]: userId,
+        id: userId,
         email: decrypted.email,
-        phoneNumber: decrypted.phoneNumber,
-        roles: decrypted.roles ?? [],
-        permissions: decrypted.permissions ?? [],
+        phone: decrypted.phone ?? decrypted.phoneNumber,
+        phoneNumber: decrypted.phoneNumber ?? decrypted.phone,
+        roles,
+        permissions,
         isFirstTime: decrypted.isFirstTime ?? false,
+        role: decrypted.role,
+        scope: decrypted.scope,
+        merchantProfilesId: decrypted.merchantProfilesId,
       };
 
       return userProfile;

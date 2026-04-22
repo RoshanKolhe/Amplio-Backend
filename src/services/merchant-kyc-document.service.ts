@@ -61,11 +61,23 @@ export class MerchantKycDocumentService {
     private mediaService: MediaService,
   ) {}
 
-  async fetchForKycStepper(usersId: string): Promise<{
+  private assertOwnedUserAccess(usersId: string, requesterUserId?: string) {
+    if (requesterUserId && requesterUserId !== usersId) {
+      throw new HttpErrors.Forbidden(
+        'You are not allowed to access another merchant KYC record',
+      );
+    }
+  }
+
+  async fetchForKycStepper(
+    usersId: string,
+    requesterUserId?: string,
+  ): Promise<{
     success: boolean;
     message: string;
     documents: MerchantKycDocumentStepperItem[];
   }> {
+    this.assertOwnedUserAccess(usersId, requesterUserId);
     const user = await this.usersRepository.findOne({
       where: {
         and: [{id: usersId}, {isDeleted: false}],
@@ -153,11 +165,12 @@ export class MerchantKycDocumentService {
     };
   }
 
-  async fetchByUser(usersId: string): Promise<{
+  async fetchByUser(usersId: string, requesterUserId?: string): Promise<{
     success: boolean;
     message: string;
     documents: MerchantKycDocument[];
   }> {
+    this.assertOwnedUserAccess(usersId, requesterUserId);
     const documents = await this.merchantKycDocumentRepository.find({
       where: {
         and: [{usersId}, {isActive: true}, {isDeleted: false}],
@@ -198,11 +211,13 @@ export class MerchantKycDocumentService {
     usersId: string,
     documents: MerchantKycDocumentCreatePayload[],
     tx: unknown,
+    requesterUserId?: string,
   ): Promise<{
     success: boolean;
     message: string;
     uploadedDocuments: MerchantKycDocument[];
   }> {
+    this.assertOwnedUserAccess(usersId, requesterUserId);
     const user = await this.usersRepository.findOne(
       {
         where: {
@@ -294,11 +309,13 @@ export class MerchantKycDocumentService {
 
   async uploadDocument(
     documentPayload: MerchantKycDocumentCreatePayload,
+    requesterUserId?: string,
   ): Promise<{
     success: boolean;
     message: string;
     document: MerchantKycDocument;
   }> {
+    this.assertOwnedUserAccess(documentPayload.usersId, requesterUserId);
     const user = await this.usersRepository.findOne({
       where: {
         and: [

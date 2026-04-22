@@ -62,6 +62,27 @@ export class BankDetailsService {
     );
   }
 
+  private buildAccountWhereClause(
+    accountId: string,
+    owner?: {usersId: string; roleValue?: string},
+  ) {
+    const whereClause: Record<string, unknown>[] = [
+      {id: accountId},
+      {isActive: true},
+      {isDeleted: false},
+    ];
+
+    if (owner?.usersId) {
+      whereClause.push({usersId: owner.usersId});
+    }
+
+    if (owner?.roleValue) {
+      whereClause.push({roleValue: owner.roleValue});
+    }
+
+    return {and: whereClause};
+  }
+
   // verify bank account with Perfios
   async verifyWithPerfios(data: {
     accountNumber: string;
@@ -276,14 +297,13 @@ export class BankDetailsService {
   }
 
   // fetch user bank accounts...
-  async fetchUserBankAccount(accountId: string): Promise<{success: boolean; message: string; account: BankDetails}> {
+  async fetchUserBankAccount(
+    accountId: string,
+    owner?: {usersId: string; roleValue?: string},
+  ): Promise<{success: boolean; message: string; account: BankDetails}> {
     const bankAccount = await this.bankDetailsRepository.findOne({
       where: {
-        and: [
-          {id: accountId},
-          {isActive: true},
-          {isDeleted: false}
-        ]
+        ...this.buildAccountWhereClause(accountId, owner),
       },
       include: [
         {relation: 'bankAccountProof', scope: {fields: {id: true, fileUrl: true, fileOriginalName: true}}}
@@ -302,14 +322,15 @@ export class BankDetailsService {
   }
 
   // update bank account info...
-  async updateBankAccountInfo(accountId: string, accountData: Partial<BankDetails>, tx: any): Promise<{success: boolean; message: string; account: BankDetails | null}> {
+  async updateBankAccountInfo(
+    accountId: string,
+    accountData: Partial<BankDetails>,
+    tx: any,
+    owner?: {usersId: string; roleValue?: string},
+  ): Promise<{success: boolean; message: string; account: BankDetails | null}> {
     const bankAccount = await this.bankDetailsRepository.findOne({
       where: {
-        and: [
-          {id: accountId},
-          {isActive: true},
-          {isDeleted: false}
-        ]
+        ...this.buildAccountWhereClause(accountId, owner),
       },
       include: [
         {relation: 'bankAccountProof', scope: {fields: {id: true, fileUrl: true, fileOriginalName: true}}}
@@ -332,11 +353,7 @@ export class BankDetailsService {
 
     const updatedAccountData = await this.bankDetailsRepository.findOne({
       where: {
-        and: [
-          {id: accountId},
-          {isActive: true},
-          {isDeleted: false}
-        ]
+        ...this.buildAccountWhereClause(accountId, owner),
       },
       include: [
         {relation: 'bankAccountProof', scope: {fields: {id: true, fileUrl: true, fileOriginalName: true}}}

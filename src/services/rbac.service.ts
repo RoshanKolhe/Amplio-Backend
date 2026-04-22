@@ -114,6 +114,28 @@ export class RbacService {
       throw new HttpErrors.NotFound('No role found with given role');
     }
 
+    const existingUserRole = await this.userRolesRepo.findOne({
+      where: {
+        usersId: userId,
+        rolesId: role.id,
+        isDeleted: false,
+      },
+    });
+
+    if (existingUserRole) {
+      if (!existingUserRole.isActive) {
+        await this.userRolesRepo.updateById(existingUserRole.id, {
+          isActive: true,
+        });
+      }
+
+      return {
+        success: true,
+        message: 'Role is already assigned to user',
+        data: existingUserRole,
+      };
+    }
+
     const newRole = await this.userRolesRepo.create({
       usersId: userId,
       rolesId: role.id,

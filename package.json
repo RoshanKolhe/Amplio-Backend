@@ -76,6 +76,7 @@
     "@loopback/eslint-config": "^16.0.0",
     "@loopback/testlab": "^8.0.2",
     "@types/axios": "^0.9.36",
+    "@types/jest": "^30.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/mime-types": "^3.0.1",
     "@types/multer": "^2.0.0",
