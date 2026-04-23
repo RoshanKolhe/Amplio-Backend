@@ -1,7 +1,15 @@
 import {Entity, model, property, belongsTo} from '@loopback/repository';
 import {SpvApplication} from './spv-application.model';
 
-@model()
+
+@model({
+  settings: {
+    postgresql: {
+      table: 'spv_ptc_parameters',
+      schema: 'public',
+    },
+  },
+})
 export class PtcParameters extends Entity {
   @property({
     type: 'string',

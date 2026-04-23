@@ -3,8 +3,9 @@ import {IsolationLevel} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {AmplioDataSource} from '../datasources';
 import {
-  EscrowSetup,
   CreditRatings,
+  EscrowSetup,
+  IsinApplication,
   PoolFinancials,
   PtcParameters,
   Spv,
@@ -12,18 +13,17 @@ import {
   SpvKycDocument,
   SpvKycDocumentWithRelations,
   TrustDeed,
-  IsinApplication,
 } from '../models';
 import {EscrowSetupService} from './escrow-setup.service';
+import {IsinApplicationService} from './isin-application.service';
 import {PoolFinancialsService} from './pool-financials.service';
 import {PtcParametersService} from './ptc-parameters.service';
-import {SpvApplicationService} from './spv-application.service';
 import {SpvApplicationCreditRatingService} from './spv-application-credit-rating.service';
 import {SpvApplicationStatusService} from './spv-application-status.service';
-import {SpvService} from './spv.service';
+import {SpvApplicationService} from './spv-application.service';
 import {SpvKycDocumentService} from './spv-kyc-document.service';
+import {SpvService} from './spv.service';
 import {TrustDeedService} from './trust-deed.service';
-import {IsinApplicationService} from './isin-application.service';
 
 type TrustDeedSavePayload = Pick<TrustDeed, 'trustName'> &
   Partial<
@@ -78,7 +78,7 @@ export class SpvApplicationTransactionsService {
     private spvKycDocumentService: SpvKycDocumentService,
     @inject('service.isinApplication.service')
     private isinApplicationService: IsinApplicationService,
-  ) {}
+  ) { }
 
   private async syncApplicationStatus(
     applicationId: string,
@@ -516,6 +516,16 @@ export class SpvApplicationTransactionsService {
         tx,
       );
 
+      await this.spvApplicationService.updateApplicationVerification(
+        application.id,
+        {
+          status: 1,
+          reason: undefined,
+          verifiedAt: undefined,
+        },
+        tx,
+      );
+
       const currentStatus = await this.syncApplicationStatus(
         application.id,
         application.spvApplicationStatusMasterId,
@@ -697,17 +707,17 @@ export class SpvApplicationTransactionsService {
 
       await tx.commit();
 
-        return {
-          success: true,
-          message: 'Review submitted successfully',
-          currentStatus: {
-            id: reviewAndSubmitStatus.id,
-            label: reviewAndSubmitStatus.status,
-            code: reviewAndSubmitStatus.value,
-          },
-          reviewStatus: application.status,
-        };
-      } catch (error) {
+      return {
+        success: true,
+        message: 'Review submitted successfully',
+        currentStatus: {
+          id: reviewAndSubmitStatus.id,
+          label: reviewAndSubmitStatus.status,
+          code: reviewAndSubmitStatus.value,
+        },
+        reviewStatus: application.status,
+      };
+    } catch (error) {
       await tx.rollback();
       throw error;
     }

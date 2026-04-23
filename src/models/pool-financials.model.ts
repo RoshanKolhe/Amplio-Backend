@@ -1,8 +1,16 @@
-import {Entity, model, property, belongsTo} from '@loopback/repository';
+import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {SpvApplication} from './spv-application.model';
 import {Spv} from './spv.model';
 
-@model()
+
+@model({
+  settings: {
+    postgresql: {
+      table: 'spv_pool_financials',
+      schema: 'public',
+    },
+  },
+})
 export class PoolFinancials extends Entity {
   @property({
     type: 'string',

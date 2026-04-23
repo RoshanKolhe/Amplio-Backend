@@ -1,14 +1,19 @@
-import {authenticate} from '@loopback/authentication';
+import {authenticate, AuthenticationBindings} from '@loopback/authentication';
 import {inject} from '@loopback/core';
-import {patch, param, requestBody} from '@loopback/rest';
+import {patch,get, param, requestBody} from '@loopback/rest';
 import {authorize} from '../authorization';
-import {SpvKycDocument} from '../models';
+import {SpvApplication, SpvKycDocument} from '../models';
 import {SpvApplicationTransactionsService} from '../services/spv-application-transactions.service';
+import {UserProfile} from '@loopback/security';
+import {Filter, repository} from '@loopback/repository';
+import {SpvApplicationRepository} from '../repositories';
 
 export class SpvSuperAdminController {
   constructor(
     @inject('service.spvApplicationTransactions.service')
     private spvApplicationTransactionsService: SpvApplicationTransactionsService,
+      @repository(SpvApplicationRepository)
+        private spvApplicationsRepository: SpvApplicationRepository,
   ) {}
 
   @authenticate('jwt')
@@ -102,4 +107,50 @@ export class SpvSuperAdminController {
       details,
     };
   }
+
+
+    @authenticate('jwt')
+    @authorize({roles: ['super_admin']})
+    @get('/super-admin/spv-applications')
+    async getSpvApplications(
+      @param.filter(SpvApplication) filter?: Filter<SpvApplication>,
+      @param.query.number('status') status?: number,
+    ): Promise<{
+      success: boolean;
+      message: string;
+      data: SpvApplication[];
+      count: {
+        totalCount: number
+      }
+    }> {
+      let rootWhere = {
+        ...filter?.where,
+      };
+
+
+      const spvApplications = await this.spvApplicationsRepository.find({
+        ...filter,
+        where: rootWhere,
+        limit: filter?.limit ?? 10,
+        skip: filter?.skip ?? 0,
+
+        order: filter?.order ?? ['createdAt DESC'],
+
+      });
+
+      const totalCount = (await this.spvApplicationsRepository.count(filter?.where)).count;
+
+      return {
+        success: true,
+        message: 'SPV Applications',
+        data: spvApplications,
+        count: {
+          totalCount: totalCount,
+
+        }
+      };
+    }
+
+
+
 }
