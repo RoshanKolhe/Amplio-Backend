@@ -19,6 +19,7 @@ export * from './document-extraction.controller';
 export * from './documents.controller';
 export * from './investor-kyc-document-requirements.controller';
 export * from './investor-kyc-document.controller';
+export * from './investor-investments.controller';
 export * from './investor-profile.controller';
 export * from './investor-types.controller';
 export * from './kyc.controller';

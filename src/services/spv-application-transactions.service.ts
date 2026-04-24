@@ -205,9 +205,33 @@ export class SpvApplicationTransactionsService {
         );
       }
 
+      const escrowSetups = await this.escrowSetupService.fetchByApplicationId(
+        applicationId,
+      );
+      const requestedEscrowSetupId = payload.escrowSetupId;
+      const collectionEscrowSetup = escrowSetups.find(
+        escrow => escrow.accountType === 'collection_escrow',
+      );
+
+      if (requestedEscrowSetupId) {
+        const matchedEscrowSetup = escrowSetups.find(
+          escrow => escrow.id === requestedEscrowSetupId,
+        );
+
+        if (!matchedEscrowSetup) {
+          throw new HttpErrors.BadRequest(
+            'Selected escrow account does not belong to this SPV application',
+          );
+        }
+      }
+
       const poolFinancials = await this.poolFinancialsService.createOrUpdate(
         applicationId,
-        payload,
+        {
+          ...payload,
+          escrowSetupId:
+            requestedEscrowSetupId ?? collectionEscrowSetup?.id ?? undefined,
+        },
         tx,
       );
 
@@ -362,7 +386,7 @@ export class SpvApplicationTransactionsService {
         );
       }
 
-      const trustDeed = await this.trustDeedService.createOrUpdate(
+      await this.trustDeedService.createOrUpdate(
         applicationId,
         payload,
         tx,
@@ -585,7 +609,7 @@ export class SpvApplicationTransactionsService {
         );
       }
 
-      let updatedDocument = await this.spvKycDocumentService.updateDocumentById(
+      const updatedDocument = await this.spvKycDocumentService.updateDocumentById(
         documentId,
         payload,
         tx,
@@ -628,7 +652,7 @@ export class SpvApplicationTransactionsService {
         );
       }
 
-      let updatedDocument = await this.spvKycDocumentService.updateDocumentById(
+      const updatedDocument = await this.spvKycDocumentService.updateDocumentById(
         documentId,
         payload,
         tx,

@@ -264,6 +264,7 @@ export class SpvController {
               reserveBufferPercent: {type: 'number'},
               reserveAmount: {type: 'number'},
               dailyCutoffTime: {type: 'string'},
+              escrowSetupId: {type: 'string'},
             },
           },
         },

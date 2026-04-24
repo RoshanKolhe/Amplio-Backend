@@ -33,6 +33,7 @@ export * from './investor-pan-cards.model';
 export * from './investor-kyc-document.model';
 export * from './investor-kyc-document-requirements.model';
 export * from './investor-profile.model';
+export * from './investor-ptc-holding.model';
 
 export * from './address-details.model';
 export * from './business-kyc-audited-financials.model';
@@ -80,8 +81,10 @@ export * from './spv-application-status-master.model';
 export * from './spv-kyc-document.model';
 export * from './spv-kyc-document-type.model';
 export * from './pool-financials.model';
+export * from './pool-summary.model';
 export * from './pool-transaction.model';
 export * from './ptc-parameters.model';
+export * from './ptc-issuance.model';
 export * from './trust-deed.model';
 export * from './escrow-setup.model';
 export * from './escrow-transaction.model';

@@ -52,6 +52,7 @@ import {ComplianceAndDeclarationsService} from './services/compliance-and-declar
 import {InvestorKycDocumentService} from './services/investor-kyc-document.service';
 import {InvestorKycDocumentRequirementsService} from './services/investor-kyc-document-requirements.service';
 import {InvestmentMandateService} from './services/investment-mandate.service';
+import {InvestorInvestmentsService} from './services/investor-investments.service';
 import {MerchantKycDocumentService} from './services/merchant-kyc-document.service';
 import {MerchantKycDocumentRequirementsService} from './services/merchant-kyc-document-requirements.service';
 import {PlatformAgreementService} from './services/platform-agreement.service';
@@ -64,6 +65,7 @@ import {SpvApplicationService} from './services/spv-application.service';
 import {EscrowSetupService} from './services/escrow-setup.service';
 import {PoolFinancialsService} from './services/pool-financials.service';
 import {PtcParametersService} from './services/ptc-parameters.service';
+import {PtcIssuanceService} from './services/ptc-issuance.service';
 import {SpvKycDocumentService} from './services/spv-kyc-document.service';
 import {SpvApplicationStatusService} from './services/spv-application-status.service';
 import {SpvApplicationTransactionsService} from './services/spv-application-transactions.service';
@@ -204,6 +206,9 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.investmentMandateService.service').toClass(
       InvestmentMandateService,
     );
+    this.bind('service.investorInvestments.service').toClass(
+      InvestorInvestmentsService,
+    );
     this.bind('service.platformAgreementService.service').toClass(
       PlatformAgreementService,
     );
@@ -246,6 +251,9 @@ export class AmplioBackendApplication extends BootMixin(
     );
     this.bind('service.ptcParameters.service').toClass(
       PtcParametersService,
+    );
+    this.bind('service.ptcIssuance.service').toClass(
+      PtcIssuanceService,
     );
     this.bind('service.trustDeed.service').toClass(
       TrustDeedService,

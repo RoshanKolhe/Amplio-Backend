@@ -45,19 +45,29 @@ export class PoolFinancialsService {
 
   async fetchByApplicationId(
     spvApplicationId: string,
+    options?: {includeDeleted?: boolean},
   ): Promise<PoolFinancials | null> {
     return this.poolFinancialsRepository.findOne({
       where: {
-        and: [{spvApplicationId}, {isActive: true}, {isDeleted: false}],
+        and: options?.includeDeleted
+          ? [{spvApplicationId}]
+          : [{spvApplicationId}, {isActive: true}, {isDeleted: false}],
       },
+      order: ['createdAt DESC'],
     });
   }
 
-  async fetchBySpvId(spvId: string): Promise<PoolFinancials | null> {
+  async fetchBySpvId(
+    spvId: string,
+    options?: {includeDeleted?: boolean},
+  ): Promise<PoolFinancials | null> {
     return this.poolFinancialsRepository.findOne({
       where: {
-        and: [{spvId}, {isActive: true}, {isDeleted: false}],
+        and: options?.includeDeleted
+          ? [{spvId}]
+          : [{spvId}, {isActive: true}, {isDeleted: false}],
       },
+      order: ['createdAt DESC'],
     });
   }
 

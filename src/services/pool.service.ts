@@ -2,13 +2,15 @@ import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {v4 as uuidv4} from 'uuid';
-import {PoolFinancials, PoolTransaction, Transaction} from '../models';
+import {PoolFinancials, PoolSummary, Transaction} from '../models';
 import {
   PoolFinancialsRepository,
+  PoolSummaryRepository,
   PoolTransactionRepository,
   TransactionRepository,
 } from '../repositories';
 import {PoolFinancialsService} from './pool-financials.service';
+import {PtcIssuanceService} from './ptc-issuance.service';
 import {SpvService} from './spv.service';
 
 const FUNDED_STATUS = 'fundeed';
@@ -24,14 +26,152 @@ export class PoolService {
     private poolTransactionRepository: PoolTransactionRepository,
     @repository(PoolFinancialsRepository)
     private poolFinancialsRepository: PoolFinancialsRepository,
+    @repository(PoolSummaryRepository)
+    private poolSummaryRepository: PoolSummaryRepository,
     @inject('service.poolFinancials.service')
     private poolFinancialsService: PoolFinancialsService,
+    @inject('service.ptcIssuance.service')
+    private ptcIssuanceService: PtcIssuanceService,
     @inject('service.spv.service')
     private spvService: SpvService,
   ) {}
 
   private normalizeAmount(amount: number): number {
     return Number(Number(amount ?? 0).toFixed(2));
+  }
+
+  private async fetchPoolTransactions(spvId: string) {
+    return this.poolTransactionRepository.find({
+      where: {
+        and: [{spvId}, {isDeleted: false}],
+      },
+    });
+  }
+
+  private async buildComputedPoolSnapshot(
+    poolFinancials: PoolFinancials,
+    spvId: string,
+  ): Promise<PoolFinancials> {
+    const poolTransactions = await this.fetchPoolTransactions(spvId);
+
+    const totalFunded = this.normalizeAmount(
+      poolTransactions.reduce(
+        (sum, transaction) => sum + Number(transaction.amount ?? 0),
+        0,
+      ),
+    );
+    const totalSettled = this.normalizeAmount(
+      poolTransactions.reduce((sum, transaction) => {
+        if (!transaction.isSettledProcessed) {
+          return sum;
+        }
+
+        return sum + Number(transaction.amount ?? 0);
+      }, 0),
+    );
+
+    return new PoolFinancials({
+      ...poolFinancials.toJSON(),
+      totalFunded,
+      totalSettled,
+      outstanding: this.normalizeAmount(totalFunded - totalSettled),
+    });
+  }
+
+  private async buildPoolSummaryPayload(
+    poolFinancials: PoolFinancials,
+    spvId: string,
+  ): Promise<Partial<PoolSummary>> {
+    const poolTransactions = await this.fetchPoolTransactions(spvId);
+    const totalPoolTransactions = poolTransactions.length;
+    const settledPoolTransactions = poolTransactions.filter(
+      transaction =>
+        Boolean(transaction.isSettledProcessed) ||
+        transaction.status === SETTLED_POOL_STATUS,
+    ).length;
+    const activePoolTransactions = Math.max(
+      totalPoolTransactions - settledPoolTransactions,
+      0,
+    );
+    const outstanding = this.normalizeAmount(Number(poolFinancials.outstanding ?? 0));
+    const poolLimit = this.normalizeAmount(Number(poolFinancials.poolLimit ?? 0));
+    const configuredReserveAmount = this.normalizeAmount(
+      Number(poolFinancials.reserveAmount ?? 0),
+    );
+    const reserveRequiredAmount = this.normalizeAmount(
+      (outstanding * Number(poolFinancials.reserveBufferPercent ?? 0)) / 100,
+    );
+
+    let label: PoolSummary['status']['label'] = 'Inactive';
+
+    if (poolFinancials.isDeleted) {
+      label = 'Deleted';
+    } else if (poolFinancials.isActive) {
+      label = 'Active';
+    }
+
+    return {
+      spvId,
+      poolFinancialsId: poolFinancials.id,
+      asOf: poolFinancials.updatedAt ?? new Date(),
+      status: {
+        label,
+        isActive: Boolean(poolFinancials.isActive),
+        isDeleted: Boolean(poolFinancials.isDeleted),
+      },
+      terms: {
+        poolLimit,
+        targetYield: this.normalizeAmount(Number(poolFinancials.targetYield ?? 0)),
+        maturityDays: this.normalizeAmount(Number(poolFinancials.maturityDays ?? 0)),
+        reserveBufferPercent: this.normalizeAmount(
+          Number(poolFinancials.reserveBufferPercent ?? 0),
+        ),
+        reserveAmount: configuredReserveAmount,
+        dailyCutoffTime: poolFinancials.dailyCutoffTime ?? null,
+      },
+      metrics: {
+        totalFunded: this.normalizeAmount(Number(poolFinancials.totalFunded ?? 0)),
+        totalSettled: this.normalizeAmount(Number(poolFinancials.totalSettled ?? 0)),
+        outstanding,
+        remainingCapacity: this.normalizeAmount(Math.max(poolLimit - outstanding, 0)),
+        utilizationPercent: poolLimit
+          ? this.normalizeAmount((outstanding / poolLimit) * 100)
+          : 0,
+        reserveRequiredAmount,
+        reserveShortfallAmount: this.normalizeAmount(
+          Math.max(reserveRequiredAmount - configuredReserveAmount, 0),
+        ),
+        reserveSurplusAmount: this.normalizeAmount(
+          Math.max(configuredReserveAmount - reserveRequiredAmount, 0),
+        ),
+        totalPoolTransactions,
+        activePoolTransactions,
+        settledPoolTransactions,
+      },
+      isActive: Boolean(poolFinancials.isActive),
+      isDeleted: Boolean(poolFinancials.isDeleted),
+      deletedAt: poolFinancials.isDeleted ? poolFinancials.deletedAt ?? new Date() : undefined,
+    };
+  }
+
+  private async upsertPoolSummary(
+    poolFinancials: PoolFinancials,
+    spvId: string,
+  ): Promise<PoolSummary> {
+    const payload = await this.buildPoolSummaryPayload(poolFinancials, spvId);
+    const existingSummary = await this.poolSummaryRepository.findOne({
+      where: {spvId},
+    });
+
+    if (existingSummary) {
+      await this.poolSummaryRepository.updateById(existingSummary.id, payload);
+      return this.poolSummaryRepository.findById(existingSummary.id);
+    }
+
+    return this.poolSummaryRepository.create({
+      id: uuidv4(),
+      ...payload,
+    });
   }
 
   private isFundedTransaction(transaction: Transaction): boolean {
@@ -55,9 +195,15 @@ export class PoolService {
     return transaction;
   }
 
-  private async getPoolFinancialsForSpvOrFail(spvId: string): Promise<PoolFinancials> {
+  private async getPoolFinancialsForSpvOrFail(
+    spvId: string,
+    options?: {includeDeleted?: boolean},
+  ): Promise<PoolFinancials> {
     const spv = await this.spvService.fetchSpvByIdOrFail(spvId);
-    const runtimePool = await this.poolFinancialsService.fetchBySpvId(spvId);
+    const runtimePool = await this.poolFinancialsService.fetchBySpvId(
+      spvId,
+      options,
+    );
 
     if (runtimePool) {
       return runtimePool;
@@ -65,25 +211,61 @@ export class PoolService {
 
     const existingPool = await this.poolFinancialsService.fetchByApplicationId(
       spv.spvApplicationId,
+      options,
     );
 
     if (!existingPool) {
       throw new HttpErrors.NotFound('Pool financials not found for the SPV');
     }
 
-    await this.poolFinancialsService.attachSpv(existingPool.id, spvId);
+    if (!existingPool.spvId && !existingPool.isDeleted) {
+      await this.poolFinancialsService.attachSpv(existingPool.id, spvId);
+    }
+
+    if (Boolean(existingPool.spvId) || existingPool.isDeleted === true) {
+      return existingPool;
+    }
 
     return this.poolFinancialsRepository.findById(existingPool.id);
   }
 
   async getPoolBySpvId(spvId: string): Promise<PoolFinancials> {
-    return this.recomputePoolFinancials(spvId);
+    try {
+      return await this.recomputePoolFinancials(spvId);
+    } catch (error) {
+      if (!(error instanceof HttpErrors.NotFound)) {
+        throw error;
+      }
+
+      const deletedPool = await this.getPoolFinancialsForSpvOrFail(spvId, {
+        includeDeleted: true,
+      });
+
+      return this.buildComputedPoolSnapshot(deletedPool, spvId);
+    }
+  }
+
+  async getPoolDetailsBySpvId(
+    spvId: string,
+  ): Promise<{pool: PoolFinancials; poolSummary: PoolSummary}> {
+    const pool = await this.getPoolBySpvId(spvId);
+
+    return {
+      pool,
+      poolSummary: await this.upsertPoolSummary(pool, spvId),
+    };
   }
 
   async addFundedTransactionToPool(
     transactionId: string,
     spvId: string,
-  ): Promise<{added: boolean; reason?: string}> {
+  ): Promise<{
+    added: boolean;
+    reason?: string;
+    ptcIssuanceCreated?: boolean;
+    ptcIssuanceId?: string | null;
+    ptcReason?: string;
+  }> {
     const transaction = await this.getTransactionForSpvOrFail(transactionId, spvId);
 
     if (transaction.spvId !== spvId) {
@@ -138,8 +320,17 @@ export class PoolService {
     });
 
     await this.recomputePoolFinancials(spvId);
+    const ptcResult = await this.ptcIssuanceService.ensureIssuanceForPoolTransaction(
+      transaction.id,
+      spvId,
+    );
 
-    return {added: true};
+    return {
+      added: true,
+      ptcIssuanceCreated: ptcResult.created,
+      ptcIssuanceId: ptcResult.issuance?.id ?? null,
+      ptcReason: ptcResult.reason,
+    };
   }
 
   async syncFundedTransactions(spvId: string): Promise<{
@@ -272,34 +463,22 @@ export class PoolService {
 
   async recomputePoolFinancials(spvId: string): Promise<PoolFinancials> {
     const poolFinancials = await this.getPoolFinancialsForSpvOrFail(spvId);
-    const poolTransactions = await this.poolTransactionRepository.find({
-      where: {
-        and: [{spvId}, {isDeleted: false}],
-      },
+    const snapshot = await this.buildComputedPoolSnapshot(poolFinancials, spvId);
+
+    if (poolFinancials.isDeleted) {
+      await this.upsertPoolSummary(snapshot, spvId);
+      return snapshot;
+    }
+
+    const updatedPool = await this.poolFinancialsService.updateRuntimeTotals(poolFinancials.id, {
+      totalFunded: snapshot.totalFunded,
+      totalSettled: snapshot.totalSettled,
+      outstanding: snapshot.outstanding,
     });
 
-    const totalFunded = this.normalizeAmount(
-      poolTransactions.reduce(
-        (sum, transaction) => sum + Number(transaction.amount ?? 0),
-        0,
-      ),
-    );
-    const totalSettled = this.normalizeAmount(
-      poolTransactions.reduce((sum, transaction) => {
-        if (!transaction.isSettledProcessed) {
-          return sum;
-        }
+    await this.upsertPoolSummary(updatedPool, spvId);
 
-        return sum + Number(transaction.amount ?? 0);
-      }, 0),
-    );
-    const outstanding = this.normalizeAmount(totalFunded - totalSettled);
-
-    return this.poolFinancialsService.updateRuntimeTotals(poolFinancials.id, {
-      totalFunded,
-      totalSettled,
-      outstanding,
-    });
+    return updatedPool;
   }
 
   async syncSpvPool(spvId: string): Promise<{
