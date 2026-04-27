@@ -1083,6 +1083,7 @@ export class InvestorProfileController {
     const investors = await this.investorProfileRepository.find({
       ...filter,
       where: rootWhere,
+      order: filter?.order ?? ['createdAt DESC'],
       limit: filter?.limit ?? 10,
       skip: filter?.skip ?? 0,
       include: [
