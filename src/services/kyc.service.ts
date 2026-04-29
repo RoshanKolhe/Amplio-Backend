@@ -25,6 +25,7 @@ import {UboDetailsService} from './ubo-details.service';
 import {PspService} from './psp.service';
 import {ComplianceAndDeclarationsService} from './compliance-and-declarations.service';
 import {InvestmentMandateService} from './investment-mandate.service';
+import {InvestorEscrowAccountService} from './investor-escrow-account.service';
 import {PlatformAgreementService} from './platform-agreement.service';
 import {TrusteeKycDocumentService} from './trustee-kyc-document.service';
 
@@ -70,6 +71,8 @@ export class KycService {
     private complianceAndDeclarationsService: ComplianceAndDeclarationsService,
     @inject('service.investmentMandateService.service')
     private investmentMandateService: InvestmentMandateService,
+    @inject('service.investorEscrowAccount.service')
+    private investorEscrowAccountService: InvestorEscrowAccountService,
     @inject('service.platformAgreementService.service')
     private platformAgreementService: PlatformAgreementService,
     @inject('service.uboDetailsService.service')
@@ -884,6 +887,11 @@ export class KycService {
         );
 
         await this.investorPanCardsRepository.updateById(investorPanCard?.id, {status: 1, verifiedAt: new Date()})
+
+        await this.investorEscrowAccountService.ensureForApprovedInvestor(
+          investorId,
+          tx,
+        );
 
         return {
           success: true,

@@ -51,6 +51,7 @@ import {CompanyKycDocumentRequirementsService} from './services/company-kyc-docu
 import {ComplianceAndDeclarationsService} from './services/compliance-and-declarations.service';
 import {InvestorKycDocumentService} from './services/investor-kyc-document.service';
 import {InvestorKycDocumentRequirementsService} from './services/investor-kyc-document-requirements.service';
+import {InvestorEscrowAccountService} from './services/investor-escrow-account.service';
 import {InvestmentMandateService} from './services/investment-mandate.service';
 import {InvestorInvestmentsService} from './services/investor-investments.service';
 import {MerchantKycDocumentService} from './services/merchant-kyc-document.service';
@@ -88,6 +89,7 @@ import {PoolService} from './services/pool.service';
 import {TrusteeKycDocumentService} from './services/trustee-kyc-document.service';
 import {MerchantPayoutService} from './services/merchant-payout.service';
 import {MerchantPayoutExecutorService} from './services/merchant-payout-executor.service';
+import {WalletWithdrawalService} from './services/wallet-withdrawal.service';
 
 export {ApplicationConfig};
 
@@ -209,6 +211,9 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.investorInvestments.service').toClass(
       InvestorInvestmentsService,
     );
+    this.bind('service.investorEscrowAccount.service').toClass(
+      InvestorEscrowAccountService,
+    );
     this.bind('service.platformAgreementService.service').toClass(
       PlatformAgreementService,
     );
@@ -296,6 +301,9 @@ export class AmplioBackendApplication extends BootMixin(
     );
     this.bind('service.merchantPayoutExecutorService.service').toClass(
       MerchantPayoutExecutorService,
+    );
+    this.bind('service.walletWithdrawal.service').toClass(
+      WalletWithdrawalService,
     );
   }
 

@@ -30,10 +30,14 @@ export * from './users.model';
 export * from './business-kyc-collateral-assets.model';
 export * from './business-kyc-guarantor.model';
 export * from './investor-pan-cards.model';
+export * from './investor-escrow-account.model';
+export * from './investor-escrow-ledger.model';
+export * from './investor-closed-investment.model';
 export * from './investor-kyc-document.model';
 export * from './investor-kyc-document-requirements.model';
 export * from './investor-profile.model';
 export * from './investor-ptc-holding.model';
+export * from './withdrawal-request.model';
 
 export * from './address-details.model';
 export * from './business-kyc-audited-financials.model';

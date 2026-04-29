@@ -35,6 +35,7 @@ export * from './ping.controller';
 export * from './pool.controller';
 export * from './psp-master-fields.controller';
 export * from './psp-master.controller';
+export * from './ptc.controller';
 export * from './roles.controller';
 export * from './screens.controller';
 export * from './spv-kyc-document-type.controller';
@@ -45,4 +46,5 @@ export * from './trustee-kyc-document-requirements.controller';
 export * from './trustee-profiles.controller';
 export * from './user-consent-controller.controller';
 export * from './users-consent-consent-template.controller';
+export * from './wallet-withdrawal.controller';
 

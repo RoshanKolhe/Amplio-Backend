@@ -11,12 +11,6 @@ import {Users} from './users.model';
       table: 'investor_ptc_holdings',
       schema: 'public',
     },
-    indexes: {
-      uniqueInvestorHoldingByIssuance: {
-        keys: {ptcIssuanceId: 1, investorProfileId: 1},
-        options: {unique: true},
-      },
-    },
   },
 })
 export class InvestorPtcHolding extends Entity {

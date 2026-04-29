@@ -2,7 +2,8 @@ import {Constructor, inject, Getter} from '@loopback/core';
 import {DefaultCrudRepository, repository, BelongsToAccessor, HasOneRepositoryFactory} from '@loopback/repository';
 import {AmplioDataSource} from '../datasources';
 import {TimeStampRepositoryMixin} from '../mixins/timestamp-repository-mixin';
-import {InvestorProfile, InvestorProfileRelations, Media, InvestorPanCards, Users, KycApplications, InvestorType} from '../models';
+import {InvestorEscrowAccount, InvestorProfile, InvestorProfileRelations, Media, InvestorPanCards, Users, KycApplications, InvestorType} from '../models';
+import {InvestorEscrowAccountRepository} from './investor-escrow-account.repository';
 import {MediaRepository} from './media.repository';
 import {InvestorPanCardsRepository} from './investor-pan-cards.repository';
 import {UsersRepository} from './users.repository';
@@ -29,6 +30,8 @@ export class InvestorProfileRepository extends TimeStampRepositoryMixin<
 
   public readonly investorPanCards: HasOneRepositoryFactory<InvestorPanCards, typeof InvestorProfile.prototype.id>;
 
+  public readonly investorEscrowAccount: HasOneRepositoryFactory<InvestorEscrowAccount, typeof InvestorProfile.prototype.id>;
+
   public readonly users: BelongsToAccessor<Users, typeof InvestorProfile.prototype.id>;
 
   public readonly kycApplications: BelongsToAccessor<KycApplications, typeof InvestorProfile.prototype.id>;
@@ -38,7 +41,7 @@ export class InvestorProfileRepository extends TimeStampRepositoryMixin<
   public readonly media: BelongsToAccessor<Media, typeof InvestorProfile.prototype.id>;
 
   constructor(
-    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('InvestorPanCardsRepository') protected investorPanCardsRepositoryGetter: Getter<InvestorPanCardsRepository>, @repository.getter('UsersRepository') protected usersRepositoryGetter: Getter<UsersRepository>, @repository.getter('KycApplicationsRepository') protected kycApplicationsRepositoryGetter: Getter<KycApplicationsRepository>, @repository.getter('InvestorTypeRepository') protected investorTypeRepositoryGetter: Getter<InvestorTypeRepository>,
+    @inject('datasources.amplio') dataSource: AmplioDataSource, @repository.getter('MediaRepository') protected mediaRepositoryGetter: Getter<MediaRepository>, @repository.getter('InvestorPanCardsRepository') protected investorPanCardsRepositoryGetter: Getter<InvestorPanCardsRepository>, @repository.getter('InvestorEscrowAccountRepository') protected investorEscrowAccountRepositoryGetter: Getter<InvestorEscrowAccountRepository>, @repository.getter('UsersRepository') protected usersRepositoryGetter: Getter<UsersRepository>, @repository.getter('KycApplicationsRepository') protected kycApplicationsRepositoryGetter: Getter<KycApplicationsRepository>, @repository.getter('InvestorTypeRepository') protected investorTypeRepositoryGetter: Getter<InvestorTypeRepository>,
   ) {
     super(InvestorProfile, dataSource);
     this.media = this.createBelongsToAccessorFor('media', mediaRepositoryGetter,);
@@ -51,6 +54,8 @@ export class InvestorProfileRepository extends TimeStampRepositoryMixin<
     this.registerInclusionResolver('users', this.users.inclusionResolver);
     this.investorPanCards = this.createHasOneRepositoryFactoryFor('investorPanCards', investorPanCardsRepositoryGetter);
     this.registerInclusionResolver('investorPanCards', this.investorPanCards.inclusionResolver);
+    this.investorEscrowAccount = this.createHasOneRepositoryFactoryFor('investorEscrowAccount', investorEscrowAccountRepositoryGetter);
+    this.registerInclusionResolver('investorEscrowAccount', this.investorEscrowAccount.inclusionResolver);
     this.selfie = this.createBelongsToAccessorFor('selfie', mediaRepositoryGetter,);
     this.registerInclusionResolver('selfie', this.selfie.inclusionResolver);
     this.aadharBackImage = this.createBelongsToAccessorFor('aadharBackImage', mediaRepositoryGetter,);
