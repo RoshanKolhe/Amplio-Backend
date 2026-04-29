@@ -11,7 +11,7 @@ import {
   post,
   requestBody,
 } from '@loopback/rest';
-import {UserProfile} from '@loopback/security';
+import {securityId, UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
 import {
   AddressDetails,
@@ -53,9 +53,11 @@ import {BankDetailsService} from '../services/bank-details.service';
 import {ComplianceAndDeclarationsService} from '../services/compliance-and-declarations.service';
 import {InvestmentMandateService} from '../services/investment-mandate.service';
 import {InvestorKycDocumentService} from '../services/investor-kyc-document.service';
+import {JWTService} from '../services/jwt-service';
 import {KycService} from '../services/kyc.service';
 import {MediaService} from '../services/media.service';
 import {PlatformAgreementService} from '../services/platform-agreement.service';
+import {RbacService} from '../services/rbac.service';
 import {SessionService} from '../services/session.service';
 import {AuthorizeSignatoriesService} from '../services/signatories.service';
 import {UboDetailsService} from '../services/ubo-details.service';
@@ -140,6 +142,10 @@ export class InvestorProfileController {
     private platformAgreementService: PlatformAgreementService,
     @inject('service.media.service')
     private mediaService: MediaService,
+    @inject('service.jwt.service')
+    public jwtService: JWTService,
+    @inject('services.rbac')
+    public rbacService: RbacService,
   ) {}
 
   private getInvestorStepperConfig(investorKycType?: string): {
@@ -748,7 +754,6 @@ export class InvestorProfileController {
     }
   }
 
-  // for investor get current progress at start...
   @get('/investor-profiles/kyc-progress/{sessionId}')
   async getInvestorProfileKycProgress(
     @param.path.string('sessionId') sessionId: string,
@@ -757,6 +762,7 @@ export class InvestorProfileController {
     message: string;
     currentProgress: string[];
     profile: InvestorProfile | null;
+    accessToken?: string;
   }> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const response: any = await this.sessionService.fetchProfile(sessionId);
@@ -847,11 +853,28 @@ export class InvestorProfileController {
         investorProfile.investorKycType,
       );
 
+      const {roles, permissions} =
+        await this.rbacService.getUserRoleAndPermissionsByRole(
+          investorProfile.usersId,
+          'investor',
+        );
+
+      const accessToken = await this.jwtService.generateToken({
+        [securityId]: investorProfile.usersId,
+        id: investorProfile.usersId,
+        email: response.profile.email,
+        phone: response.profile.phone,
+        roles,
+        permissions,
+        scope: 'kyc_onboarding',
+      });
+
       return {
         success: true,
         message: 'New Profile',
         currentProgress: normalizedProgress,
         profile: investorProfile,
+        accessToken,
       };
     }
 

@@ -80,6 +80,40 @@ export class AuthController {
     return String(otp ?? '').trim();
   }
 
+  private async generateInvestorOnboardingAuth(
+    user: {
+      id: string;
+      email?: string;
+      phone?: string;
+    },
+    investorProfilesId: string,
+  ) {
+    const {roles, permissions} =
+      await this.rbacService.getUserRoleAndPermissionsByRole(
+        user.id!,
+        'investor',
+      );
+
+    const accessToken = await this.jwtService.generateToken({
+      [securityId]: user.id!,
+      id: user.id!,
+      email: user.email,
+      phone: user.phone,
+      roles,
+      permissions,
+      scope: 'kyc_onboarding',
+    });
+
+    return {
+      accessToken,
+      user: {
+        id: user.id,
+        role: 'investor' as const,
+        investorProfilesId,
+      },
+    };
+  }
+
   private async generateMerchantOnboardingAuth(
     user: {
       id: string;
@@ -2110,6 +2144,8 @@ export class AuthController {
     kycStatus: number;
     currentProgress: string[];
     usersId: string;
+    accessToken: string;
+    user: object;
   }> {
     const tx = await this.investorProfileRepository.dataSource.beginTransaction(
       {
@@ -2271,6 +2307,16 @@ export class AuthController {
           {kycApplicationsId: newApplication.id},
           {transaction: tx},
         );
+
+        const investorAuth = await this.generateInvestorOnboardingAuth(
+          {
+            id: newUserProfile.id,
+            email: newUserProfile.email,
+            phone: newUserProfile.phone,
+          },
+          newInvestorProfile.id,
+        );
+
         await tx.commit();
 
         return {
@@ -2279,6 +2325,8 @@ export class AuthController {
           kycStatus: 0,
           currentProgress: newApplication.currentProgress ?? ['investor_kyc'],
           usersId: newUserProfile.id,
+          accessToken: investorAuth.accessToken,
+          user: investorAuth.user,
         };
       }
 
@@ -2348,6 +2396,16 @@ export class AuthController {
           throw new HttpErrors.InternalServerError('Internal server error');
         }
       }
+
+      const investorAuth = await this.generateInvestorOnboardingAuth(
+        {
+          id: newUserProfile.id,
+          email: newUserProfile.email,
+          phone: newUserProfile.phone,
+        },
+        newInvestorProfile.id,
+      );
+
       await tx.commit();
 
       return {
@@ -2359,6 +2417,8 @@ export class AuthController {
           'pan_verified',
         ],
         usersId: newUserProfile.id,
+        accessToken: investorAuth.accessToken,
+        user: investorAuth.user,
       };
     } catch (error) {
       await tx.rollback();
