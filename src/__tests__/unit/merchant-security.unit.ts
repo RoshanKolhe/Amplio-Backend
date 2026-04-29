@@ -473,6 +473,7 @@ describe('Merchant security hardening', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       {
         fetchProfile: sinon.stub(),
       } as never,
@@ -522,6 +523,7 @@ describe('Merchant security hardening', () => {
     const controller = new MerchantProfilesController(
       merchantProfilesRepository as never,
       kycApplicationsRepository as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -943,6 +945,7 @@ describe('Merchant security hardening', () => {
           roleValue: 'merchant',
         }),
       } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,

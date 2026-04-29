@@ -13,16 +13,30 @@ import {
 } from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
-import {AddressDetails, AuthorizeSignatories, BankDetails, ComplianceAndDeclarations, InvestmentMandate, InvestorKycDocument, InvestorProfile, PlatformAgreement, UboDetails} from '../models';
+import {
+  AddressDetails,
+  AuthorizeSignatories,
+  BankDetails,
+  ComplianceAndDeclarations,
+  InvestmentMandate,
+  InvestorKycDocument,
+  InvestorProfile,
+  PlatformAgreement,
+  UboDetails,
+} from '../models';
 import {
   AddressDetailsRepository,
   AuthorizeSignatoriesRepository,
   BankDetailsRepository,
   ComplianceAndDeclarationsRepository,
   InvestmentMandateRepository,
+  InvestorClosedInvestmentRepository,
+  InvestorEscrowAccountRepository,
+  InvestorEscrowLedgerRepository,
   InvestorKycDocumentRepository,
   InvestorPanCardsRepository,
   InvestorProfileRepository,
+  InvestorPtcHoldingRepository,
   KycApplicationsRepository,
   OtpRepository,
   PlatformAgreementRepository,
@@ -30,7 +44,9 @@ import {
   RolesRepository,
   UboDetailsRepository,
   UserRolesRepository,
+  UsersConsentRepository,
   UsersRepository,
+  WithdrawalRequestRepository,
 } from '../repositories';
 import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
@@ -48,7 +64,7 @@ type InvestorKycFlowType = 'individual' | 'institutional';
 type InvestorKycDataResponse = {
   success: boolean;
   message: string;
-  data: any;
+  data: unknown;
   investorType?: {
     id: string;
     label: string;
@@ -66,6 +82,16 @@ export class InvestorProfileController {
     private investorPanCardsRepository: InvestorPanCardsRepository,
     @repository(InvestorKycDocumentRepository)
     private investorKycDocumentRepository: InvestorKycDocumentRepository,
+    @repository(InvestorEscrowAccountRepository)
+    private investorEscrowAccountRepository: InvestorEscrowAccountRepository,
+    @repository(InvestorEscrowLedgerRepository)
+    private investorEscrowLedgerRepository: InvestorEscrowLedgerRepository,
+    @repository(InvestorPtcHoldingRepository)
+    private investorPtcHoldingRepository: InvestorPtcHoldingRepository,
+    @repository(InvestorClosedInvestmentRepository)
+    private investorClosedInvestmentRepository: InvestorClosedInvestmentRepository,
+    @repository(WithdrawalRequestRepository)
+    private withdrawalRequestRepository: WithdrawalRequestRepository,
     @repository(AddressDetailsRepository)
     private addressDetailsRepository: AddressDetailsRepository,
     @repository(BankDetailsRepository)
@@ -88,6 +114,8 @@ export class InvestorProfileController {
     private registrationSessionsRepository: RegistrationSessionsRepository,
     @repository(OtpRepository)
     private otpRepository: OtpRepository,
+    @repository(UsersConsentRepository)
+    private usersConsentRepository: UsersConsentRepository,
     @repository(UsersRepository)
     private usersRepository: UsersRepository,
     @inject('service.kyc.service')
@@ -112,7 +140,7 @@ export class InvestorProfileController {
     private platformAgreementService: PlatformAgreementService,
     @inject('service.media.service')
     private mediaService: MediaService,
-  ) { }
+  ) {}
 
   private getInvestorStepperConfig(investorKycType?: string): {
     flowType: InvestorKycFlowType;
@@ -123,44 +151,48 @@ export class InvestorProfileController {
       investorKycType === 'institutional' ? 'institutional' : 'individual';
 
     if (flowType === 'institutional') {
+      const institutionalSteps = [
+        'investor_documents',
+        'kyc_address_details',
+        'kyc_ubo_details',
+        'kyc_signatories',
+        'kyc_compliance_declarations',
+        'investor_bank_details',
+        'kyc_investment_mandate',
+        'kyc_agreement',
+        'kyc_review',
+      ];
+      const institutionalStepAliasesEntries: Array<[string, string[]]> = [
+        [
+          'investor_documents',
+          ['investor_documents', 'investor_basic_info', 'pan_verified'],
+        ],
+        ['kyc_address_details', ['kyc_address_details']],
+        ['kyc_ubo_details', ['kyc_ubo_details']],
+        ['kyc_signatories', ['kyc_signatories']],
+        ['kyc_compliance_declarations', ['kyc_compliance_declarations']],
+        ['investor_bank_details', ['investor_bank_details']],
+        ['kyc_investment_mandate', ['kyc_investment_mandate']],
+        ['kyc_agreement', ['kyc_agreement']],
+        ['kyc_review', ['kyc_review']],
+      ];
+
       return {
         flowType,
-        steps: [
-          'investor_documents',
-          'kyc_address_details',
-          'kyc_ubo_details',
-          'kyc_signatories',
-          'kyc_compliance_declarations',
-          'investor_bank_details',
-          'kyc_investment_mandate',
-          'kyc_agreement',
-          'kyc_review'
-        ],
-        stepAliases: {
-          investor_documents: [
-            'investor_documents',
-            'investor_basic_info',
-            'pan_verified',
-          ],
-          kyc_address_details: ['kyc_address_details'],
-          kyc_ubo_details: ['kyc_ubo_details'],
-          kyc_signatories: ['kyc_signatories'],
-          kyc_compliance_declarations: ['kyc_compliance_declarations'],
-          investor_bank_details: ['investor_bank_details'],
-          kyc_investment_mandate: ['kyc_investment_mandate'],
-          kyc_agreement: ['kyc_agreement'],
-          kyc_review: ['kyc_review'],
-        }
+        steps: institutionalSteps,
+        stepAliases: Object.fromEntries(institutionalStepAliasesEntries),
       };
     }
+
+    const individualStepAliasesEntries: Array<[string, string[]]> = [
+      ['investor_kyc', ['investor_kyc', 'investor_basic_info']],
+      ['investor_bank_details', ['investor_bank_details']],
+    ];
 
     return {
       flowType,
       steps: ['investor_kyc', 'investor_bank_details'],
-      stepAliases: {
-        investor_kyc: ['investor_kyc', 'investor_basic_info'],
-        investor_bank_details: ['investor_bank_details'],
-      },
+      stepAliases: Object.fromEntries(individualStepAliasesEntries),
     };
   }
 
@@ -171,7 +203,9 @@ export class InvestorProfileController {
     const {steps, stepAliases} = this.getInvestorStepperConfig(investorKycType);
 
     return steps.filter(step =>
-      (stepAliases[step] ?? [step]).some(alias => currentProgress.includes(alias)),
+      (stepAliases[step] ?? [step]).some(alias =>
+        currentProgress.includes(alias),
+      ),
     );
   }
 
@@ -188,10 +222,9 @@ export class InvestorProfileController {
   }
 
   // fetch KYC application status...
-  async getKycApplicationStatus(
-    applicationId: string
-  ): Promise<string[]> {
-    const kycApplication = await this.kycApplicationsRepository.findById(applicationId);
+  async getKycApplicationStatus(applicationId: string): Promise<string[]> {
+    const kycApplication =
+      await this.kycApplicationsRepository.findById(applicationId);
 
     return kycApplication.currentProgress ?? [];
   }
@@ -200,11 +233,15 @@ export class InvestorProfileController {
   async updateKycProgress(appId: string, step: string) {
     const kyc = await this.kycApplicationsRepository.findById(appId);
 
-    const progress = Array.isArray(kyc.currentProgress) ? kyc.currentProgress : [];
+    const progress = Array.isArray(kyc.currentProgress)
+      ? kyc.currentProgress
+      : [];
 
     if (!progress.includes(step)) {
       progress.push(step);
-      await this.kycApplicationsRepository.updateById(appId, {currentProgress: progress});
+      await this.kycApplicationsRepository.updateById(appId, {
+        currentProgress: progress,
+      });
     }
 
     return progress;
@@ -226,6 +263,11 @@ export class InvestorProfileController {
       investorDocuments: number;
       addressDetails: number;
       bankDetails: number;
+      investorEscrowAccounts: number;
+      investorEscrowLedgers: number;
+      investorPtcHoldings: number;
+      investorClosedInvestments: number;
+      withdrawalRequests: number;
       uboDetails: number;
       signatories: number;
       complianceDeclarations: number;
@@ -235,12 +277,14 @@ export class InvestorProfileController {
       investorUserRoles: number;
       registrationSessions: number;
       otpEntries: number;
+      usersConsents: number;
     };
   }> {
-    const tx =
-      await this.investorProfileRepository.dataSource.beginTransaction({
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction(
+      {
         isolationLevel: IsolationLevel.READ_COMMITTED,
-      });
+      },
+    );
 
     try {
       const investorProfile = await this.investorProfileRepository.findOne(
@@ -255,12 +299,6 @@ export class InvestorProfileController {
 
       if (!investorProfile) {
         throw new HttpErrors.NotFound('Investor profile not found');
-      }
-
-      if (investorProfile.investorKycType !== 'institutional') {
-        throw new HttpErrors.BadRequest(
-          'Purge is only supported for institutional investor profiles',
-        );
       }
 
       const investorUser = await this.usersRepository.findById(
@@ -289,7 +327,7 @@ export class InvestorProfileController {
             and: [
               {identifierId: investorProfile.id},
               {roleValue: 'investor'},
-              {usersId: investorProfile.usersId}
+              {usersId: investorProfile.usersId},
             ],
           },
         },
@@ -299,10 +337,7 @@ export class InvestorProfileController {
       const bankDetails = await this.bankDetailsRepository.find(
         {
           where: {
-            and: [
-              {usersId: investorProfile.usersId},
-              {roleValue: 'investor'},
-            ],
+            and: [{usersId: investorProfile.usersId}, {roleValue: 'investor'}],
           },
         },
         {transaction: tx},
@@ -315,8 +350,7 @@ export class InvestorProfileController {
               {usersId: investorProfile.usersId},
               {identifierId: investorProfile.id},
               {roleValue: 'investor'},
-            ]
-
+            ],
           },
         },
         {transaction: tx},
@@ -329,7 +363,7 @@ export class InvestorProfileController {
               {usersId: investorProfile.usersId},
               {identifierId: investorProfile.id},
               {roleValue: 'investor'},
-            ]
+            ],
           },
         },
         {transaction: tx},
@@ -342,16 +376,32 @@ export class InvestorProfileController {
               {usersId: investorProfile.usersId},
               {identifierId: investorProfile.id},
               {roleValue: 'investor'},
-            ]
+            ],
           },
         },
         {transaction: tx},
+      );
+
+      const investorEscrowAccounts =
+        await this.investorEscrowAccountRepository.find(
+          {
+            where: {
+              investorProfileId: investorProfile.id,
+            },
+          },
+          {transaction: tx},
+        );
+      const investorEscrowAccountIds = investorEscrowAccounts.map(
+        account => account.id,
       );
 
       const mediaIds = Array.from(
         new Set(
           [
             investorProfile.investorLogo,
+            investorProfile.aadharFrontImageId,
+            investorProfile.aadharBackImageId,
+            investorProfile.selfieId,
             ...investorPanCards.map(pan => pan.panCardDocumentId),
             ...investorDocuments.map(doc => doc.documentsFileId),
             ...addressDetails.map(address => address.addressProofId),
@@ -366,6 +416,53 @@ export class InvestorProfileController {
         ),
       );
 
+      const deletedInvestorEscrowLedgers =
+        await this.investorEscrowLedgerRepository.deleteAll(
+          investorEscrowAccountIds.length
+            ? {
+                or: [
+                  {investorId: investorProfile.id},
+                  {investorEscrowAccountId: {inq: investorEscrowAccountIds}},
+                ],
+              }
+            : {
+                investorId: investorProfile.id,
+              },
+          {transaction: tx},
+        );
+
+      const deletedWithdrawalRequests =
+        await this.withdrawalRequestRepository.deleteAll(
+          {
+            investorProfileId: investorProfile.id,
+          },
+          {transaction: tx},
+        );
+
+      const deletedInvestorPtcHoldings =
+        await this.investorPtcHoldingRepository.deleteAll(
+          {
+            investorProfileId: investorProfile.id,
+          },
+          {transaction: tx},
+        );
+
+      const deletedInvestorClosedInvestments =
+        await this.investorClosedInvestmentRepository.deleteAll(
+          {
+            investorProfileId: investorProfile.id,
+          },
+          {transaction: tx},
+        );
+
+      const deletedInvestorEscrowAccounts =
+        await this.investorEscrowAccountRepository.deleteAll(
+          {
+            investorProfileId: investorProfile.id,
+          },
+          {transaction: tx},
+        );
+
       const deletedSignatories =
         await this.authorizeSignatoriesRepository.deleteAll(
           {
@@ -373,7 +470,7 @@ export class InvestorProfileController {
               {usersId: investorProfile.usersId},
               {identifierId: investorProfile.id},
               {roleValue: 'investor'},
-            ]
+            ],
           },
           {transaction: tx},
         );
@@ -425,13 +522,14 @@ export class InvestorProfileController {
         {transaction: tx},
       );
 
-      const deletedAddressDetails = await this.addressDetailsRepository.deleteAll(
-        {
-          identifierId: investorProfile.id,
-          roleValue: 'investor',
-        },
-        {transaction: tx},
-      );
+      const deletedAddressDetails =
+        await this.addressDetailsRepository.deleteAll(
+          {
+            identifierId: investorProfile.id,
+            roleValue: 'investor',
+          },
+          {transaction: tx},
+        );
 
       const deletedInvestorDocuments =
         await this.investorKycDocumentRepository.deleteAll(
@@ -468,12 +566,12 @@ export class InvestorProfileController {
 
       const deletedInvestorUserRoles = investorRole
         ? await this.userRolesRepository.deleteAll(
-          {
-            usersId: investorProfile.usersId,
-            rolesId: investorRole.id,
-          },
-          {transaction: tx},
-        )
+            {
+              usersId: investorProfile.usersId,
+              rolesId: investorRole.id,
+            },
+            {transaction: tx},
+          )
         : {count: 0};
 
       const deletedRegistrationSessions =
@@ -502,10 +600,18 @@ export class InvestorProfileController {
         {transaction: tx},
       );
 
-      const deletedInvestorProfile = await this.investorProfileRepository.deleteAll(
-        {id: investorProfile.id},
+      const deletedUsersConsents = await this.usersConsentRepository.deleteAll(
+        {
+          identifierId: investorProfile.id,
+        },
         {transaction: tx},
       );
+
+      const deletedInvestorProfile =
+        await this.investorProfileRepository.deleteAll(
+          {id: investorProfile.id},
+          {transaction: tx},
+        );
 
       const remainingUserRoles = await this.userRolesRepository.count(
         {
@@ -524,7 +630,10 @@ export class InvestorProfileController {
 
       let userDeleted = false;
 
-      if (remainingUserRoles.count === 0 && remainingKycApplications.count === 0) {
+      if (
+        remainingUserRoles.count === 0 &&
+        remainingKycApplications.count === 0
+      ) {
         await this.usersRepository.deleteById(investorProfile.usersId, {
           transaction: tx,
         });
@@ -537,8 +646,7 @@ export class InvestorProfileController {
 
       return {
         success: true,
-        message:
-          'Institutional investor profile and related records deleted successfully',
+        message: 'Investor profile and related records deleted successfully',
         profileId,
         userDeleted,
         deleted: {
@@ -547,6 +655,11 @@ export class InvestorProfileController {
           investorDocuments: deletedInvestorDocuments.count,
           addressDetails: deletedAddressDetails.count,
           bankDetails: deletedBankDetails.count,
+          investorEscrowAccounts: deletedInvestorEscrowAccounts.count,
+          investorEscrowLedgers: deletedInvestorEscrowLedgers.count,
+          investorPtcHoldings: deletedInvestorPtcHoldings.count,
+          investorClosedInvestments: deletedInvestorClosedInvestments.count,
+          withdrawalRequests: deletedWithdrawalRequests.count,
           uboDetails: deletedUboDetails.count,
           signatories: deletedSignatories.count,
           complianceDeclarations: deletedComplianceDeclarations.count,
@@ -556,6 +669,7 @@ export class InvestorProfileController {
           investorUserRoles: deletedInvestorUserRoles.count,
           registrationSessions: deletedRegistrationSessions.count,
           otpEntries: deletedOtpEntries.count,
+          usersConsents: deletedUsersConsents.count,
         },
       };
     } catch (error) {
@@ -563,7 +677,6 @@ export class InvestorProfileController {
       throw error;
     }
   }
-  
 
   private async validateInvestorReviewSubmission(investor: InvestorProfile) {
     const currentProgress = await this.getKycApplicationStatus(
@@ -638,26 +751,83 @@ export class InvestorProfileController {
   // for investor get current progress at start...
   @get('/investor-profiles/kyc-progress/{sessionId}')
   async getInvestorProfileKycProgress(
-    @param.path.string('sessionId') sessionId: string
-  ): Promise<{success: boolean; message: string; currentProgress: string[]; profile: InvestorProfile | null}> {
+    @param.path.string('sessionId') sessionId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    currentProgress: string[];
+    profile: InvestorProfile | null;
+  }> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const response: any = await this.sessionService.fetchProfile(sessionId);
     if (response.success && response?.profile?.id) {
       const investorProfile = await this.investorProfileRepository.findOne({
         where: {
-          and: [
-            {usersId: response?.profile?.id},
-            {isDeleted: false},
-          ]
+          and: [{usersId: response?.profile?.id}, {isDeleted: false}],
         },
         include: [
-          {relation: 'investorPanCards', scope: {include: [{relation: 'panCardDocument', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}]}},
-          {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
-          {relation: 'kycApplications', scope: {fields: {id: true, status: true, verifiedAt: true, reason: true}}},
-          {relation: 'aadharFrontImage', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
-          {relation: 'aadharBackImage', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
-          {relation: 'selfie', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}
-        ]
+          {
+            relation: 'investorPanCards',
+            scope: {
+              include: [
+                {
+                  relation: 'panCardDocument',
+                  scope: {
+                    fields: {
+                      fileUrl: true,
+                      id: true,
+                      fileOriginalName: true,
+                      fileType: true,
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          {
+            relation: 'users',
+            scope: {fields: {id: true, phone: true, email: true}},
+          },
+          {
+            relation: 'kycApplications',
+            scope: {
+              fields: {id: true, status: true, verifiedAt: true, reason: true},
+            },
+          },
+          {
+            relation: 'aadharFrontImage',
+            scope: {
+              fields: {
+                fileUrl: true,
+                id: true,
+                fileOriginalName: true,
+                fileType: true,
+              },
+            },
+          },
+          {
+            relation: 'aadharBackImage',
+            scope: {
+              fields: {
+                fileUrl: true,
+                id: true,
+                fileOriginalName: true,
+                fileType: true,
+              },
+            },
+          },
+          {
+            relation: 'selfie',
+            scope: {
+              fields: {
+                fileUrl: true,
+                id: true,
+                fileOriginalName: true,
+                fileType: true,
+              },
+            },
+          },
+        ],
       });
 
       if (!investorProfile) {
@@ -665,11 +835,13 @@ export class InvestorProfileController {
           success: true,
           message: 'New Profile',
           currentProgress: [],
-          profile: null
-        }
+          profile: null,
+        };
       }
 
-      const currentProgress = await this.getKycApplicationStatus(investorProfile.kycApplicationsId);
+      const currentProgress = await this.getKycApplicationStatus(
+        investorProfile.kycApplicationsId,
+      );
       const normalizedProgress = this.normalizeInvestorProgress(
         currentProgress,
         investorProfile.investorKycType,
@@ -679,16 +851,16 @@ export class InvestorProfileController {
         success: true,
         message: 'New Profile',
         currentProgress: normalizedProgress,
-        profile: investorProfile
-      }
+        profile: investorProfile,
+      };
     }
 
     return {
       success: true,
       message: 'New Profile',
       currentProgress: [],
-      profile: null
-    }
+      profile: null,
+    };
   }
 
   // fetch investor info with stepper...
@@ -697,22 +869,73 @@ export class InvestorProfileController {
     @param.path.string('stepperId') stepperId: string,
     @param.path.string('usersId') usersId: string,
     @param.query.string('route') route?: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<InvestorKycDataResponse> {
     const investorProfile = await this.investorProfileRepository.findOne({
       where: {
-        and: [
-          {usersId: usersId},
-          {isDeleted: false}
-        ]
+        and: [{usersId: usersId}, {isDeleted: false}],
       },
       include: [
-        {relation: 'investorPanCards', scope: {include: [{relation: 'panCardDocument', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}]}},
-        {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
-        {relation: 'kycApplications', scope: {fields: {id: true, status: true, verifiedAt: true, reason: true}}},
-        {relation: 'aadharFrontImage', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
-        {relation: 'aadharBackImage', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
-        {relation: 'selfie', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
+        {
+          relation: 'investorPanCards',
+          scope: {
+            include: [
+              {
+                relation: 'panCardDocument',
+                scope: {
+                  fields: {
+                    fileUrl: true,
+                    id: true,
+                    fileOriginalName: true,
+                    fileType: true,
+                  },
+                },
+              },
+            ],
+          },
+        },
+        {
+          relation: 'users',
+          scope: {fields: {id: true, phone: true, email: true}},
+        },
+        {
+          relation: 'kycApplications',
+          scope: {
+            fields: {id: true, status: true, verifiedAt: true, reason: true},
+          },
+        },
+        {
+          relation: 'aadharFrontImage',
+          scope: {
+            fields: {
+              fileUrl: true,
+              id: true,
+              fileOriginalName: true,
+              fileType: true,
+            },
+          },
+        },
+        {
+          relation: 'aadharBackImage',
+          scope: {
+            fields: {
+              fileUrl: true,
+              id: true,
+              fileOriginalName: true,
+              fileType: true,
+            },
+          },
+        },
+        {
+          relation: 'selfie',
+          scope: {
+            fields: {
+              fileUrl: true,
+              id: true,
+              fileOriginalName: true,
+              fileType: true,
+            },
+          },
+        },
         {
           relation: 'investorType',
           scope: {
@@ -723,14 +946,16 @@ export class InvestorProfileController {
             },
           },
         },
-      ]
+      ],
     });
 
     if (!investorProfile) {
       throw new HttpErrors.NotFound('Investor not found');
     }
 
-    const {steps} = this.getInvestorStepperConfig(investorProfile.investorKycType);
+    const {steps} = this.getInvestorStepperConfig(
+      investorProfile.investorKycType,
+    );
 
     if (!steps.includes(stepperId)) {
       throw new HttpErrors.BadRequest(
@@ -738,9 +963,11 @@ export class InvestorProfileController {
       );
     }
 
-    const currentProgress = await this.getKycApplicationStatus(investorProfile.kycApplicationsId);
+    const currentProgress = await this.getKycApplicationStatus(
+      investorProfile.kycApplicationsId,
+    );
 
-    console.log('Curent Progress', currentProgress)
+    console.log('Curent Progress', currentProgress);
 
     if (
       stepperId !== 'kyc_agreement' &&
@@ -753,15 +980,12 @@ export class InvestorProfileController {
       throw new HttpErrors.BadRequest('Please complete the steps');
     }
 
-    if (
-      stepperId === 'investor_kyc' ||
-      stepperId === 'investor_basic_info'
-    ) {
+    if (stepperId === 'investor_kyc' || stepperId === 'investor_basic_info') {
       return {
         success: true,
         message: 'Documents Data',
-        data: investorProfile
-      }
+        data: investorProfile,
+      };
     }
     if (stepperId === 'investor_documents') {
       const investorType = (
@@ -770,34 +994,34 @@ export class InvestorProfileController {
         }
       ).investorType
         ? {
-          id: (
-            investorProfile as InvestorProfile & {
-              investorType: {
-                id: string;
-                label: string;
-                value: string;
-              };
-            }
-          ).investorType.id,
-          label: (
-            investorProfile as InvestorProfile & {
-              investorType: {
-                id: string;
-                label: string;
-                value: string;
-              };
-            }
-          ).investorType.label,
-          value: (
-            investorProfile as InvestorProfile & {
-              investorType: {
-                id: string;
-                label: string;
-                value: string;
-              };
-            }
-          ).investorType.value,
-        }
+            id: (
+              investorProfile as InvestorProfile & {
+                investorType: {
+                  id: string;
+                  label: string;
+                  value: string;
+                };
+              }
+            ).investorType.id,
+            label: (
+              investorProfile as InvestorProfile & {
+                investorType: {
+                  id: string;
+                  label: string;
+                  value: string;
+                };
+              }
+            ).investorType.label,
+            value: (
+              investorProfile as InvestorProfile & {
+                investorType: {
+                  id: string;
+                  label: string;
+                  value: string;
+                };
+              }
+            ).investorType.value,
+          }
         : null;
 
       const documentsResponse =
@@ -807,8 +1031,7 @@ export class InvestorProfileController {
         success: true,
         message: 'Documents Data',
         data: documentsResponse.documents,
-        investorType
-
+        investorType,
       };
     }
 
@@ -828,12 +1051,11 @@ export class InvestorProfileController {
     }
 
     if (stepperId === 'kyc_ubo_details') {
-      const uboDetailsResponse =
-        await this.uboDetailsService.fetchUboDetails(
-          investorProfile.usersId,
-          investorProfile.id,
-          'investor'
-        );
+      const uboDetailsResponse = await this.uboDetailsService.fetchUboDetails(
+        investorProfile.usersId,
+        investorProfile.id,
+        'investor',
+      );
 
       return {
         success: true,
@@ -843,7 +1065,6 @@ export class InvestorProfileController {
     }
 
     if (stepperId === 'kyc_signatories') {
-
       const signatoriesResponse =
         await this.authorizeSignatoriesService.fetchAuthorizeSignatories(
           investorProfile.usersId,
@@ -856,7 +1077,6 @@ export class InvestorProfileController {
         message: 'Authorize signatories',
         data: signatoriesResponse.signatories,
       };
-
     }
 
     if (stepperId === 'kyc_compliance_declarations') {
@@ -875,13 +1095,17 @@ export class InvestorProfileController {
     }
 
     if (stepperId === 'investor_bank_details') {
-      const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccounts(investorProfile.usersId, 'investor');
+      const bankDetailsResponse =
+        await this.bankDetailsService.fetchUserBankAccounts(
+          investorProfile.usersId,
+          'investor',
+        );
 
       return {
         success: true,
         message: 'Bank accounts',
-        data: bankDetailsResponse.accounts
-      }
+        data: bankDetailsResponse.accounts,
+      };
     }
 
     if (stepperId === 'kyc_investment_mandate') {
@@ -917,8 +1141,8 @@ export class InvestorProfileController {
     return {
       success: false,
       message: 'No Step found',
-      data: null
-    }
+      data: null,
+    };
   }
 
   // for investor but without login just for KYC
@@ -934,7 +1158,18 @@ export class InvestorProfileController {
               usersId: {type: 'string'},
               bankDetails: {
                 type: 'object',
-                required: ['bankName', 'bankShortCode', 'ifscCode', 'branchName', 'bankAddress', 'accountType', 'accountHolderName', 'accountNumber', 'bankAccountProofType', 'bankAccountProofId'],
+                required: [
+                  'bankName',
+                  'bankShortCode',
+                  'ifscCode',
+                  'branchName',
+                  'bankAddress',
+                  'accountType',
+                  'accountHolderName',
+                  'accountNumber',
+                  'bankAccountProofType',
+                  'bankAccountProofId',
+                ],
                 properties: {
                   bankName: {type: 'string'},
                   bankShortCode: {type: 'string'},
@@ -945,13 +1180,13 @@ export class InvestorProfileController {
                   accountHolderName: {type: 'string'},
                   accountNumber: {type: 'string'},
                   bankAccountProofType: {type: 'number'},
-                  bankAccountProofId: {type: 'string'}
-                }
-              }
-            }
-          }
-        }
-      }
+                  bankAccountProofId: {type: 'string'},
+                },
+              },
+            },
+          },
+        },
+      },
     })
     body: {
       usersId: string;
@@ -966,8 +1201,8 @@ export class InvestorProfileController {
         accountNumber: string;
         bankAccountProofType: number;
         bankAccountProofId: string;
-      }
-    }
+      };
+    },
   ): Promise<{
     success: boolean;
     message: string;
@@ -975,22 +1210,25 @@ export class InvestorProfileController {
     currentProgress: string[];
   }> {
     const investor = await this.investorProfileRepository.findOne({
-      where: {usersId: body.usersId, isDeleted: false}
+      where: {usersId: body.usersId, isDeleted: false},
     });
 
-    if (!investor) throw new HttpErrors.NotFound("Investor not found");
+    if (!investor) throw new HttpErrors.NotFound('Investor not found');
 
     const bankData = new BankDetails({
       ...body.bankDetails,
       usersId: body.usersId,
       mode: 1,
       status: 0,
-      roleValue: 'investor'
+      roleValue: 'investor',
     });
 
     const result = await this.bankDetailsService.createNewBankAccount(bankData);
 
-    const currentProgress = await this.updateKycProgress(investor.kycApplicationsId, "investor_bank_details");
+    const currentProgress = await this.updateKycProgress(
+      investor.kycApplicationsId,
+      'investor_bank_details',
+    );
 
     return {...result, currentProgress};
   }
@@ -1000,23 +1238,69 @@ export class InvestorProfileController {
   @authorize({roles: ['investor']})
   @get('/investor-profiles/me')
   async getMyInvestorProfile(
-    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
   ): Promise<{success: boolean; message: string; profile: InvestorProfile}> {
     const investorProfile = await this.investorProfileRepository.findOne({
       where: {
-        and: [
-          {usersId: currentUser.id},
-          {isActive: true},
-          {isDeleted: false}
-        ]
+        and: [{usersId: currentUser.id}, {isActive: true}, {isDeleted: false}],
       },
       include: [
-        {relation: 'investorPanCards', scope: {include: [{relation: 'panCardDocument', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}]}},
-        {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
-        {relation: 'aadharFrontImage', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
-        {relation: 'aadharBackImage', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
-        {relation: 'selfie', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}
-      ]
+        {
+          relation: 'investorPanCards',
+          scope: {
+            include: [
+              {
+                relation: 'panCardDocument',
+                scope: {
+                  fields: {
+                    fileUrl: true,
+                    id: true,
+                    fileOriginalName: true,
+                    fileType: true,
+                  },
+                },
+              },
+            ],
+          },
+        },
+        {
+          relation: 'users',
+          scope: {fields: {id: true, phone: true, email: true}},
+        },
+        {
+          relation: 'aadharFrontImage',
+          scope: {
+            fields: {
+              fileUrl: true,
+              id: true,
+              fileOriginalName: true,
+              fileType: true,
+            },
+          },
+        },
+        {
+          relation: 'aadharBackImage',
+          scope: {
+            fields: {
+              fileUrl: true,
+              id: true,
+              fileOriginalName: true,
+              fileType: true,
+            },
+          },
+        },
+        {
+          relation: 'selfie',
+          scope: {
+            fields: {
+              fileUrl: true,
+              id: true,
+              fileOriginalName: true,
+              fileType: true,
+            },
+          },
+        },
+      ],
     });
 
     if (!investorProfile) {
@@ -1026,11 +1310,9 @@ export class InvestorProfileController {
     return {
       success: true,
       message: 'Investor Profile data',
-      profile: investorProfile
-    }
+      profile: investorProfile,
+    };
   }
-
-
 
   private async countInvestorByStatus(status: number) {
     const kycIds = (
@@ -1065,20 +1347,23 @@ export class InvestorProfileController {
       totalPending: number;
       totalVerified: number;
       totalUnderReview: number;
-    }
+    };
   }> {
     let rootWhere = {
-      ...filter?.where
+      ...filter?.where,
     };
 
     if (status !== undefined && status !== null) {
-      const filteredProfiles = await this.kycService.handleKycApplicationFilter(status, 'investor');
+      const filteredProfiles = await this.kycService.handleKycApplicationFilter(
+        status,
+        'investor',
+      );
 
       rootWhere = {
         ...filter?.where,
-        id: {inq: filteredProfiles.profileIds}
-      }
-    };
+        id: {inq: filteredProfiles.profileIds},
+      };
+    }
 
     const investors = await this.investorProfileRepository.find({
       ...filter,
@@ -1087,20 +1372,36 @@ export class InvestorProfileController {
       limit: filter?.limit ?? 10,
       skip: filter?.skip ?? 0,
       include: [
-        {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
-        {relation: 'kycApplications', scope: {fields: {id: true, usersId: true, status: true, mode: true}}},
+        {
+          relation: 'users',
+          scope: {fields: {id: true, phone: true, email: true}},
+        },
+        {
+          relation: 'kycApplications',
+          scope: {fields: {id: true, usersId: true, status: true, mode: true}},
+        },
         {
           relation: 'investorType',
           scope: {fields: {id: true, label: true, value: true}},
         },
         {
           relation: 'media',
-          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true, fileName: true, fileType: true}},
+          scope: {
+            fields: {
+              id: true,
+              fileOriginalName: true,
+              fileUrl: true,
+              fileName: true,
+              fileType: true,
+            },
+          },
         },
-      ]
+      ],
     });
 
-    const totalCount = (await this.investorProfileRepository.count(filter?.where)).count;
+    const totalCount = (
+      await this.investorProfileRepository.count(filter?.where)
+    ).count;
 
     const totalPending = await this.countInvestorByStatus(0);
     const totalUnderReview = await this.countInvestorByStatus(1);
@@ -1117,8 +1418,8 @@ export class InvestorProfileController {
         totalRejected: totalRejected,
         totalUnderReview: totalUnderReview,
         totalVerified: totalVerified,
-      }
-    }
+      },
+    };
   }
 
   // Get investor profiles by id...
@@ -1136,66 +1437,114 @@ export class InvestorProfileController {
     const investor = await this.investorProfileRepository.findById(id, {
       ...filter,
       include: [
-        {relation: 'users', scope: {fields: {id: true, phone: true, email: true}}},
+        {
+          relation: 'users',
+          scope: {fields: {id: true, phone: true, email: true}},
+        },
         {relation: 'kycApplications'},
-        {relation: 'investorPanCards', scope: {include: [{relation: 'panCardDocument', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}}]}},
-        {relation: 'aadharFrontImage', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
-        {relation: 'aadharBackImage', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
-        {relation: 'selfie', scope: {fields: {fileUrl: true, id: true, fileOriginalName: true, fileType: true}}},
+        {
+          relation: 'investorPanCards',
+          scope: {
+            include: [
+              {
+                relation: 'panCardDocument',
+                scope: {
+                  fields: {
+                    fileUrl: true,
+                    id: true,
+                    fileOriginalName: true,
+                    fileType: true,
+                  },
+                },
+              },
+            ],
+          },
+        },
+        {
+          relation: 'aadharFrontImage',
+          scope: {
+            fields: {
+              fileUrl: true,
+              id: true,
+              fileOriginalName: true,
+              fileType: true,
+            },
+          },
+        },
+        {
+          relation: 'aadharBackImage',
+          scope: {
+            fields: {
+              fileUrl: true,
+              id: true,
+              fileOriginalName: true,
+              fileType: true,
+            },
+          },
+        },
+        {
+          relation: 'selfie',
+          scope: {
+            fields: {
+              fileUrl: true,
+              id: true,
+              fileOriginalName: true,
+              fileType: true,
+            },
+          },
+        },
         {
           relation: 'investorType',
           scope: {fields: {id: true, label: true, value: true}},
         },
         {
           relation: 'media',
-          scope: {fields: {id: true, fileOriginalName: true, fileUrl: true, fileName: true, fileType: true}},
+          scope: {
+            fields: {
+              id: true,
+              fileOriginalName: true,
+              fileUrl: true,
+              fileName: true,
+              fileType: true,
+            },
+          },
         },
-      ]
+      ],
     });
 
     return {
       success: true,
       message: 'Investor Profiles',
-      data: investor
-    }
+      data: investor,
+    };
   }
 
-  // fetch bank account
   @authenticate('jwt')
   @authorize({roles: ['investor']})
   @get('/investor-profiles/bank-details')
   async fetchBankDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-  ): Promise<{success: boolean; message: string; bankDetails: BankDetails | null}> {
+  ): Promise<{success: boolean; message: string; bankDetails: BankDetails[]}> {
     const investorProfile = await this.investorProfileRepository.findOne({
       where: {
-        and: [
-          {usersId: currentUser.id},
-          {isDeleted: false}
-        ]
-      }
+        and: [{usersId: currentUser.id}, {isDeleted: false}],
+      },
     });
 
     if (!investorProfile) {
       throw new HttpErrors.NotFound('Investor not found');
     }
 
-    const bankAccountList = await this.bankDetailsService.fetchUserBankAccounts(investorProfile.usersId, 'investor');
-
-    if (!bankAccountList || bankAccountList?.accounts?.length === 0) {
-      return {
-        success: true,
-        message: 'Bank accounts',
-        bankDetails: null
-      }
-    }
-    const bankDetailsResponse = await this.bankDetailsService.fetchUserBankAccount(bankAccountList.accounts[0].id);
+    const bankAccountList = await this.bankDetailsService.fetchUserBankAccounts(
+      investorProfile.usersId,
+      'investor',
+    );
 
     return {
       success: true,
       message: 'Bank accounts',
-      bankDetails: bankDetailsResponse.account
-    }
+      bankDetails: bankAccountList.accounts,
+    };
   }
 
   // Update Bank account info for company...
@@ -1208,28 +1557,35 @@ export class InvestorProfileController {
     @requestBody({
       content: {
         'application/json': {
-          schema: getModelSchemaRef(BankDetails, {partial: true})
-        }
-      }
+          schema: getModelSchemaRef(BankDetails, {partial: true}),
+        },
+      },
     })
-    accountData: Partial<BankDetails>
+    accountData: Partial<BankDetails>,
   ): Promise<{success: boolean; message: string; account: BankDetails | null}> {
-    const tx = await this.investorProfileRepository.dataSource.beginTransaction({IsolationLevel: IsolationLevel.READ_COMMITTED});
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
+    );
     try {
-      const investorProfile = await this.investorProfileRepository.findOne({
-        where: {
-          and: [
-            {usersId: currentUser.id},
-            {isDeleted: false}
-          ]
-        }
-      }, {transaction: tx});
+      const investorProfile = await this.investorProfileRepository.findOne(
+        {
+          where: {
+            and: [{usersId: currentUser.id}, {isDeleted: false}],
+          },
+        },
+        {transaction: tx},
+      );
 
       if (!investorProfile) {
         throw new HttpErrors.NotFound('Investor not found');
       }
 
-      const bankDetailsResponse = await this.bankDetailsService.updateBankAccountInfo(accountId, accountData, tx);
+      const bankDetailsResponse =
+        await this.bankDetailsService.updateBankAccountInfo(
+          accountId,
+          accountData,
+          tx,
+        );
 
       await tx.commit();
 
@@ -1239,7 +1595,6 @@ export class InvestorProfileController {
       throw error;
     }
   }
-
 
   // INVESTOR INSTITUTIONAL FLOWS API'S
 
@@ -1288,10 +1643,11 @@ export class InvestorProfileController {
     uploadedDocuments: InvestorKycDocument[];
     currentProgress: string[];
   }> {
-    const tx =
-      await this.investorProfileRepository.dataSource.beginTransaction({
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction(
+      {
         IsolationLevel: IsolationLevel.READ_COMMITTED,
-      });
+      },
+    );
 
     try {
       const investor = await this.investorProfileRepository.findOne(
@@ -1313,7 +1669,7 @@ export class InvestorProfileController {
       }));
 
       const invalidPayload = newDocs.find(
-        doc => !doc.investorKycDocumentRequirementsId
+        doc => !doc.investorKycDocumentRequirementsId,
       );
 
       if (invalidPayload) {
@@ -1508,7 +1864,7 @@ export class InvestorProfileController {
   @get('/investor-profiles/UBO-details')
   async fetchUboDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-  ): Promise<{success: boolean, message: string, UboDetails: UboDetails[]}> {
+  ): Promise<{success: boolean; message: string; UboDetails: UboDetails[]}> {
     const investorProfile = await this.investorProfileRepository.findOne({
       where: {
         and: [{usersId: currentUser.id}, {isDeleted: false}],
@@ -1521,14 +1877,14 @@ export class InvestorProfileController {
     const uboDetailsResponse = await this.uboDetailsService.fetchUboDetails(
       investorProfile?.usersId,
       investorProfile?.id,
-      'investor'
+      'investor',
     );
 
     return {
       success: true,
       message: 'UBO Details',
-      UboDetails: uboDetailsResponse.uboDetails
-    }
+      UboDetails: uboDetailsResponse.uboDetails,
+    };
   }
 
   @post('/investor-profiles/kyc-ubo-details')
@@ -1613,10 +1969,11 @@ export class InvestorProfileController {
     }>;
     currentProgress: string[];
   }> {
-    const tx =
-      await this.investorProfileRepository.dataSource.beginTransaction({
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction(
+      {
         IsolationLevel: IsolationLevel.READ_COMMITTED,
-      });
+      },
+    );
 
     try {
       const investor = await this.investorProfileRepository.findOne(
@@ -1644,11 +2001,10 @@ export class InvestorProfileController {
           }),
       );
 
-      const result =
-        await this.uboDetailsService.createUboDetails(
-          uboDetailsData,
-          tx,
-        );
+      const result = await this.uboDetailsService.createUboDetails(
+        uboDetailsData,
+        tx,
+      );
 
       const currentProgress = await this.updateKycProgress(
         investor.kycApplicationsId,
@@ -1662,7 +2018,7 @@ export class InvestorProfileController {
         message: result.message,
         createdUboDetails: result.createdUboDetails,
         erroredUboDetails: result.erroredUboDetails,
-        currentProgress
+        currentProgress,
       };
     } catch (err) {
       await tx.rollback();
@@ -1697,19 +2053,18 @@ export class InvestorProfileController {
     message: string;
     uboDetail: UboDetails | null;
   }> {
-
-    const tx =
-      await this.investorProfileRepository.dataSource.beginTransaction({
+    const tx = await this.investorProfileRepository.dataSource.beginTransaction(
+      {
         isolationLevel: IsolationLevel.READ_COMMITTED,
-      });
+      },
+    );
 
     try {
-      const result =
-        await this.uboDetailsService.updateUboDetail(
-          body.uboId,
-          body.uboDetail,
-          tx,
-        );
+      const result = await this.uboDetailsService.updateUboDetail(
+        body.uboId,
+        body.uboDetail,
+        tx,
+      );
 
       await tx.commit();
 
@@ -2489,11 +2844,14 @@ export class InvestorProfileController {
       'kyc_review',
     );
 
-    await this.kycApplicationsRepository.updateById(investor.kycApplicationsId, {
-      status: 1,
-      reason: undefined,
-      verifiedAt: undefined,
-    });
+    await this.kycApplicationsRepository.updateById(
+      investor.kycApplicationsId,
+      {
+        status: 1,
+        reason: undefined,
+        verifiedAt: undefined,
+      },
+    );
 
     return {
       success: true,
@@ -2501,5 +2859,4 @@ export class InvestorProfileController {
       currentProgress,
     };
   }
-
 }

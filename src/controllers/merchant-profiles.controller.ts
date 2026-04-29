@@ -39,6 +39,7 @@ import {
   RolesRepository,
   TransactionRepository,
   UboDetailsRepository,
+  UsersConsentRepository,
   UserRolesRepository,
   UsersRepository,
 } from '../repositories';
@@ -86,6 +87,8 @@ export class MerchantProfilesController {
     private registrationSessionsRepository: RegistrationSessionsRepository,
     @repository(OtpRepository)
     private otpRepository: OtpRepository,
+    @repository(UsersConsentRepository)
+    private usersConsentRepository: UsersConsentRepository,
     @repository(UsersRepository)
     private usersRepository: UsersRepository,
     @inject('service.session.service')
@@ -293,6 +296,7 @@ export class MerchantProfilesController {
       registrationSessions: number;
       merchantUserRoles: number;
       otpEntries: number;
+      usersConsents: number;
     };
   }> {
     const tx =
@@ -547,6 +551,13 @@ export class MerchantProfilesController {
         {transaction: tx},
       );
 
+      const deletedUsersConsents = await this.usersConsentRepository.deleteAll(
+        {
+          identifierId: merchantProfile.id,
+        },
+        {transaction: tx},
+      );
+
       const deletedMerchantProfile =
         await this.merchantProfilesRepository.deleteAll(
           {id: merchantProfile.id},
@@ -605,6 +616,7 @@ export class MerchantProfilesController {
           registrationSessions: deletedRegistrationSessions.count,
           merchantUserRoles: deletedMerchantUserRoles.count,
           otpEntries: deletedOtpEntries.count,
+          usersConsents: deletedUsersConsents.count,
         },
       };
     } catch (error) {
