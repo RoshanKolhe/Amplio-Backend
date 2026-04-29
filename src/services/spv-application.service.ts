@@ -185,63 +185,81 @@ export class SpvApplicationService {
     );
   }
 
-  async fetchSingleApplication(
-    trusteeProfileId: string,
-    applicationId: string,
-  ): Promise<{
-    id: string;
-    completedSteps: {
-      id: string;
-      label: string;
-      code: string;
-    }[];
-    activeStep: {
-      id: string;
-      label: string;
-      code: string;
-    };
-  }> {
-    const application = await this.verifyApplicationWithTrustee(
+async fetchSingleApplication(
+ trusteeProfileId: string,
+ applicationId: string,
+): Promise<{
+ id: string;
+ reviewStatus: number;
+ completedSteps: {
+   id: string;
+   label: string;
+   code: string;
+ }[];
+ activeStep: {
+   id: string;
+   label: string;
+   code: string;
+ };
+}> {
+
+ const application =
+   await this.verifyApplicationWithTrustee(
       trusteeProfileId,
       applicationId,
-    );
+   );
 
-    const currentStatus = await this.statusService.fetchApplicationStatusById(
+ const currentStatus =
+   await this.statusService.fetchApplicationStatusById(
       application.spvApplicationStatusMasterId,
-    );
-    let activeStatus = currentStatus;
-    let completedSteps: {
-      id: string;
-      label: string;
-      code: string;
-    }[] = [];
+   );
 
-    if (!currentStatus.isInitial) {
-      completedSteps = await this.statusService.fetchCompletedStepsSequence(
-        currentStatus.sequenceOrder,
-      );
-    }
+ let activeStatus = currentStatus;
 
-    try {
-      if (!currentStatus.isInitial) {
-        activeStatus = await this.statusService.fetchNextStatus(
+ let completedSteps: {
+   id: string;
+   label: string;
+   code: string;
+ }[] = [];
+
+ if (!currentStatus.isInitial) {
+   completedSteps =
+     await this.statusService.fetchCompletedStepsSequence(
+       currentStatus.sequenceOrder,
+     );
+ }
+
+ try {
+
+   if (!currentStatus.isInitial) {
+     activeStatus =
+       await this.statusService.fetchNextStatus(
           currentStatus.sequenceOrder,
-        );
-      }
-    } catch (error) {
-      activeStatus = currentStatus;
-    }
+       );
+   }
 
-    return {
-      id: application.id,
-      completedSteps,
-      activeStep: {
-        id: activeStatus.id,
-        label: activeStatus.status,
-        code: activeStatus.value,
-      },
-    };
-  }
+ } catch (error) {
+
+   activeStatus = currentStatus;
+
+ }
+
+ return {
+   id: application.id,
+
+   // NEW FIELD
+   reviewStatus: application.status,
+
+   completedSteps,
+
+   activeStep: {
+      id: activeStatus.id,
+      label: activeStatus.status,
+      code: activeStatus.value,
+   },
+ };
+
+}
 
   async fetchDataByStatusValue(
     trusteeProfileId: string,

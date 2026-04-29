@@ -19,6 +19,27 @@ async function tableExists(
   return Boolean(rows?.[0]?.exists);
 }
 
+async function columnExists(
+  datasource: AmplioDataSource,
+  tableName: string,
+  columnName: string,
+): Promise<boolean> {
+  const rows = await datasource.execute(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = $1
+          AND column_name = $2
+      ) AS "exists"
+    `,
+    [tableName, columnName],
+  );
+
+  return Boolean(rows?.[0]?.exists);
+}
+
 export async function runLegacySpvBackfillMigration(
   app: AmplioBackendApplication,
 ): Promise<void> {
@@ -27,6 +48,15 @@ export async function runLegacySpvBackfillMigration(
   const legacyPtcTableExists = await tableExists(datasource, 'ptcparameters');
 
   if (legacyPoolTableExists) {
+    const hasEscrowSetupId = await columnExists(
+      datasource,
+      'poolfinancials',
+      'escrowsetupid',
+    );
+    const escrowSetupIdSelect = hasEscrowSetupId
+      ? 'legacy.escrowsetupid'
+      : 'NULL::uuid';
+
     const poolBackfillResult = await datasource.execute(`
       INSERT INTO public.spv_pool_financials (
         id,
@@ -66,7 +96,7 @@ export async function runLegacySpvBackfillMigration(
         legacy.deletedat,
         legacy.spvapplicationid,
         legacy.spvid,
-        legacy.escrowsetupid
+        ${escrowSetupIdSelect}
       FROM public.poolfinancials legacy
       ON CONFLICT (id) DO NOTHING
     `);

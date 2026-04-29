@@ -146,7 +146,7 @@ export class InvestorProfileController {
     public jwtService: JWTService,
     @inject('services.rbac')
     public rbacService: RbacService,
-  ) {}
+  ) { }
 
   private getInvestorStepperConfig(investorKycType?: string): {
     flowType: InvestorKycFlowType;
@@ -426,14 +426,14 @@ export class InvestorProfileController {
         await this.investorEscrowLedgerRepository.deleteAll(
           investorEscrowAccountIds.length
             ? {
-                or: [
-                  {investorId: investorProfile.id},
-                  {investorEscrowAccountId: {inq: investorEscrowAccountIds}},
-                ],
-              }
+              or: [
+                {investorId: investorProfile.id},
+                {investorEscrowAccountId: {inq: investorEscrowAccountIds}},
+              ],
+            }
             : {
-                investorId: investorProfile.id,
-              },
+              investorId: investorProfile.id,
+            },
           {transaction: tx},
         );
 
@@ -572,12 +572,12 @@ export class InvestorProfileController {
 
       const deletedInvestorUserRoles = investorRole
         ? await this.userRolesRepository.deleteAll(
-            {
-              usersId: investorProfile.usersId,
-              rolesId: investorRole.id,
-            },
-            {transaction: tx},
-          )
+          {
+            usersId: investorProfile.usersId,
+            rolesId: investorRole.id,
+          },
+          {transaction: tx},
+        )
         : {count: 0};
 
       const deletedRegistrationSessions =
@@ -683,6 +683,7 @@ export class InvestorProfileController {
       throw error;
     }
   }
+
 
   private async validateInvestorReviewSubmission(investor: InvestorProfile) {
     const currentProgress = await this.getKycApplicationStatus(
@@ -1017,34 +1018,34 @@ export class InvestorProfileController {
         }
       ).investorType
         ? {
-            id: (
-              investorProfile as InvestorProfile & {
-                investorType: {
-                  id: string;
-                  label: string;
-                  value: string;
-                };
-              }
-            ).investorType.id,
-            label: (
-              investorProfile as InvestorProfile & {
-                investorType: {
-                  id: string;
-                  label: string;
-                  value: string;
-                };
-              }
-            ).investorType.label,
-            value: (
-              investorProfile as InvestorProfile & {
-                investorType: {
-                  id: string;
-                  label: string;
-                  value: string;
-                };
-              }
-            ).investorType.value,
-          }
+          id: (
+            investorProfile as InvestorProfile & {
+              investorType: {
+                id: string;
+                label: string;
+                value: string;
+              };
+            }
+          ).investorType.id,
+          label: (
+            investorProfile as InvestorProfile & {
+              investorType: {
+                id: string;
+                label: string;
+                value: string;
+              };
+            }
+          ).investorType.label,
+          value: (
+            investorProfile as InvestorProfile & {
+              investorType: {
+                id: string;
+                label: string;
+                value: string;
+              };
+            }
+          ).investorType.value,
+        }
         : null;
 
       const documentsResponse =
@@ -1391,7 +1392,6 @@ export class InvestorProfileController {
     const investors = await this.investorProfileRepository.find({
       ...filter,
       where: rootWhere,
-      order: filter?.order ?? ['createdAt DESC'],
       limit: filter?.limit ?? 10,
       skip: filter?.skip ?? 0,
       include: [
@@ -1420,6 +1420,7 @@ export class InvestorProfileController {
           },
         },
       ],
+      order: filter?.order ?? ['createdAt DESC'],
     });
 
     const totalCount = (

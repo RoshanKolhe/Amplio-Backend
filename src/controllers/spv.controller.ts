@@ -86,42 +86,48 @@ export class SpvController {
     };
   }
 
-  @authenticate('jwt')
-  @authorize({roles: ['trustee']})
-  @get('/spv-application/{applicationId}')
-  async fetchApplicationById(
-    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-    @param.path.string('applicationId') applicationId: string,
-  ): Promise<{
-    success: boolean;
-    message: string;
-    applicationData: {
+@authenticate('jwt')
+@authorize({roles: ['trustee']})
+@get('/spv-application/{applicationId}')
+async fetchApplicationById(
+  @inject(AuthenticationBindings.CURRENT_USER)
+  currentUser: UserProfile,
+
+  @param.path.string('applicationId')
+  applicationId: string,
+): Promise<{
+  success: boolean;
+  message: string;
+  applicationData: {
+    id: string;
+    reviewStatus: number;
+    completedSteps: {
       id: string;
-      completedSteps: {
-        id: string;
-        label: string;
-        code: string;
-      }[];
-      activeStep: {
-        id: string;
-        label: string;
-        code: string;
-      };
+      label: string;
+      code: string;
+    }[];
+    activeStep: {
+      id: string;
+      label: string;
+      code: string;
     };
-  }> {
-    const trustee = await this.verifyTrustee(currentUser.id);
-    const applicationData = await this.spvApplicationService.fetchSingleApplication(
+  };
+}> {
+
+  const trustee = await this.verifyTrustee(currentUser.id);
+
+  const applicationData =
+    await this.spvApplicationService.fetchSingleApplication(
       trustee.id,
       applicationId,
     );
 
-    return {
-      success: true,
-      message: 'Application Data',
-      applicationData,
-    };
-  }
-
+  return {
+    success: true,
+    message: 'Application Data',
+    applicationData,
+  };
+}
   @authenticate('jwt')
   @authorize({roles: ['trustee']})
   @get('/spv-applications/{applicationId}/data-by-status/{statusValue}')
