@@ -122,20 +122,24 @@ export class AuthController {
     },
     merchantProfilesId: string,
   ) {
-    const accessToken = await this.jwtService.generateMerchantOnboardingToken({
-      sub: user.id,
-      id: user.id,
-      role: 'merchant',
-      roles: ['merchant'],
-      scope: 'kyc_onboarding',
-      merchantProfilesId,
+    const {roles, permissions} =
+      await this.rbacService.getUserRoleAndPermissionsByRole(
+        user.id!,
+        'merchant',
+      );
+
+    const accessToken = await this.jwtService.generateToken({
+      [securityId]: user.id!,
+      id: user.id!,
       email: user.email,
       phone: user.phone,
-      permissions: [],
+      roles,
+      permissions,
+      scope: 'kyc_onboarding',
     });
 
     return {
-      accessToken,
+      onboardingToken: accessToken,
       user: {
         id: user.id,
         role: 'merchant' as const,
@@ -168,33 +172,61 @@ export class AuthController {
     return roleValue === 'merchant' ? [0, 1] : [0];
   }
 
-  private async buildExistingMerchantRegistrationResponse(
-    user: {
-      id: string;
-      email?: string;
-      phone?: string;
-    },
-    merchantProfile: {
-      id: string;
-    },
-    kycApplication: {
-      status: number;
-      currentProgress?: string[] | null;
-    },
-  ) {
-    const merchantAuth = await this.generateMerchantOnboardingAuth(
-      user,
-      merchantProfile.id,
-    );
+  private async findExistingMerchantOnboardingBySession(sessionId: string) {
+    const session = await this.findActiveRegistrationSession(sessionId);
+
+    if (!session.email || !session.phoneNumber || session.roleValue !== 'merchant') {
+      return null;
+    }
+
+    const user = await this.usersRepository.findOne({
+      where: {
+        and: [
+          {email: session.email},
+          {phone: session.phoneNumber},
+          {isActive: true},
+          {isDeleted: false},
+        ],
+      },
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    const merchantProfile = await this.merchantProfileRepository.findOne({
+      where: {
+        and: [{usersId: user.id}, {isDeleted: false}],
+      },
+      order: ['createdAt DESC'],
+    });
+
+    if (!merchantProfile) {
+      return null;
+    }
+
+    const kycApplication = await this.kycApplicationsRepository.findOne({
+      where: {
+        and: [
+          {usersId: user.id},
+          {identifierId: merchantProfile.id},
+          {roleValue: 'merchant'},
+          {isActive: true},
+          {isDeleted: false},
+          {status: {inq: this.getPendingMerchantKycStatuses('merchant')}},
+        ],
+      },
+      order: ['createdAt DESC'],
+    });
+
+    if (!kycApplication) {
+      return null;
+    }
 
     return {
-      success: true,
-      message: 'Merchant onboarding is already in progress',
-      kycStatus: kycApplication.status,
-      currentProgress: kycApplication.currentProgress ?? ['merchant_kyc'],
-      usersId: user.id,
-      accessToken: merchantAuth.accessToken,
-      user: merchantAuth.user,
+      user,
+      merchantProfile,
+      kycApplication,
     };
   }
 
@@ -409,8 +441,15 @@ export class AuthController {
   @authenticate('jwt')
   @get('/auth/me')
   async whoAmI(
-    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @inject(AuthenticationBindings.CURRENT_USER)
+    currentUser: UserProfile & {scope?: string},
   ) {
+    if (currentUser.scope === 'kyc_onboarding') {
+      throw new HttpErrors.Unauthorized(
+        'Onboarding session cannot access dashboard. Please login after approval.',
+      );
+    }
+
     const user = await this.usersRepository.findById(currentUser.id);
 
     const companyProfile = await this.companyProfilesRepository.findOne({
@@ -796,7 +835,21 @@ export class AuthController {
       isAlreadyRegistered: boolean;
       kycStatus: number | null;
     },
-  ): Promise<{success: boolean; message: string}> {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    isAlreadyRegistered?: boolean;
+    kycStatus?: number | null;
+    currentProgress?: string[];
+    usersId?: string;
+    merchantProfilesId?: string;
+    onboardingToken?: string;
+    user?: {
+      id: string;
+      role: 'merchant';
+      merchantProfilesId: string;
+    };
+  }> {
     const sessionId = this.normalizeSessionId(body.sessionId);
     const otp = this.normalizeOtpValue(body.otp);
     const session = await this.findActiveRegistrationSession(sessionId);
@@ -854,9 +907,40 @@ export class AuthController {
       emailVerified: true,
     });
 
+    const existingMerchantOnboarding =
+      await this.findExistingMerchantOnboardingBySession(sessionId);
+
+    if (existingMerchantOnboarding) {
+      const merchantAuth = await this.generateMerchantOnboardingAuth(
+        {
+          id: existingMerchantOnboarding.user.id,
+          email: existingMerchantOnboarding.user.email,
+          phone: existingMerchantOnboarding.user.phone,
+        },
+        existingMerchantOnboarding.merchantProfile.id,
+      );
+
+      return {
+        success: true,
+        message: 'Email verified successfully',
+        isAlreadyRegistered: true,
+        kycStatus: existingMerchantOnboarding.kycApplication.status,
+        currentProgress:
+          existingMerchantOnboarding.kycApplication.currentProgress ?? [
+            'merchant_kyc',
+          ],
+        usersId: existingMerchantOnboarding.user.id,
+        merchantProfilesId: existingMerchantOnboarding.merchantProfile.id,
+        onboardingToken: merchantAuth.onboardingToken,
+        user: merchantAuth.user,
+      };
+    }
+
     return {
       success: true,
       message: 'Email verified successfully',
+      isAlreadyRegistered: false,
+      kycStatus: null,
     };
   }
 
@@ -1172,6 +1256,14 @@ export class AuthController {
     kycStatus: number;
     currentProgress: string[];
     usersId: string;
+    isAlreadyRegistered?: boolean;
+    merchantProfilesId?: string;
+    onboardingToken?: string;
+    user?: {
+      id: string;
+      role: 'merchant';
+      merchantProfilesId: string;
+    };
   }> {
     const tx = await this.companyProfilesRepository.dataSource.beginTransaction(
       {
@@ -1237,6 +1329,73 @@ export class AuthController {
           ],
         },
       });
+
+      if (newUserProfile) {
+        const existingMerchantProfile = await this.merchantProfileRepository.findOne(
+          {
+            where: {
+              and: [{usersId: newUserProfile.id}, {isDeleted: false}],
+            },
+            order: ['createdAt DESC'],
+          },
+          {transaction: tx},
+        );
+
+        if (existingMerchantProfile) {
+          const existingKycApplication =
+            await this.kycApplicationsRepository.findOne(
+              {
+                where: {
+                  and: [
+                    {usersId: newUserProfile.id},
+                    {identifierId: existingMerchantProfile.id},
+                    {roleValue: 'merchant'},
+                    {isActive: true},
+                    {isDeleted: false},
+                    {
+                      status: {
+                        inq: this.getPendingMerchantKycStatuses('merchant'),
+                      },
+                    },
+                  ],
+                },
+                order: ['createdAt DESC'],
+              },
+              {transaction: tx},
+            );
+
+          if (existingKycApplication) {
+            const merchantAuth = await this.generateMerchantOnboardingAuth(
+              {
+                id: newUserProfile.id,
+                email: newUserProfile.email,
+                phone: newUserProfile.phone,
+              },
+              existingMerchantProfile.id,
+            );
+
+            await tx.commit();
+
+            return {
+              success: true,
+              message: 'Merchant onboarding is already in progress',
+              isAlreadyRegistered: true,
+              kycStatus: existingKycApplication.status,
+              currentProgress: existingKycApplication.currentProgress ?? [
+                'merchant_kyc',
+              ],
+              usersId: newUserProfile.id,
+              merchantProfilesId: existingMerchantProfile.id,
+              onboardingToken: merchantAuth.onboardingToken,
+              user: merchantAuth.user,
+            };
+          }
+
+          throw new HttpErrors.BadRequest(
+            'Merchant profile already exists for this user',
+          );
+        }
+      }
 
       if (!newUserProfile) {
         newUserProfile = await this.usersRepository.create(
@@ -2771,6 +2930,14 @@ export class AuthController {
     kycStatus: number;
     currentProgress: string[];
     usersId: string;
+    isAlreadyRegistered?: boolean;
+    merchantProfilesId?: string;
+    onboardingToken?: string;
+    user?: {
+      id: string;
+      role: 'merchant';
+      merchantProfilesId: string;
+    };
   }> {
     const tx = await this.investorProfileRepository.dataSource.beginTransaction(
       {
@@ -3260,18 +3427,18 @@ export class AuthController {
     kycStatus: number;
     currentProgress: string[];
     usersId: string;
-    accessToken: string;
-    user: {
+    isAlreadyRegistered?: boolean;
+    merchantProfilesId?: string;
+    onboardingToken?: string;
+    user?: {
       id: string;
       role: 'merchant';
       merchantProfilesId: string;
     };
   }> {
-    const tx = await this.merchantProfileRepository.dataSource.beginTransaction(
-      {
-        isolationLevel: 'READ COMMITTED',
-      },
-    );
+    const tx = await this.merchantProfileRepository.dataSource.beginTransaction({
+      isolationLevel: 'READ COMMITTED',
+    });
     console.log('body', body);
     try {
       // ----------------------------
@@ -3296,7 +3463,29 @@ export class AuthController {
       }
 
       // ----------------------------
-      //  Create or reuse User
+      //  Validate CIN & GSTIN
+      // ----------------------------
+      const companyWithCIN = await this.merchantProfileRepository.findOne(
+        {where: {CIN: body.CIN, isDeleted: false}},
+        {transaction: tx},
+      );
+      if (companyWithCIN)
+        throw new HttpErrors.BadRequest('CIN already registered');
+
+      const companyWithGSTIN = await this.merchantProfileRepository.findOne(
+        {where: {GSTIN: body.GSTIN, isDeleted: false}},
+        {transaction: tx},
+      );
+      if (companyWithGSTIN)
+        throw new HttpErrors.BadRequest('GSTIN already registered');
+
+      await this.companyDataMapperService.merchantPanValidation(
+        body.submittedPanDetails.submittedPanNumber,
+        body.submittedPanDetails.submittedMerchantName,
+      );
+
+      // ----------------------------
+      //  Create User
       // ----------------------------
       const hashedPassword = await this.hasher.hashPassword('Merchant@123');
 
@@ -3324,81 +3513,6 @@ export class AuthController {
           {transaction: tx},
         );
       }
-
-      const existingMerchantProfile = await this.merchantProfileRepository.findOne(
-        {
-          where: {
-            and: [{usersId: newUserProfile.id}, {isDeleted: false}],
-          },
-          order: ['createdAt DESC'],
-        },
-        {transaction: tx},
-      );
-
-      if (existingMerchantProfile) {
-        const existingKycApplication =
-          await this.kycApplicationsRepository.findOne(
-            {
-              where: {
-                and: [
-                  {usersId: newUserProfile.id},
-                  {identifierId: existingMerchantProfile.id},
-                  {roleValue: 'merchant'},
-                  {isActive: true},
-                  {isDeleted: false},
-                ],
-              },
-              order: ['createdAt DESC'],
-            },
-            {transaction: tx},
-          );
-
-        if (
-          existingKycApplication &&
-          this.getPendingMerchantKycStatuses('merchant').includes(
-            existingKycApplication.status,
-          )
-        ) {
-          await tx.commit();
-
-          return this.buildExistingMerchantRegistrationResponse(
-            {
-              id: newUserProfile.id,
-              email: newUserProfile.email,
-              phone: newUserProfile.phone,
-            },
-            existingMerchantProfile,
-            existingKycApplication,
-          );
-        }
-
-        throw new HttpErrors.BadRequest(
-          'Merchant profile already exists for this user',
-        );
-      }
-
-      // ----------------------------
-      //  Validate CIN & GSTIN
-      // ----------------------------
-      const companyWithCIN = await this.merchantProfileRepository.findOne(
-        {where: {CIN: body.CIN, isDeleted: false}},
-        {transaction: tx},
-      );
-      if (companyWithCIN)
-        throw new HttpErrors.BadRequest('CIN already registered');
-
-      const companyWithGSTIN = await this.merchantProfileRepository.findOne(
-        {where: {GSTIN: body.GSTIN, isDeleted: false}},
-        {transaction: tx},
-      );
-      if (companyWithGSTIN)
-        throw new HttpErrors.BadRequest('GSTIN already registered');
-
-      await this.companyDataMapperService.merchantPanValidation(
-        body.submittedPanDetails.submittedPanNumber,
-        body.submittedPanDetails.submittedMerchantName,
-      );
-
       // ----------------------------
       //  Create Company Profile
       // ----------------------------
@@ -3499,6 +3613,11 @@ export class AuthController {
           }
         }
 
+        await this.merchantProfileRepository.updateById(
+          newCompanyProfile.id,
+          {kycApplicationsId: newApplication.id},
+          {transaction: tx},
+        );
         const merchantAuth = await this.generateMerchantOnboardingAuth(
           {
             id: newUserProfile.id,
@@ -3507,21 +3626,15 @@ export class AuthController {
           },
           newCompanyProfile.id,
         );
-
-        await this.merchantProfileRepository.updateById(
-          newCompanyProfile.id,
-          {kycApplicationsId: newApplication.id},
-          {transaction: tx},
-        );
         await tx.commit();
 
         return {
           success: true,
           message: 'Registration completed',
-          kycStatus: 1,
+          kycStatus: 0,
           currentProgress: newApplication.currentProgress ?? ['merchant_kyc'],
           usersId: newUserProfile.id,
-          accessToken: merchantAuth.accessToken,
+          onboardingToken: merchantAuth.onboardingToken,
           user: merchantAuth.user,
         };
       }
@@ -3612,7 +3725,7 @@ export class AuthController {
           'pan_verified',
         ],
         usersId: newUserProfile.id,
-        accessToken: merchantAuth.accessToken,
+        onboardingToken: merchantAuth.onboardingToken,
         user: merchantAuth.user,
       };
     } catch (error) {

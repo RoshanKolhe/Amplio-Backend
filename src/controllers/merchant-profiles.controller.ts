@@ -9,9 +9,7 @@ import {
   param,
   patch,
   post,
-  Request,
   requestBody,
-  RestBindings,
 } from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
@@ -49,7 +47,6 @@ import {KycService} from '../services/kyc.service';
 import {MediaService} from '../services/media.service';
 import {MerchantKycDocumentService} from '../services/merchant-kyc-document.service';
 import {PspService} from '../services/psp.service';
-import {JWTService} from '../services/jwt-service';
 import {SessionService} from '../services/session.service';
 import {UboDetailsService} from '../services/ubo-details.service';
 
@@ -93,8 +90,6 @@ export class MerchantProfilesController {
     private usersRepository: UsersRepository,
     @inject('service.session.service')
     private sessionService: SessionService,
-    @inject('service.jwt.service')
-    private jwtService: JWTService,
     @inject('service.merchantKycDocumentService.service')
     private merchantKycDocumentService: MerchantKycDocumentService,
     @inject('service.bankDetails.service')
@@ -176,98 +171,6 @@ export class MerchantProfilesController {
     }
 
     return merchantProfile;
-  }
-
-  private extractBearerToken(authorizationHeader?: string) {
-    const normalizedHeader = String(authorizationHeader ?? '').trim();
-
-    if (!normalizedHeader) {
-      return undefined;
-    }
-
-    const [scheme, token] = normalizedHeader.split(' ');
-
-    if (scheme?.toLowerCase() !== 'bearer' || !token) {
-      throw new HttpErrors.Unauthorized('Invalid authorization header format');
-    }
-
-    return token.trim();
-  }
-
-  private buildMerchantKycProgressProfile(
-    merchantProfile: MerchantProfiles & {
-      merchantDealershipType?: {id: string; label: string; value: string};
-      kycApplications?: {
-        id: string;
-        status: number;
-        verifiedAt?: Date;
-        reason?: string;
-      };
-    },
-  ) {
-    return {
-      id: merchantProfile.id,
-      usersId: merchantProfile.usersId,
-      companyName: merchantProfile.companyName,
-      CIN: merchantProfile.CIN,
-      GSTIN: merchantProfile.GSTIN,
-      udyamRegistrationNumber: merchantProfile.udyamRegistrationNumber,
-      dateOfIncorporation: merchantProfile.dateOfIncorporation,
-      cityOfIncorporation: merchantProfile.cityOfIncorporation,
-      stateOfIncorporation: merchantProfile.stateOfIncorporation,
-      countryOfIncorporation: merchantProfile.countryOfIncorporation,
-      merchantDealershipTypeId: merchantProfile.merchantDealershipTypeId,
-      kycApplicationsId: merchantProfile.kycApplicationsId,
-      isActive: merchantProfile.isActive,
-      isBusinessKycComplete: merchantProfile.isBusinessKycComplete,
-      merchantDealershipType: merchantProfile.merchantDealershipType ?? null,
-      kycApplications: merchantProfile.kycApplications ?? null,
-    };
-  }
-
-  private async authorizeMerchantKycReadAccess(
-    usersId: string,
-    sessionId?: string,
-    authorizationHeader?: string,
-  ) {
-    const bearerToken = this.extractBearerToken(authorizationHeader);
-
-    if (bearerToken) {
-      const currentUser = await this.jwtService.verifyToken(bearerToken);
-
-      if (!currentUser.roles.includes('merchant')) {
-        throw new HttpErrors.Forbidden(
-          'Only merchant users can access merchant KYC data',
-        );
-      }
-
-      if (
-        currentUser.scope &&
-        currentUser.scope !== 'kyc_onboarding'
-      ) {
-        throw new HttpErrors.Forbidden('Forbidden: Token scope not allowed');
-      }
-
-      return this.ensureCurrentUserMatchesRequestedUser(currentUser, usersId);
-    }
-
-    if (sessionId) {
-      this.assertUuid(sessionId, 'sessionId');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response: any = await this.sessionService.fetchProfile(sessionId);
-
-      if (!response?.profile?.id || response.profile.id !== usersId) {
-        throw new HttpErrors.Forbidden(
-          'You can only access your own merchant onboarding data',
-        );
-      }
-
-      return response.profile.id;
-    }
-
-    throw new HttpErrors.Unauthorized(
-      'Authentication or a verified session is required',
-    );
   }
 
   @authenticate('jwt')
@@ -633,8 +536,7 @@ export class MerchantProfilesController {
     success: boolean;
     message: string;
     currentProgress: string[];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    profile: any;
+    profile: MerchantProfiles | null;
   }> {
     this.assertUuid(sessionId, 'sessionId');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -647,12 +549,38 @@ export class MerchantProfilesController {
         },
         order: ['createdAt DESC'],
         include: [
+          {
+            relation: 'merchantPanCard',
+            scope: {
+              include: [
+                {
+                  relation: 'media',
+                  scope: {
+                    fields: {
+                      fileUrl: true,
+                      id: true,
+                      fileOriginalName: true,
+                      fileType: true,
+                    },
+                  },
+                },
+              ],
+            },
+          },
           {relation: 'merchantDealershipType'},
+          {
+            relation: 'users',
+            scope: {fields: {id: true, phone: true, email: true}},
+          },
           {
             relation: 'kycApplications',
             scope: {
               fields: {id: true, status: true, verifiedAt: true, reason: true},
             },
+          },
+          {
+            relation: 'media',
+            scope: {fields: {id: true, fileOriginalName: true, fileUrl: true}},
           },
         ],
       });
@@ -674,17 +602,7 @@ export class MerchantProfilesController {
         success: true,
         message: 'New Profile',
         currentProgress,
-        profile: this.buildMerchantKycProgressProfile(
-          merchantProfile as MerchantProfiles & {
-            merchantDealershipType?: {id: string; label: string; value: string};
-            kycApplications?: {
-              id: string;
-              status: number;
-              verifiedAt?: Date;
-              reason?: string;
-            };
-          },
-        ),
+        profile: merchantProfile,
       };
     }
 
@@ -700,8 +618,6 @@ export class MerchantProfilesController {
   async getMerchantProfileKycData(
     @param.path.string('stepperId') stepperId: string,
     @param.path.string('usersId') usersId: string,
-    @param.query.string('sessionId') sessionId?: string,
-    @inject(RestBindings.Http.REQUEST) request?: Request,
   ): Promise<{
     success: boolean;
     message: string;
@@ -714,12 +630,6 @@ export class MerchantProfilesController {
     } | null;
   }> {
     this.assertUuid(usersId, 'usersId');
-    await this.authorizeMerchantKycReadAccess(
-      usersId,
-      sessionId,
-      request?.headers.authorization,
-    );
-
     const steppersAllowed = [
       'merchant_kyc',
       'pan_verified',
@@ -921,7 +831,7 @@ export class MerchantProfilesController {
   }
 
   @authenticate('jwt')
-  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
+  @authorize({roles: ['merchant']})
   @post('/merchant-profiles/kyc-upload-documents')
   async uploadMerchantKYCDocuments(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
@@ -1029,7 +939,7 @@ export class MerchantProfilesController {
   }
 
   @authenticate('jwt')
-  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
+  @authorize({roles: ['merchant']})
   @patch('/merchant-profiles/kyc-upload-documents')
   async patchMerchantKYCDocuments(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
@@ -1080,7 +990,7 @@ export class MerchantProfilesController {
   }
 
   @authenticate('jwt')
-  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
+  @authorize({roles: ['merchant']})
   @post('/merchant-profiles/kyc-bank-details')
   async uploadMerchantBankDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
@@ -1174,7 +1084,7 @@ export class MerchantProfilesController {
   }
 
   @authenticate('jwt')
-  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
+  @authorize({roles: ['merchant']})
   @patch('/merchant-profiles/kyc-bank-details')
   async patchMerchantKycBankDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
@@ -1326,7 +1236,7 @@ export class MerchantProfilesController {
   }
 
   @authenticate('jwt')
-  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
+  @authorize({roles: ['merchant']})
   @post('/merchant-profiles/kyc-ubo-details')
   async uploadMerchantKycUboDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
@@ -1471,7 +1381,7 @@ export class MerchantProfilesController {
   }
 
   @authenticate('jwt')
-  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
+  @authorize({roles: ['merchant']})
   @patch('/merchant-profiles/kyc-ubo-details')
   async patchMerchantKycUboDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
@@ -1537,7 +1447,7 @@ export class MerchantProfilesController {
   }
 
   @authenticate('jwt')
-  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
+  @authorize({roles: ['merchant']})
   @post('/merchant-profiles/kyc-psp')
   async createMerchantPsp(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
@@ -1617,7 +1527,7 @@ export class MerchantProfilesController {
   }
 
   @authenticate('jwt')
-  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
+  @authorize({roles: ['merchant']})
   @patch('/merchant-profiles/kyc-psp')
   async updateMerchantPsp(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
@@ -1700,7 +1610,7 @@ export class MerchantProfilesController {
   }
 
   @authenticate('jwt')
-  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
+  @authorize({roles: ['merchant']})
   @post('/merchant-profiles/kyc-address-details')
   async uploadMerchantKycAddressDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
@@ -1783,7 +1693,7 @@ export class MerchantProfilesController {
   }
 
   @authenticate('jwt')
-  @authorize({roles: ['merchant'], allowedScopes: ['kyc_onboarding']})
+  @authorize({roles: ['merchant']})
   @patch('/merchant-profiles/kyc-address-details')
   async patchMerchantKycAddressDetails(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,

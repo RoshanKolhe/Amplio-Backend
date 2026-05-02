@@ -28,7 +28,6 @@ export class BankDetailsController {
   @authenticate('jwt')
   @authorize({
     roles: ['super_admin', 'company', 'trustee', 'investor', 'merchant'],
-    allowedScopes: ['kyc_onboarding'],
   })
   @get('/bank-details/get-by-ifsc/{ifscCode}')
   async fetchBankInfo(
@@ -45,7 +44,6 @@ export class BankDetailsController {
   @authenticate('jwt')
   @authorize({
     roles: ['super_admin', 'company', 'trustee', 'investor', 'merchant'],
-    allowedScopes: ['kyc_onboarding'],
   })
   @post('/bank-details/verify-account')
   @response(200, {
