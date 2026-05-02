@@ -1,6 +1,13 @@
 import {Entity, model, property} from '@loopback/repository';
 
-@model()
+@model({
+  settings: {
+    postgresql: {
+      table: 'consenttemplate',
+      schema: 'public',
+    },
+  },
+})
 export class ConsentTemplate extends Entity {
 
   @property({
@@ -15,15 +22,15 @@ export class ConsentTemplate extends Entity {
 
   @property({
     type: 'string',
-    required: 'true'
+    required: true,
   })
-  title: string
+  title: string;
 
   @property({
     type: 'string',
-    required: 'true'
+    required: true,
   })
-  content: string
+  content: string;
 
   @property({
     type: 'date',

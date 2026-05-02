@@ -36,6 +36,8 @@ export async function migrate(args: string[]) {
       'Screens',
       'DocumentScreens',
       'UserUploadedDocuments',
+      'ConsentTemplate',
+      'UsersConsent',
       'BankDetails',
       'AuthorizeSignatories',
       'AddressDetails',

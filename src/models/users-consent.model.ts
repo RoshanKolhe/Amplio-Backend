@@ -1,7 +1,14 @@
 import {Entity, model, property, belongsTo} from '@loopback/repository';
 import {ConsentTemplate} from './consent-template.model';
 
-@model()
+@model({
+  settings: {
+    postgresql: {
+      table: 'usersconsent',
+      schema: 'public',
+    },
+  },
+})
 export class UsersConsent extends Entity {
 
   @property({
