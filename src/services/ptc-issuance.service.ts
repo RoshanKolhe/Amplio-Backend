@@ -148,7 +148,7 @@ type InvestorSpvLedgerEntry = {
 
 export class PtcIssuanceService {
   private static readonly REDEMPTION_TIMEZONE = 'Asia/Kolkata';
-  private static readonly IST_REDEMPTION_DAY_INDEX = 2;
+  private static readonly DEFAULT_IST_REDEMPTION_DAY_INDEX = 2;
   private static readonly IST_OFFSET_MINUTES = 330;
   private static readonly IST_INTEREST_CUTOFF_HOUR = 20;
 
@@ -181,6 +181,13 @@ export class PtcIssuanceService {
 
   private normalizeAmount(value: number | undefined | null): number {
     return Number(Number(value ?? 0).toFixed(2));
+  }
+
+  private normalizeDecimal(
+    value: number | undefined | null,
+    fractionDigits: number,
+  ): number {
+    return Number(Number(value ?? 0).toFixed(fractionDigits));
   }
 
   private normalizeRate(value: number | undefined | null): number {
@@ -369,6 +376,33 @@ export class PtcIssuanceService {
     return istPseudoDate.getUTCHours();
   }
 
+  private getConfiguredRedemptionDayIndex(): number {
+    const rawValue = Number(
+      process.env.PTC_REDEMPTION_DAY_INDEX ??
+        PtcIssuanceService.DEFAULT_IST_REDEMPTION_DAY_INDEX,
+    );
+
+    if (!Number.isInteger(rawValue) || rawValue < 0 || rawValue > 6) {
+      return PtcIssuanceService.DEFAULT_IST_REDEMPTION_DAY_INDEX;
+    }
+
+    return rawValue;
+  }
+
+  private getRedemptionWeekdayLabel(dayIndex: number): string {
+    const weekdayLabels = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
+
+    return weekdayLabels[dayIndex] ?? 'Tuesday';
+  }
+
   private formatIstDateTime(date: Date): string {
     return new Intl.DateTimeFormat('en-IN', {
       timeZone: PtcIssuanceService.REDEMPTION_TIMEZONE,
@@ -379,9 +413,9 @@ export class PtcIssuanceService {
 
   private findNextRedemptionWindowStart(fromDate: Date): Date {
     const currentWeekday = this.getIstWeekdayIndex(fromDate);
+    const redemptionDayIndex = this.getConfiguredRedemptionDayIndex();
     const daysUntilRedemptionDay =
-      (PtcIssuanceService.IST_REDEMPTION_DAY_INDEX - currentWeekday + 7) % 7 ||
-      7;
+      (redemptionDayIndex - currentWeekday + 7) % 7 || 7;
     const istPseudoDate = this.toIstPseudoDate(fromDate);
     istPseudoDate.setUTCDate(istPseudoDate.getUTCDate() + daysUntilRedemptionDay);
     istPseudoDate.setUTCHours(0, 0, 0, 0);
@@ -425,20 +459,22 @@ export class PtcIssuanceService {
   private ensureRedemptionWindowOrFail(ptcParameters: PtcParameters): void {
     const now = new Date();
     const weekdayIndex = this.getIstWeekdayIndex(now);
+    const redemptionDayIndex = this.getConfiguredRedemptionDayIndex();
+    const redemptionDayLabel =
+      this.getRedemptionWeekdayLabel(redemptionDayIndex);
     const configuredHours = Number(ptcParameters.windowDurationHours ?? 24);
     const allowedHours = Math.max(1, Math.min(Math.trunc(configuredHours), 24));
     const hourOfDay = this.getIstHourOfDay(now);
-    const isMonday =
-      weekdayIndex === PtcIssuanceService.IST_REDEMPTION_DAY_INDEX;
+    const isRedemptionDay = weekdayIndex === redemptionDayIndex;
     const withinHours = hourOfDay < allowedHours;
 
-    if (isMonday && withinHours) {
+    if (isRedemptionDay && withinHours) {
       return;
     }
 
     const nextWindowStartsAt = this.findNextRedemptionWindowStart(now);
     throw new HttpErrors.BadRequest(
-      `Redemption window is closed. Redemptions are allowed every Tuesday for ${allowedHours} hour(s) in IST. Next window starts at ${this.formatIstDateTime(
+      `Redemption window is closed. Redemptions are allowed every ${redemptionDayLabel} for ${allowedHours} hour(s) in IST. Next window starts at ${this.formatIstDateTime(
         nextWindowStartsAt,
       )}.`,
     );
@@ -1007,47 +1043,51 @@ export class PtcIssuanceService {
     return Boolean(existingByTransaction);
   }
 
-  private async hasSnapshotForCurrentLifecycle(
-    investorProfileId: string,
-    spvId: string,
-    lifecycleStartAt: Date,
-    tx: unknown,
-  ): Promise<boolean> {
-    const existingSnapshot = await this.investorClosedInvestmentRepository.findOne(
-      {
-        where: {
-          and: [
-            {investorProfileId},
-            {spvId},
-            {status: InvestorClosedInvestmentStatus.CLOSED},
-            {isDeleted: false},
-            {closedAt: {gte: lifecycleStartAt}},
-          ],
-        },
-        order: ['closedAt DESC'],
-      },
-      this.getOptions(tx),
-    );
+  private allocateAmountAcrossUnitBuckets(
+    bucketUnits: number[],
+    unitAmount: number,
+    totalAmount: number,
+  ): number[] {
+    const allocations = bucketUnits.map(() => 0);
+    const positiveBucketIndexes = bucketUnits
+      .map((units, index) => ({index, units}))
+      .filter(bucket => bucket.units > 0);
+    let remainingAmount = this.normalizeAmount(totalAmount);
 
-    return Boolean(existingSnapshot);
+    if (positiveBucketIndexes.length === 0) {
+      if (remainingAmount !== 0) {
+        throw new HttpErrors.Conflict('Amount allocation mismatch');
+      }
+
+      return allocations;
+    }
+
+    positiveBucketIndexes.forEach((bucket, position) => {
+      if (position === positiveBucketIndexes.length - 1) {
+        allocations[bucket.index] = Math.max(this.normalizeAmount(remainingAmount), 0);
+        remainingAmount = 0;
+        return;
+      }
+
+      const rawAllocation = this.normalizeAmount(bucket.units * unitAmount);
+      const allocation = Math.min(Math.max(rawAllocation, 0), remainingAmount);
+      allocations[bucket.index] = allocation;
+      remainingAmount = this.normalizeAmount(remainingAmount - allocation);
+    });
+
+    if (this.normalizeAmount(remainingAmount) !== 0) {
+      throw new HttpErrors.Conflict('Unable to allocate redemption amount');
+    }
+
+    return allocations;
   }
 
-  private async createClosedInvestmentSnapshotOnFullRedemption(
+  private async createClosedInvestmentRecordOnRedemption(
     payload: ClosedInvestmentSnapshotPayload,
     tx: unknown,
   ): Promise<void> {
     const investorProfileId = payload.request.investorProfileId;
     const spvId = payload.request.spvId;
-
-    const remainingUnits = await this.fetchInvestorOwnedUnits(
-      investorProfileId,
-      spvId,
-      tx,
-    );
-
-    if (remainingUnits > 0) {
-      return;
-    }
 
     const hasExistingSnapshot = await this.hasExistingClosedInvestmentSnapshot(
       payload.request.id,
@@ -1059,120 +1099,30 @@ export class PtcIssuanceService {
       return;
     }
 
-    const redemptionLedgers = await this.fetchInvestorLedgerHistoryForSpv(
-      investorProfileId,
-      spvId,
-      InvestorEscrowLedgerType.REDEMPTION_CREDIT,
-      tx,
+    const soldHoldings = payload.holdingsBreakdown.filter(
+      holding => Number(holding.redeemedUnits ?? 0) > 0,
     );
 
-    if (redemptionLedgers.length === 0) {
+    if (!soldHoldings.length) {
       return;
     }
 
-    const buyLedgers = await this.fetchInvestorLedgerHistoryForSpv(
-      investorProfileId,
-      spvId,
-      InvestorEscrowLedgerType.BUY_DEBIT,
-      tx,
-    );
-
-    const buyDateCandidates = buyLedgers
-      .map(ledger => ledger.createdAt)
-      .filter(date => !Number.isNaN(date.getTime()));
-    const holdingDateCandidates = payload.holdingsBreakdown
+    const holdingDateCandidates = soldHoldings
       .map(holding => (holding.createdAt ? new Date(holding.createdAt) : null))
       .filter((date): date is Date => Boolean(date && !Number.isNaN(date.getTime())));
-    const lifecycleStartDateCandidates = [
-      ...buyDateCandidates,
-      ...holdingDateCandidates,
-    ];
-
     const startDate =
-      lifecycleStartDateCandidates.length > 0
+      holdingDateCandidates.length > 0
         ? new Date(
-            Math.min(...lifecycleStartDateCandidates.map(date => date.getTime())),
+            Math.min(...holdingDateCandidates.map(date => date.getTime())),
           )
         : new Date();
-
-    const hasLifecycleSnapshot = await this.hasSnapshotForCurrentLifecycle(
-      investorProfileId,
-      spvId,
-      startDate,
-      tx,
-    );
-
-    if (hasLifecycleSnapshot) {
-      return;
-    }
-
-    let totalUnits = 0;
-    let totalPrincipalPayout = 0;
-    let totalInterestPayout = 0;
-    let totalStampDutyAmount = 0;
-    let totalNetPayout = 0;
-    let totalGrossPayout = 0;
-    let totalCapitalGain = 0;
-
-    for (const ledger of redemptionLedgers) {
-      const metadata = ledger.metadata;
-      const redeemedUnits = this.toFiniteNumber(
-        metadata.units ?? metadata.redeemedUnits,
-      );
-      const principalPayout = this.toFiniteNumber(metadata.principalPayout);
-      const interestPayout = this.toFiniteNumber(metadata.interestPayout);
-      const stampDutyAmount = this.toFiniteNumber(metadata.stampDutyAmount);
-      const capitalGain = this.toFiniteNumber(metadata.capitalGain);
-      const grossPayoutCandidate = this.toFiniteNumber(metadata.grossPayout);
-      const grossPayout =
-        grossPayoutCandidate > 0
-          ? grossPayoutCandidate
-          : principalPayout + interestPayout;
-
-      totalUnits += redeemedUnits;
-      totalPrincipalPayout += principalPayout;
-      totalInterestPayout += interestPayout;
-      totalStampDutyAmount += stampDutyAmount;
-      totalNetPayout += this.toFiniteNumber(ledger.amount);
-      totalGrossPayout += grossPayout;
-      totalCapitalGain += capitalGain;
-    }
-
-    const totalInvestedAmount = buyLedgers.length
-      ? this.normalizeAmount(
-          buyLedgers.reduce(
-            (sum, ledger) => sum + this.toFiniteNumber(ledger.amount),
-            0,
-          ),
-        )
-      : this.normalizeAmount(payload.redeemedCostBasis);
-
-    const latestRedemptionLedger =
-      redemptionLedgers[redemptionLedgers.length - 1] ?? null;
-    const closedAt = latestRedemptionLedger?.createdAt ?? new Date();
-    const latestRedemptionMetadata = latestRedemptionLedger?.metadata ?? {};
-    const annualInterestRate = this.normalizeRate(
-      this.toFiniteNumber(
-        latestRedemptionMetadata.annualInterestRate ?? payload.annualInterestRate,
-      ),
-    );
-
-    const lifecycleHoldings = await this.investorPtcHoldingRepository.find(
-      {
-        where: {
-          and: [{investorProfileId}, {spvId}, {isDeleted: false}],
-        },
-        fields: {ptcIssuanceId: true, usersId: true},
-      },
-      this.getOptions(tx),
-    );
+    const closedAt = new Date();
+    const annualInterestRate = this.normalizeRate(payload.annualInterestRate);
 
     const uniquePtcIssuanceIds = Array.from(
       new Set(
-        [
-          ...lifecycleHoldings.map(holding => holding.ptcIssuanceId),
-          ...payload.holdingsBreakdown.map(holding => holding.ptcIssuanceId),
-        ]
+        soldHoldings
+          .map(holding => holding.ptcIssuanceId)
           .filter((id): id is string => Boolean(id)),
       ),
     );
@@ -1187,33 +1137,34 @@ export class PtcIssuanceService {
       this.getOptions(tx),
     );
 
-    const usersIdFromHoldings =
-      lifecycleHoldings.find(holding => holding.usersId)?.usersId ??
-      payload.holdingsBreakdown.find(holding => holding.usersId)?.usersId ??
-      null;
+    const usersIdFromHoldings = soldHoldings.find(holding => holding.usersId)?.usersId ?? null;
     const usersId = usersIdFromHoldings ?? investorProfile.usersId ?? payload.processedBy;
 
-    const normalizedTotalUnits = Math.max(Math.round(totalUnits), 0);
-    const normalizedPrincipalPayout = this.normalizeAmount(totalPrincipalPayout);
-    const normalizedInterestPayout = this.normalizeAmount(totalInterestPayout);
-    const normalizedStampDutyAmount = this.normalizeAmount(totalStampDutyAmount);
-    const normalizedNetPayout = this.normalizeAmount(totalNetPayout);
-    const normalizedGrossPayout = this.normalizeAmount(totalGrossPayout);
-    const normalizedCapitalGain = this.normalizeAmount(totalCapitalGain);
+    const normalizedTotalUnits = Math.max(Math.round(payload.redeemedUnits), 0);
+    const normalizedTotalInvestedAmount = this.normalizeAmount(payload.redeemedCostBasis);
+    const normalizedPrincipalPayout = this.normalizeAmount(payload.principalPayout);
+    const normalizedInterestPayout = this.normalizeAmount(payload.interestPayout);
+    const normalizedStampDutyAmount = this.normalizeAmount(payload.stampDutyAmount);
+    const normalizedNetPayout = this.normalizeAmount(payload.netPayout);
+    const normalizedGrossPayout = this.normalizeAmount(payload.grossPayout);
+    const normalizedCapitalGain = this.normalizeAmount(payload.capitalGain);
     const resolvedPoolFinancialsIdRaw = String(
-      latestRedemptionMetadata.poolFinancialsId ?? payload.poolFinancialsId ?? '',
+      payload.poolFinancialsId ??
+        soldHoldings.find(holding => holding.poolFinancialsId)?.poolFinancialsId ??
+        '',
     ).trim();
     const resolvedPoolFinancialsId = resolvedPoolFinancialsIdRaw || undefined;
 
     await this.investorClosedInvestmentRepository.create(
       {
+        id: uuidv4(),
         investorProfileId,
         usersId,
         spvId,
         poolFinancialsId: resolvedPoolFinancialsId,
         ptcIssuanceIds: uniquePtcIssuanceIds,
         totalUnits: normalizedTotalUnits,
-        totalInvestedAmount,
+        totalInvestedAmount: normalizedTotalInvestedAmount,
         totalRedeemedAmount: normalizedGrossPayout,
         principalPayout: normalizedPrincipalPayout,
         interestPayout: normalizedInterestPayout,
@@ -1232,11 +1183,10 @@ export class PtcIssuanceService {
           spvId,
           redemptionRequestId: payload.request.id,
           transactionId: payload.transactionId,
-          aggregatedFromAllRedemptions: true,
-          redemptionLedgerCount: redemptionLedgers.length,
-          buyLedgerCount: buyLedgers.length,
-          totalUnitsRedeemed: normalizedTotalUnits,
-          totalInvestedAmount,
+          unitsSold: normalizedTotalUnits,
+          saleAmount: normalizedPrincipalPayout,
+          costBasis: normalizedTotalInvestedAmount,
+          profitLoss: normalizedCapitalGain,
           totalPrincipalPayout: normalizedPrincipalPayout,
           totalInterestPayout: normalizedInterestPayout,
           totalGrossPayout: normalizedGrossPayout,
@@ -1244,11 +1194,14 @@ export class PtcIssuanceService {
           totalCapitalGain: normalizedCapitalGain,
           totalStampDutyAmount: normalizedStampDutyAmount,
           annualInterestRate,
-          holdingsBreakdown: payload.holdingsBreakdown,
+          holdingsBreakdown: soldHoldings,
           generatedBy: payload.processedBy,
+          createdAt: closedAt.toISOString(),
         },
         isActive: true,
         isDeleted: false,
+        createdAt: closedAt,
+        updatedAt: closedAt,
       },
       this.getOptions(tx),
     );
@@ -1679,6 +1632,38 @@ export class PtcIssuanceService {
       const pool = await this.fetchPoolForSpvOrFail(request.spvId, tx);
       const annualInterestRate = Number(pool.targetYield ?? 0);
       const dailyInterestRate = Math.max(annualInterestRate, 0) / 100 / 365;
+      const activeHoldings = holdings.filter(
+        holding => Number(holding.ownedUnits ?? 0) > 0,
+      );
+      const totalOwnedUnitsBefore = activeHoldings.reduce(
+        (sum, holding) => sum + Number(holding.ownedUnits ?? 0),
+        0,
+      );
+      const totalInvestedAmountBefore = this.normalizeAmount(
+        activeHoldings.reduce(
+          (sum, holding) => sum + Number(holding.investedAmount ?? 0),
+          0,
+        ),
+      );
+
+      if (totalOwnedUnitsBefore < normalizedRequestedUnits) {
+        throw new HttpErrors.Conflict('Redemption holdings mismatch');
+      }
+
+      const averageCostPerUnit =
+        totalOwnedUnitsBefore > 0
+          ? this.normalizeDecimal(
+              totalInvestedAmountBefore / totalOwnedUnitsBefore,
+              8,
+            )
+          : 0;
+      const normalizedUnitPrice = this.normalizeAmount(request.unitPrice);
+      const totalCostBasis = this.normalizeAmount(
+        averageCostPerUnit * normalizedRequestedUnits,
+      );
+      const totalPrincipalPayout = this.normalizeAmount(
+        normalizedRequestedUnits * normalizedUnitPrice,
+      );
 
       let unitsToRedeem = normalizedRequestedUnits;
       let principalPayout = 0;
@@ -1686,46 +1671,82 @@ export class PtcIssuanceService {
       let redeemedCostBasis = 0;
       let interestPayout = 0;
       const redeemedHoldingsBreakdown: RedemptionHoldingBreakdown[] = [];
-
-      // Holdings are reduced using FIFO (first purchased, first sold)
-      for (const holding of holdings) {
-        if (unitsToRedeem <= 0) {
-          break;
-        }
-
+      const holdingRedemptionPlan = holdings.map(holding => {
         const ownedUnits = Number(holding.ownedUnits ?? 0);
-
-        if (ownedUnits <= 0) {
-          continue;
+        if (unitsToRedeem <= 0 || ownedUnits <= 0) {
+          return {
+            holding,
+            ownedUnits,
+            redeemedUnits: 0,
+            nextOwnedUnits: ownedUnits,
+          };
         }
 
         const redeemedUnits = Math.min(unitsToRedeem, ownedUnits);
-        const investedPerUnit =
-          ownedUnits > 0
-            ? this.normalizeAmount(Number(holding.investedAmount ?? 0) / ownedUnits)
-            : 0;
         const nextOwnedUnits = ownedUnits - redeemedUnits;
+        unitsToRedeem -= redeemedUnits;
+
+        return {
+          holding,
+          ownedUnits,
+          redeemedUnits,
+          nextOwnedUnits,
+        };
+      });
+
+      if (unitsToRedeem !== 0) {
+        throw new HttpErrors.Conflict('Redemption holdings mismatch');
+      }
+
+      const redeemedCostAllocations = this.allocateAmountAcrossUnitBuckets(
+        holdingRedemptionPlan.map(planItem => planItem.redeemedUnits),
+        averageCostPerUnit,
+        totalCostBasis,
+      );
+      const remainingInvestedAmount = Math.max(
+        this.normalizeAmount(totalInvestedAmountBefore - totalCostBasis),
+        0,
+      );
+      const remainingInvestedAllocations = this.allocateAmountAcrossUnitBuckets(
+        holdingRedemptionPlan.map(planItem => planItem.nextOwnedUnits),
+        averageCostPerUnit,
+        remainingInvestedAmount,
+      );
+      const principalAllocations = this.allocateAmountAcrossUnitBuckets(
+        holdingRedemptionPlan.map(planItem => planItem.redeemedUnits),
+        normalizedUnitPrice,
+        totalPrincipalPayout,
+      );
+
+      for (const [index, planItem] of holdingRedemptionPlan.entries()) {
+        const {holding, ownedUnits, redeemedUnits, nextOwnedUnits} = planItem;
+        const redeemedCostForHolding = redeemedCostAllocations[index] ?? 0;
+        const remainingInvestedForHolding =
+          remainingInvestedAllocations[index] ?? 0;
 
         if (nextOwnedUnits < 0) {
           throw new HttpErrors.Conflict('Holding units cannot become negative');
+        }
+
+        if (remainingInvestedForHolding < 0) {
+          throw new HttpErrors.Conflict('Holding invested amount cannot become negative');
         }
 
         await this.investorPtcHoldingRepository.updateById(
           holding.id,
           {
             ownedUnits: nextOwnedUnits,
-            investedAmount: this.normalizeAmount(nextOwnedUnits * investedPerUnit),
+            investedAmount: remainingInvestedForHolding,
             isActive: nextOwnedUnits > 0,
           },
           this.getOptions(tx),
         );
 
-        const redeemedPrincipal = this.normalizeAmount(
-          redeemedUnits * this.normalizeAmount(request.unitPrice),
-        );
-        const redeemedCostForHolding = this.normalizeAmount(
-          redeemedUnits * investedPerUnit,
-        );
+        if (redeemedUnits <= 0) {
+          continue;
+        }
+
+        const redeemedPrincipal = principalAllocations[index] ?? 0;
         const accruedDays = this.calculateAccruedInterestDays(
           holding.createdAt ? new Date(holding.createdAt) : undefined,
         );
@@ -1746,7 +1767,7 @@ export class PtcIssuanceService {
           unitsBefore: ownedUnits,
           redeemedUnits,
           unitsAfter: nextOwnedUnits,
-          investedPerUnit,
+          investedPerUnit: averageCostPerUnit,
           redeemedCostBasis: redeemedCostForHolding,
           principalPayout: redeemedPrincipal,
           interestPayout: interestForHolding,
@@ -1755,20 +1776,15 @@ export class PtcIssuanceService {
             ? new Date(holding.createdAt).toISOString()
             : null,
         });
-        unitsToRedeem -= redeemedUnits;
-      }
-
-      if (unitsToRedeem !== 0) {
-        throw new HttpErrors.Conflict('Redemption holdings mismatch');
       }
 
       grossPayout = this.normalizeAmount(principalPayout + interestPayout);
       const balanceBefore = this.normalizeAmount(investorWallet.currentBalance);
-      const capitalGain = this.normalizeAmount(
-        Math.max(principalPayout - redeemedCostBasis, 0),
-      );
+      const capitalGain = this.normalizeAmount(principalPayout - redeemedCostBasis);
       const stampDutyRate = this.getConfiguredRedemptionStampDutyRate();
-      const stampDutyAmount = this.normalizeAmount(capitalGain * stampDutyRate);
+      const stampDutyAmount = this.normalizeAmount(
+        Math.max(capitalGain, 0) * stampDutyRate,
+      );
       const netPayout = this.normalizeAmount(
         Math.max(grossPayout - stampDutyAmount, 0),
       );
@@ -1805,6 +1821,7 @@ export class PtcIssuanceService {
             grossPayout,
             redeemedCostBasis,
             capitalGain,
+            averageCostPerUnit,
             stampDutyRate,
             stampDutyAmount,
             netPayout,
@@ -1815,7 +1832,7 @@ export class PtcIssuanceService {
         tx,
       );
 
-      await this.createClosedInvestmentSnapshotOnFullRedemption(
+      await this.createClosedInvestmentRecordOnRedemption(
         {
           request,
           transactionId,

@@ -214,6 +214,30 @@ export class InvestorInvestmentsService {
     return Number(Number(value ?? 0).toFixed(2));
   }
 
+  private resolveClosedInvestmentProfitLoss(investment: {
+    capitalGain?: number | null;
+    metadata?: object;
+    netPayout?: number | null;
+    totalInvestedAmount?: number | null;
+  }): number {
+    const metadata =
+      investment.metadata && typeof investment.metadata === 'object'
+        ? (investment.metadata as {profitLoss?: number | string | null})
+        : undefined;
+    const explicitProfitLoss = Number(
+      investment.capitalGain ?? metadata?.profitLoss,
+    );
+
+    if (Number.isFinite(explicitProfitLoss)) {
+      return this.normalizeAmount(explicitProfitLoss);
+    }
+
+    return this.normalizeAmount(
+      Number(investment.netPayout ?? 0) -
+        Number(investment.totalInvestedAmount ?? 0),
+    );
+  }
+
   private toIstPseudoDate(date: Date): Date {
     const offsetMs = InvestorInvestmentsService.IST_OFFSET_MINUTES * 60 * 1000;
     return new Date(date.getTime() + offsetMs);
@@ -715,9 +739,7 @@ export class InvestorInvestmentsService {
     const totalEarningsAcrossClosures = this.normalizeAmount(
       closedInvestments.reduce(
         (sum, investment) =>
-          sum +
-          (Number(investment.netPayout ?? 0) -
-            Number(investment.totalInvestedAmount ?? 0)),
+          sum + this.resolveClosedInvestmentProfitLoss(investment),
         0,
       ),
     );
@@ -799,7 +821,9 @@ export class InvestorInvestmentsService {
       featuredClosedInvestment.totalInvestedAmount,
     );
     const netPayout = this.normalizeAmount(featuredClosedInvestment.netPayout);
-    const totalProfit = this.normalizeAmount(netPayout - investedAmount);
+    const totalProfit = this.resolveClosedInvestmentProfitLoss(
+      featuredClosedInvestment,
+    );
     const considerationPerUnit =
       totalUnits > 0 ? this.normalizeAmount(investedAmount / totalUnits) : 0;
     const stampDutyPerUnit =
@@ -1112,9 +1136,8 @@ export class InvestorInvestmentsService {
         interestPayout: this.normalizeAmount(investment.interestPayout),
         stampDutyAmount: this.normalizeAmount(investment.stampDutyAmount),
         capitalGain: this.normalizeAmount(investment.capitalGain),
-        totalProfit: this.normalizeAmount(
-          Number(investment.netPayout ?? 0) -
-            Number(investment.totalInvestedAmount ?? 0),
+        totalProfit: this.resolveClosedInvestmentProfitLoss(
+          investment,
         ),
         annualInterestRate: Number(
           Number(investment.annualInterestRate ?? 0).toFixed(4),

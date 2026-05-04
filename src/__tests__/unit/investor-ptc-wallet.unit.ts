@@ -761,7 +761,7 @@ describe('Investor PTC buy and wallet hardening', () => {
     expect(result.remainingUnits).to.equal(8);
   });
 
-  it('does not create a closed snapshot for partial redemptions', async () => {
+  it('creates a closed snapshot for partial redemptions', async () => {
     const {service, holdings, closedInvestments} = createPtcServiceFixture({
       holdings: [
         {
@@ -793,8 +793,80 @@ describe('Investor PTC buy and wallet hardening', () => {
     );
 
     expect(result.redeemedUnits).to.equal(4);
-    expect(closedInvestments).to.have.length(0);
+    expect(closedInvestments).to.have.length(1);
+    expect(closedInvestments[0].totalUnits).to.equal(4);
+    expect(closedInvestments[0].totalInvestedAmount).to.equal(400);
+    expect(closedInvestments[0].transactionId).to.equal(
+      'partial-redemption-transaction',
+    );
     expect(holdings[0].ownedUnits).to.equal(6);
+    expect(holdings[0].investedAmount).to.equal(600);
+  });
+
+  it('uses average cost basis for partial redemptions and keeps holdings reconciled', async () => {
+    const {service, holdings, closedInvestments} = createPtcServiceFixture({
+      holdings: [
+        {
+          id: 'holding-1',
+          ptcIssuanceId: 'issuance-1',
+          investorProfileId: '33333333-3333-4333-8333-333333333333',
+          usersId: investorUser.id,
+          spvId: '55555555-5555-4555-8555-555555555555',
+          poolFinancialsId: '66666666-6666-4666-8666-666666666666',
+          ownedUnits: 4,
+          investedAmount: 400,
+          isDeleted: false,
+          createdAt: new Date('2026-03-01T00:00:00.000Z'),
+        },
+        {
+          id: 'holding-2',
+          ptcIssuanceId: 'issuance-2',
+          investorProfileId: '33333333-3333-4333-8333-333333333333',
+          usersId: investorUser.id,
+          spvId: '55555555-5555-4555-8555-555555555555',
+          poolFinancialsId: '66666666-6666-4666-8666-666666666666',
+          ownedUnits: 6,
+          investedAmount: 900,
+          isDeleted: false,
+          createdAt: new Date('2026-04-01T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    await service.processPendingRedemption(
+      {
+        id: 'avg-cost-redemption-request',
+        investorProfileId: '33333333-3333-4333-8333-333333333333',
+        spvId: '55555555-5555-4555-8555-555555555555',
+        units: 2,
+        unitPrice: 100,
+        status: 'PENDING',
+        transactionId: 'avg-cost-redemption-transaction',
+      },
+      investorUser.id,
+    );
+
+    expect(closedInvestments).to.have.length(1);
+    expect(closedInvestments[0].totalInvestedAmount).to.equal(260);
+    expect(closedInvestments[0].metadata).to.containDeep({
+      unitsSold: 2,
+      saleAmount: 200,
+      costBasis: 260,
+      profitLoss: -60,
+    });
+    expect(holdings[0].ownedUnits).to.equal(2);
+    expect(holdings[0].investedAmount).to.equal(260);
+    expect(holdings[1].ownedUnits).to.equal(6);
+    expect(holdings[1].investedAmount).to.equal(780);
+    expect(
+      holdings.reduce(
+        (sum, holding) => sum + Number(holding.investedAmount ?? 0),
+        0,
+      ),
+    ).to.equal(1040);
+    expect(
+      holdings.reduce((sum, holding) => sum + Number(holding.ownedUnits ?? 0), 0),
+    ).to.equal(8);
   });
 
   it('creates a closed snapshot exactly once on full redemption', async () => {
