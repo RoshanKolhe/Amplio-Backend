@@ -1618,7 +1618,12 @@ export class PtcIssuanceService {
       }
 
       await this.lockInvestorWalletRow(request.investorProfileId, tx);
-      await this.lockInvestorInventoryRows(request.investorProfileId, request.spvId, [], tx);
+      await this.lockInvestorInventoryRows(
+        request.investorProfileId,
+        request.spvId,
+        [],
+        tx,
+      );
 
       const investorWallet = await this.fetchInvestorWalletOrFail(
         request.investorProfileId,
@@ -1628,6 +1633,32 @@ export class PtcIssuanceService {
         request.investorProfileId,
         request.spvId,
         tx,
+      );
+      const issuanceIdsToLock = Array.from(
+        new Set(
+          holdings
+            .map(holding => holding.ptcIssuanceId)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      );
+      await this.lockInvestorInventoryRows(
+        request.investorProfileId,
+        request.spvId,
+        issuanceIdsToLock,
+        tx,
+      );
+      const lockedIssuances = issuanceIdsToLock.length
+        ? await this.ptcIssuanceRepository.find(
+            {
+              where: {
+                and: [{id: {inq: issuanceIdsToLock}}, {isDeleted: false}],
+              },
+            },
+            this.getOptions(tx),
+          )
+        : [];
+      const issuanceById = new Map(
+        lockedIssuances.map(issuance => [issuance.id, issuance] as const),
       );
       const pool = await this.fetchPoolForSpvOrFail(request.spvId, tx);
       const annualInterestRate = Number(pool.targetYield ?? 0);
@@ -1723,6 +1754,7 @@ export class PtcIssuanceService {
         const redeemedCostForHolding = redeemedCostAllocations[index] ?? 0;
         const remainingInvestedForHolding =
           remainingInvestedAllocations[index] ?? 0;
+        const issuance = issuanceById.get(holding.ptcIssuanceId);
 
         if (nextOwnedUnits < 0) {
           throw new HttpErrors.Conflict('Holding units cannot become negative');
@@ -1730,6 +1762,10 @@ export class PtcIssuanceService {
 
         if (remainingInvestedForHolding < 0) {
           throw new HttpErrors.Conflict('Holding invested amount cannot become negative');
+        }
+
+        if (redeemedUnits > 0 && !issuance) {
+          throw new HttpErrors.Conflict('PTC issuance not found for redeemed holding');
         }
 
         await this.investorPtcHoldingRepository.updateById(
@@ -1744,6 +1780,41 @@ export class PtcIssuanceService {
 
         if (redeemedUnits <= 0) {
           continue;
+        }
+
+        const issuanceSoldUnits = Number(issuance?.soldUnits ?? 0);
+        const issuanceRemainingUnits = Number(issuance?.remainingUnits ?? 0);
+        const issuanceTotalUnits = Number(issuance?.totalUnits ?? 0);
+        const nextIssuanceSoldUnits = issuanceSoldUnits - redeemedUnits;
+        const nextIssuanceRemainingUnits = issuanceRemainingUnits + redeemedUnits;
+
+        if (nextIssuanceSoldUnits < 0) {
+          throw new HttpErrors.Conflict('PTC issuance sold units cannot become negative');
+        }
+
+        if (
+          issuanceTotalUnits > 0 &&
+          nextIssuanceRemainingUnits > issuanceTotalUnits
+        ) {
+          throw new HttpErrors.Conflict(
+            'PTC issuance remaining units cannot exceed total units',
+          );
+        }
+
+        await this.ptcIssuanceRepository.updateById(
+          holding.ptcIssuanceId,
+          {
+            soldUnits: nextIssuanceSoldUnits,
+            remainingUnits: nextIssuanceRemainingUnits,
+            status: nextIssuanceRemainingUnits === 0 ? 'SOLD_OUT' : 'ACTIVE',
+          },
+          this.getOptions(tx),
+        );
+        if (issuance) {
+          issuance.soldUnits = nextIssuanceSoldUnits;
+          issuance.remainingUnits = nextIssuanceRemainingUnits;
+          issuance.status =
+            nextIssuanceRemainingUnits === 0 ? 'SOLD_OUT' : 'ACTIVE';
         }
 
         const redeemedPrincipal = principalAllocations[index] ?? 0;

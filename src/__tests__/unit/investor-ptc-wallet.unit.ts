@@ -29,6 +29,7 @@ describe('Investor PTC buy and wallet hardening', () => {
     currentBalance?: number;
     blockedBalance?: number;
     remainingUnits?: number;
+    issuances?: Array<Record<string, unknown>>;
     holdings?: Array<Record<string, unknown>>;
     closedInvestments?: Array<Record<string, unknown>>;
   }) {
@@ -44,20 +45,68 @@ describe('Investor PTC buy and wallet hardening', () => {
       isActive: true,
       isDeleted: false,
     };
-    const issuances = [
-      {
-        id: '44444444-4444-4444-8444-444444444444',
-        spvId: '55555555-5555-4555-8555-555555555555',
-        poolFinancialsId: '66666666-6666-4666-8666-666666666666',
-        unitPrice: 100,
-        totalUnits: options?.remainingUnits ?? 10,
-        soldUnits: 0,
-        remainingUnits: options?.remainingUnits ?? 10,
-        isActive: true,
-        isDeleted: false,
-      },
-    ];
     const holdings: Array<Record<string, unknown>> = options?.holdings ?? [];
+    type FixtureIssuance = {
+      id: string;
+      spvId: string;
+      poolFinancialsId: string;
+      unitPrice: number;
+      totalUnits: number;
+      soldUnits: number;
+      remainingUnits: number;
+      isActive: boolean;
+      isDeleted: boolean;
+    };
+    const issuances =
+      options?.issuances ??
+      (holdings.length
+        ? Array.from(
+            holdings.reduce((map, holding) => {
+              const issuanceId = String(holding.ptcIssuanceId ?? '').trim();
+              if (!issuanceId) {
+                return map;
+              }
+
+              const existing = map.get(issuanceId);
+              const ownedUnits = Number(holding.ownedUnits ?? 0);
+              if (existing) {
+                existing.totalUnits += ownedUnits;
+                existing.soldUnits += ownedUnits;
+                return map;
+              }
+
+              map.set(issuanceId, {
+                id: issuanceId,
+                spvId:
+                  String(holding.spvId ?? '').trim() ||
+                  '55555555-5555-4555-8555-555555555555',
+                poolFinancialsId:
+                  String(holding.poolFinancialsId ?? '').trim() ||
+                  '66666666-6666-4666-8666-666666666666',
+                unitPrice: 100,
+                totalUnits: ownedUnits,
+                soldUnits: ownedUnits,
+                remainingUnits: 0,
+                isActive: true,
+                isDeleted: false,
+              });
+
+              return map;
+            }, new Map<string, FixtureIssuance>()).values(),
+          )
+        : [
+            {
+              id: '44444444-4444-4444-8444-444444444444',
+              spvId: '55555555-5555-4555-8555-555555555555',
+              poolFinancialsId: '66666666-6666-4666-8666-666666666666',
+              unitPrice: 100,
+              totalUnits: options?.remainingUnits ?? 10,
+              soldUnits: 0,
+              remainingUnits: options?.remainingUnits ?? 10,
+              isActive: true,
+              isDeleted: false,
+            },
+          ]);
     const ledgers: Array<Record<string, unknown>> = [];
     const closedInvestments: Array<Record<string, unknown>> =
       options?.closedInvestments ?? [];
@@ -111,7 +160,36 @@ describe('Investor PTC buy and wallet hardening', () => {
       }),
     };
     const ptcIssuanceRepository = {
-      find: sinon.stub().resolves(issuances),
+      find: sinon.stub().callsFake((filter?: {where?: {and?: object[]}}) => {
+        const conditions = filter?.where?.and ?? [];
+        const idCondition = conditions.find(condition =>
+          Object.prototype.hasOwnProperty.call(condition, 'id'),
+        ) as {id?: {inq?: string[]}};
+        const spvCondition = conditions.find(condition =>
+          Object.prototype.hasOwnProperty.call(condition, 'spvId'),
+        ) as {spvId?: string};
+        const poolCondition = conditions.find(condition =>
+          Object.prototype.hasOwnProperty.call(condition, 'poolFinancialsId'),
+        ) as {poolFinancialsId?: string};
+
+        let rows = issuances;
+
+        if (idCondition?.id?.inq?.length) {
+          rows = rows.filter(issuance => idCondition.id?.inq?.includes(String(issuance.id)));
+        }
+
+        if (spvCondition?.spvId) {
+          rows = rows.filter(issuance => issuance.spvId === spvCondition.spvId);
+        }
+
+        if (poolCondition?.poolFinancialsId) {
+          rows = rows.filter(
+            issuance => issuance.poolFinancialsId === poolCondition.poolFinancialsId,
+          );
+        }
+
+        return Promise.resolve(rows);
+      }),
       updateById: sinon.stub().callsFake((id: string, data: object) => {
         Object.assign(issuances.find(issuance => issuance.id === id)!, data);
       }),
@@ -260,6 +338,7 @@ describe('Investor PTC buy and wallet hardening', () => {
     return {
       service,
       wallet,
+      issuances,
       ledgers,
       holdings,
       closedInvestments,
@@ -867,6 +946,66 @@ describe('Investor PTC buy and wallet hardening', () => {
     expect(
       holdings.reduce((sum, holding) => sum + Number(holding.ownedUnits ?? 0), 0),
     ).to.equal(8);
+  });
+
+  it('restocks redeemed PTC units back to issuance inventory so they can be bought again', async () => {
+    const {service, holdings, issuances} = createPtcServiceFixture({
+      issuances: [
+        {
+          id: '44444444-4444-4444-8444-444444444444',
+          spvId: '55555555-5555-4555-8555-555555555555',
+          poolFinancialsId: '66666666-6666-4666-8666-666666666666',
+          unitPrice: 100,
+          totalUnits: 10,
+          soldUnits: 10,
+          remainingUnits: 0,
+          isActive: true,
+          isDeleted: false,
+        },
+      ],
+      holdings: [
+        {
+          id: 'restock-holding',
+          ptcIssuanceId: '44444444-4444-4444-8444-444444444444',
+          investorProfileId: '33333333-3333-4333-8333-333333333333',
+          usersId: investorUser.id,
+          spvId: '55555555-5555-4555-8555-555555555555',
+          poolFinancialsId: '66666666-6666-4666-8666-666666666666',
+          ownedUnits: 10,
+          investedAmount: 1000,
+          isDeleted: false,
+          createdAt: new Date('2026-04-01T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    await service.processPendingRedemption(
+      {
+        id: 'restock-redemption-request',
+        investorProfileId: '33333333-3333-4333-8333-333333333333',
+        spvId: '55555555-5555-4555-8555-555555555555',
+        units: 4,
+        unitPrice: 100,
+        status: 'PENDING',
+        transactionId: 'restock-redemption-transaction',
+      },
+      investorUser.id,
+    );
+
+    expect(issuances[0].remainingUnits).to.equal(4);
+    expect(issuances[0].soldUnits).to.equal(6);
+    expect(holdings[0].ownedUnits).to.equal(6);
+
+    const buyResult = await service.buyUnits(
+      investorUser,
+      '55555555-5555-4555-8555-555555555555',
+      4,
+    );
+
+    expect(buyResult.allocatedUnits).to.equal(4);
+    expect(issuances[0].remainingUnits).to.equal(0);
+    expect(issuances[0].soldUnits).to.equal(10);
+    expect(holdings[0].ownedUnits).to.equal(10);
   });
 
   it('creates a closed snapshot exactly once on full redemption', async () => {
