@@ -158,6 +158,7 @@ type CreditRatingLookup = {
   };
   creditRatingAgencies?: {
     name?: string;
+    value?: string;
   };
 };
 
@@ -365,10 +366,13 @@ export class InvestorInvestmentsService {
 
     return {
       rating:
-        ratingJson?.creditRatings?.value ??
         ratingJson?.creditRatings?.name ??
+        ratingJson?.creditRatings?.value ??
         'Unrated',
-      agency: ratingJson?.creditRatingAgencies?.name ?? null,
+      agency:
+        ratingJson?.creditRatingAgencies?.name ??
+        ratingJson?.creditRatingAgencies?.value ??
+        null,
     };
   }
 

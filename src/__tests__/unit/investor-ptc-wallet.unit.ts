@@ -1193,6 +1193,51 @@ describe('Investor PTC buy and wallet hardening', () => {
     expect(result.data.map(row => row.spvId)).to.deepEqual(['old-spv', 'new-spv']);
   });
 
+  it('prefers credit rating and agency names over raw values in subtitle data', async () => {
+    const spvApplicationCreditRatingRepository = {
+      findOne: sinon.stub().resolves({
+        toJSON: () => ({
+          creditRatings: {
+            name: 'A',
+            value: 'RATING_A',
+          },
+          creditRatingAgencies: {
+            name: 'CARE Ratings',
+            value: 'CARE',
+          },
+        }),
+      }),
+    };
+
+    const service = new InvestorInvestmentsService(
+      {} as never,
+      {} as never,
+      {} as never,
+      spvApplicationCreditRatingRepository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const summary = await (
+      service as unknown as {
+        fetchCreditRatingSummary: (
+          spvApplicationId: string,
+        ) => Promise<{rating: string; agency: string | null}>;
+      }
+    ).fetchCreditRatingSummary('77777777-7777-4777-8777-777777777777');
+
+    expect(summary).to.deepEqual({
+      rating: 'A',
+      agency: 'CARE Ratings',
+    });
+  });
+
   it('lists closed snapshots even when holdings are inactive and units are zero', async () => {
     const {service} = createInvestorPortfolioServiceFixture({
       holdings: [
