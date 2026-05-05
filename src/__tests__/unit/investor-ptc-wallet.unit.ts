@@ -549,7 +549,31 @@ describe('Investor PTC buy and wallet hardening', () => {
       beginTransaction: sinon.stub().resolves(tx),
       execute: datasourceExecute,
     };
-    const withdrawalRequestRepository = {};
+    const withdrawalRequests: Array<Record<string, unknown>> = [];
+    const withdrawalRequestRepository = {
+      create: sinon.stub().callsFake((data: object) => {
+        withdrawalRequests.push(data as Record<string, unknown>);
+        return Promise.resolve(data);
+      }),
+      findById: sinon.stub().callsFake((id: string) => {
+        const request = withdrawalRequests.find(row => row.id === id);
+
+        if (!request) {
+          return Promise.reject(new HttpErrors.NotFound('Withdrawal request not found'));
+        }
+
+        return Promise.resolve(request);
+      }),
+      updateById: sinon.stub().callsFake((id: string, data: object) => {
+        const request = withdrawalRequests.find(row => row.id === id);
+
+        if (request) {
+          Object.assign(request, data);
+        }
+
+        return Promise.resolve();
+      }),
+    };
     const investorProfileRepository = {
       findOne: sinon.stub().callsFake(({where}: {where: {and: object[]}}) => {
         const usersCondition = where.and.find(condition =>
@@ -677,6 +701,13 @@ describe('Investor PTC buy and wallet hardening', () => {
         ledgers.push(data as Record<string, unknown>);
         return Promise.resolve(data);
       }),
+      updateById: sinon.stub().callsFake((id: string, data: object) => {
+        const ledger = ledgers.find(row => row.id === id);
+        if (ledger) {
+          Object.assign(ledger, data);
+        }
+        return Promise.resolve();
+      }),
     };
     const investorEscrowAccountService = {
       getOrCreateActiveEscrowForApprovedInvestor: sinon
@@ -698,6 +729,7 @@ describe('Investor PTC buy and wallet hardening', () => {
     return {
       service,
       ledgers,
+      withdrawalRequests,
       datasourceExecute,
       investorEscrowAccountRepository,
       walletsByInvestorProfileId,
@@ -1363,6 +1395,136 @@ describe('Investor PTC buy and wallet hardening', () => {
     expect(metadata?.roles).to.not.containEql('investor');
   });
 
+  it('creates a single pending withdrawal ledger entry when a withdrawal is requested', async () => {
+    const {service, ledgers, walletsByInvestorProfileId, withdrawalRequests} =
+      createWalletWithdrawalServiceFixture();
+
+    const request = await service.requestWithdrawal(investorUser, 1, 'test withdraw');
+
+    expect(request.status).to.equal(WithdrawalRequestStatus.PENDING);
+    expect(withdrawalRequests).to.have.length(1);
+    expect(ledgers).to.have.length(1);
+    expect(ledgers[0]).to.containDeep({
+      type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT,
+      amount: 1,
+      status: InvestorEscrowLedgerStatus.PENDING,
+      referenceType: 'WITHDRAWAL',
+      referenceId: request.id,
+    });
+    expect(
+      walletsByInvestorProfileId['33333333-3333-4333-8333-333333333333']
+        .blockedBalance,
+    ).to.equal(1);
+  });
+
+  it('updates the same withdrawal ledger entry on processing instead of creating a duplicate', async () => {
+    const {service, ledgers, walletsByInvestorProfileId} =
+      createWalletWithdrawalServiceFixture();
+
+    const request = await service.requestWithdrawal(
+      investorUser,
+      1,
+      'process without duplicate',
+    );
+    const processed = await service.processWithdrawal(request.id);
+
+    expect(processed.status).to.equal(WithdrawalRequestStatus.COMPLETED);
+    expect(ledgers).to.have.length(1);
+    expect(ledgers[0]).to.containDeep({
+      type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT,
+      amount: 1,
+      status: InvestorEscrowLedgerStatus.SUCCESS,
+      referenceType: 'WITHDRAWAL',
+      referenceId: request.id,
+    });
+    expect(String(ledgers[0].transactionId ?? '')).to.not.equal('');
+    expect(
+      walletsByInvestorProfileId['33333333-3333-4333-8333-333333333333']
+        .currentBalance,
+    ).to.equal(999);
+    expect(
+      walletsByInvestorProfileId['33333333-3333-4333-8333-333333333333']
+        .blockedBalance,
+    ).to.equal(0);
+  });
+
+  it('returns transaction status in wallet history for deposits and withdrawals', async () => {
+    const {service} = createWalletWithdrawalServiceFixture();
+
+    await service.addFunds(investorUser, 25, 'history deposit');
+    await service.requestWithdrawal(investorUser, 10, 'history withdrawal');
+
+    const history = await service.getWalletHistory(investorUser);
+
+    expect(history).to.have.length(2);
+    expect(history.map(row => row.status)).to.containEql(
+      InvestorEscrowLedgerStatus.SUCCESS,
+    );
+    expect(history.map(row => row.status)).to.containEql(
+      InvestorEscrowLedgerStatus.PENDING,
+    );
+  });
+
+  it('collapses legacy duplicate withdrawal history rows into a single approved record', async () => {
+    const service = new WalletWithdrawalService(
+      {
+        beginTransaction: sinon.stub(),
+        execute: sinon.stub().resolves([]),
+      } as never,
+      {} as never,
+      {
+        findOne: sinon.stub().resolves({
+          id: '33333333-3333-4333-8333-333333333333',
+          usersId: investorUser.id,
+          isActive: true,
+          isDeleted: false,
+        }),
+      } as never,
+      {} as never,
+      {
+        find: sinon.stub().resolves([
+          {
+            type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT,
+            status: InvestorEscrowLedgerStatus.PENDING,
+            amount: 1,
+            balanceBefore: 1000,
+            balanceAfter: 1000,
+            referenceType: 'WITHDRAWAL',
+            referenceId: 'withdraw-request-1',
+            createdAt: new Date('2026-05-05T06:45:00.000Z'),
+          },
+          {
+            type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT,
+            status: InvestorEscrowLedgerStatus.SUCCESS,
+            amount: 1,
+            balanceBefore: 1000,
+            balanceAfter: 999,
+            referenceType: 'WITHDRAWAL',
+            referenceId: 'withdraw-request-1',
+            createdAt: new Date('2026-05-05T07:08:00.000Z'),
+          },
+        ]),
+      } as never,
+      {} as never,
+    );
+
+    const history = await service.getWalletHistory(investorUser);
+
+    expect(history).to.have.length(1);
+    expect(history[0]).to.containDeep({
+      type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT,
+      status: InvestorEscrowLedgerStatus.SUCCESS,
+      amount: 1,
+      balanceBefore: 1000,
+      balanceAfter: 999,
+      referenceType: 'WITHDRAWAL',
+      referenceId: 'withdraw-request-1',
+    });
+    expect(history[0].createdAt?.toISOString()).to.equal(
+      '2026-05-05T07:08:00.000Z',
+    );
+  });
+
   it('credits first idempotent deposit exactly once', async () => {
     const {service, ledgers, walletsByInvestorProfileId} =
       createWalletWithdrawalServiceFixture();
@@ -1568,6 +1730,21 @@ describe('Investor PTC buy and wallet hardening', () => {
       isDeleted: false,
       remarks: null,
     };
+    const ledgers = [
+      {
+        id: 'ledger-1',
+        investorEscrowAccountId: '22222222-2222-4222-8222-222222222222',
+        investorId: request.investorProfileId,
+        type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT,
+        amount: 100,
+        balanceBefore: 500,
+        balanceAfter: 500,
+        status: InvestorEscrowLedgerStatus.PENDING,
+        referenceType: 'WITHDRAWAL',
+        referenceId: request.id,
+        isDeleted: false,
+      },
+    ];
     const wallet = {
       id: '22222222-2222-4222-8222-222222222222',
       investorProfileId: request.investorProfileId,
@@ -1597,7 +1774,15 @@ describe('Investor PTC buy and wallet hardening', () => {
       withdrawalRequestRepository as never,
       {} as never,
       investorEscrowAccountRepository as never,
-      {create: sinon.stub().rejects(new Error('bank rail failed'))} as never,
+      {
+        findOne: sinon.stub().onFirstCall().resolves(null).onSecondCall().resolves(
+          ledgers[0],
+        ),
+        updateById: sinon.stub().callsFake((_id: string, data: object) => {
+          Object.assign(ledgers[0], data);
+        }),
+        create: sinon.stub().rejects(new Error('bank rail failed')),
+      } as never,
       {} as never,
     );
 
@@ -1607,6 +1792,7 @@ describe('Investor PTC buy and wallet hardening', () => {
 
     expect(request.status).to.equal(WithdrawalRequestStatus.FAILED);
     expect(wallet.blockedBalance).to.equal(0);
+    expect(ledgers[0].status).to.equal(InvestorEscrowLedgerStatus.FAILED);
   });
 });
 

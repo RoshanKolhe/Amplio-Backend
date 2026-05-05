@@ -21,6 +21,16 @@ import {
 import {InvestorEscrowAccountService} from './investor-escrow-account.service';
 
 export class WalletWithdrawalService {
+  private static readonly WITHDRAWAL_HISTORY_STATUS_PRIORITY: Record<
+    string,
+    number
+  > = {
+    [InvestorEscrowLedgerStatus.PENDING]: 1,
+    PROCESSING: 2,
+    [InvestorEscrowLedgerStatus.FAILED]: 3,
+    [InvestorEscrowLedgerStatus.SUCCESS]: 4,
+  };
+
   constructor(
     @inject('datasources.amplio')
     private datasource: AmplioDataSource,
@@ -284,6 +294,106 @@ export class WalletWithdrawalService {
     };
   }
 
+  private parseOptionalDate(value: unknown): Date | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const parsedDate = value instanceof Date ? value : new Date(String(value));
+
+    return Number.isNaN(parsedDate.getTime()) ? undefined : parsedDate;
+  }
+
+  private resolveWalletHistoryTimestamp(row: {
+    createdAt?: Date;
+    metadata?: object;
+  }): Date | undefined {
+    if (row.metadata && typeof row.metadata === 'object') {
+      const metadata = row.metadata as {
+        processedAt?: string | Date;
+        failedAt?: string | Date;
+      };
+
+      const processedAt = this.parseOptionalDate(metadata.processedAt);
+      if (processedAt) {
+        return processedAt;
+      }
+
+      const failedAt = this.parseOptionalDate(metadata.failedAt);
+      if (failedAt) {
+        return failedAt;
+      }
+    }
+
+    return row.createdAt;
+  }
+
+  private mergeWalletHistoryRows<
+    T extends {
+      type: string;
+      status: string;
+      amount: number;
+      balanceBefore: number;
+      balanceAfter: number;
+      referenceType: string;
+      referenceId: string;
+      createdAt?: Date;
+      metadata?: object;
+    },
+  >(rows: T[]): T[] {
+    const mergedRows = new Map<string, T>();
+    const orderedKeys: string[] = [];
+
+    for (const row of rows) {
+      const isWithdrawalRow =
+        row.type === InvestorEscrowLedgerType.WITHDRAWAL_DEBIT &&
+        row.referenceType === 'WITHDRAWAL' &&
+        String(row.referenceId ?? '').trim() !== '';
+      const key = isWithdrawalRow
+        ? `${row.referenceType}:${row.referenceId}`
+        : `${row.referenceType}:${row.referenceId}:${orderedKeys.length}`;
+
+      const existingRow = mergedRows.get(key);
+
+      if (!existingRow) {
+        mergedRows.set(key, row);
+        orderedKeys.push(key);
+        continue;
+      }
+
+      const existingPriority =
+        WalletWithdrawalService.WITHDRAWAL_HISTORY_STATUS_PRIORITY[
+          existingRow.status
+        ] ?? 0;
+      const currentPriority =
+        WalletWithdrawalService.WITHDRAWAL_HISTORY_STATUS_PRIORITY[row.status] ?? 0;
+      const existingTimestamp =
+        this.resolveWalletHistoryTimestamp(existingRow)?.getTime() ?? 0;
+      const currentTimestamp =
+        this.resolveWalletHistoryTimestamp(row)?.getTime() ?? 0;
+
+      if (
+        currentPriority > existingPriority ||
+        (currentPriority === existingPriority &&
+          currentTimestamp >= existingTimestamp)
+      ) {
+        mergedRows.set(key, row);
+      }
+    }
+
+    return orderedKeys
+      .map(key => mergedRows.get(key))
+      .filter((row): row is T => Boolean(row))
+      .sort((left, right) => {
+        const leftTime =
+          this.resolveWalletHistoryTimestamp(left)?.getTime() ?? Number.MIN_SAFE_INTEGER;
+        const rightTime =
+          this.resolveWalletHistoryTimestamp(right)?.getTime() ?? Number.MIN_SAFE_INTEGER;
+
+        return rightTime - leftTime;
+      });
+  }
+
   private async failWithdrawalAndReleaseBlock(
     requestId: string,
     reason: string,
@@ -338,6 +448,38 @@ export class WalletWithdrawalService {
         this.getOptions(tx),
       );
 
+      const existingLedger = await this.investorEscrowLedgerRepository.findOne(
+        {
+          where: {
+            and: [
+              {investorId: withdrawalRequest.investorProfileId},
+              {type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT},
+              {referenceType: 'WITHDRAWAL'},
+              {referenceId: requestId},
+              {isDeleted: false},
+            ],
+          },
+        },
+        this.getOptions(tx),
+      );
+
+      if (existingLedger) {
+        await this.investorEscrowLedgerRepository.updateById(
+          existingLedger.id,
+          {
+            status: InvestorEscrowLedgerStatus.FAILED,
+            remarks: reason,
+            metadata: {
+              kind: 'WITHDRAWAL_REQUEST',
+              withdrawalRequestStatus: WithdrawalRequestStatus.FAILED,
+              blockedBalanceAfter: nextBlockedBalance,
+              failedAt: new Date(),
+            },
+          },
+          this.getOptions(tx),
+        );
+      }
+
       await tx.commit();
     } catch (error) {
       await tx.rollback();
@@ -372,6 +514,7 @@ export class WalletWithdrawalService {
   ): Promise<
     Array<{
       type: string;
+      status: string;
       amount: number;
       balanceBefore: number;
       balanceAfter: number;
@@ -389,23 +532,26 @@ export class WalletWithdrawalService {
       order: ['createdAt DESC'],
       fields: {
         type: true,
+        status: true,
         amount: true,
         balanceBefore: true,
         balanceAfter: true,
         referenceType: true,
         referenceId: true,
         createdAt: true,
+        metadata: true,
       },
     });
 
-    return ledgerRows.map(row => ({
+    return this.mergeWalletHistoryRows(ledgerRows).map(row => ({
       type: row.type,
+      status: row.status,
       amount: this.normalizeAmount(row.amount),
       balanceBefore: this.normalizeAmount(row.balanceBefore),
       balanceAfter: this.normalizeAmount(row.balanceAfter),
       referenceType: row.referenceType,
       referenceId: row.referenceId,
-      createdAt: row.createdAt,
+      createdAt: this.resolveWalletHistoryTimestamp(row),
     }));
   }
 
@@ -618,6 +764,29 @@ export class WalletWithdrawalService {
         this.getOptions(tx),
       );
 
+      await this.investorEscrowLedgerRepository.create(
+        {
+          id: uuidv4(),
+          investorEscrowAccountId: wallet.id,
+          investorId: investorProfile.id,
+          type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT,
+          amount: normalizedAmount,
+          balanceBefore: currentBalance,
+          balanceAfter: currentBalance,
+          status: InvestorEscrowLedgerStatus.PENDING,
+          referenceType: 'WITHDRAWAL',
+          referenceId: withdrawalRequest.id,
+          remarks,
+          isDeleted: false,
+          metadata: {
+            kind: 'WITHDRAWAL_REQUEST',
+            withdrawalRequestStatus: WithdrawalRequestStatus.PENDING,
+            blockedBalanceAfter: nextBlockedBalance,
+          },
+        },
+        this.getOptions(tx),
+      );
+
       await tx.commit();
       return withdrawalRequest;
     } catch (error) {
@@ -693,6 +862,20 @@ export class WalletWithdrawalService {
       }
 
       const transactionId = uuidv4();
+      const existingLedger = await this.investorEscrowLedgerRepository.findOne(
+        {
+          where: {
+            and: [
+              {investorId: withdrawalRequest.investorProfileId},
+              {type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT},
+              {referenceType: 'WITHDRAWAL'},
+              {referenceId: withdrawalRequest.id},
+              {isDeleted: false},
+            ],
+          },
+        },
+        this.getOptions(tx),
+      );
 
       await this.investorEscrowAccountRepository.updateById(
         wallet.id,
@@ -703,24 +886,52 @@ export class WalletWithdrawalService {
         this.getOptions(tx),
       );
 
-      await this.investorEscrowLedgerRepository.create(
-        {
-          id: uuidv4(),
-          investorEscrowAccountId: wallet.id,
-          investorId: withdrawalRequest.investorProfileId,
-          type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT,
-          amount,
-          balanceBefore,
-          balanceAfter,
-          status: InvestorEscrowLedgerStatus.SUCCESS,
-          transactionId,
-          referenceType: 'WITHDRAWAL',
-          referenceId: withdrawalRequest.id,
-          remarks: withdrawalRequest.remarks,
-          isDeleted: false,
-        },
-        this.getOptions(tx),
-      );
+      if (existingLedger) {
+        await this.investorEscrowLedgerRepository.updateById(
+          existingLedger.id,
+          {
+            investorEscrowAccountId: wallet.id,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            status: InvestorEscrowLedgerStatus.SUCCESS,
+            transactionId,
+            remarks: withdrawalRequest.remarks,
+            metadata: {
+              kind: 'WITHDRAWAL_REQUEST',
+              withdrawalRequestStatus: WithdrawalRequestStatus.COMPLETED,
+              blockedBalanceAfter: nextBlockedBalance,
+              processedAt: new Date(),
+            },
+          },
+          this.getOptions(tx),
+        );
+      } else {
+        await this.investorEscrowLedgerRepository.create(
+          {
+            id: uuidv4(),
+            investorEscrowAccountId: wallet.id,
+            investorId: withdrawalRequest.investorProfileId,
+            type: InvestorEscrowLedgerType.WITHDRAWAL_DEBIT,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            status: InvestorEscrowLedgerStatus.SUCCESS,
+            transactionId,
+            referenceType: 'WITHDRAWAL',
+            referenceId: withdrawalRequest.id,
+            remarks: withdrawalRequest.remarks,
+            isDeleted: false,
+            metadata: {
+              kind: 'WITHDRAWAL_REQUEST',
+              withdrawalRequestStatus: WithdrawalRequestStatus.COMPLETED,
+              blockedBalanceAfter: nextBlockedBalance,
+              processedAt: new Date(),
+            },
+          },
+          this.getOptions(tx),
+        );
+      }
 
       // Simulate external bank transfer success.
 
