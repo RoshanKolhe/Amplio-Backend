@@ -53,9 +53,17 @@ export async function runLegacySpvBackfillMigration(
       'poolfinancials',
       'escrowsetupid',
     );
+    const hasDailyCutoffTime = await columnExists(
+      datasource,
+      'poolfinancials',
+      'dailycutofftime',
+    );
     const escrowSetupIdSelect = hasEscrowSetupId
       ? 'legacy.escrowsetupid'
       : 'NULL::uuid';
+    const legacyEveningCutoffTimeSelect = hasDailyCutoffTime
+      ? 'legacy.dailycutofftime'
+      : 'NULL::text';
 
     const poolBackfillResult = await datasource.execute(`
       INSERT INTO public.spv_pool_financials (
@@ -68,7 +76,8 @@ export async function runLegacySpvBackfillMigration(
         totalfunded,
         totalsettled,
         outstanding,
-        dailycutofftime,
+        morningcutofftime,
+        eveningcutofftime,
         isactive,
         isdeleted,
         createdat,
@@ -88,7 +97,8 @@ export async function runLegacySpvBackfillMigration(
         legacy.totalfunded,
         legacy.totalsettled,
         legacy.outstanding,
-        legacy.dailycutofftime,
+        NULL::text,
+        ${legacyEveningCutoffTimeSelect},
         legacy.isactive,
         legacy.isdeleted,
         legacy.createdat,

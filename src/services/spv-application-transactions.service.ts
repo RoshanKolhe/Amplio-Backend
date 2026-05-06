@@ -32,7 +32,7 @@ type TrustDeedSavePayload = Pick<TrustDeed, 'trustName'> &
       | 'trusteeEntity'
       | 'settlor'
       | 'governingLaw'
-      | 'bankruptcyClause'
+      // | 'bankruptcyClause'
       | 'trustDuration'
       | 'isActive'
       | 'isDeleted'
@@ -111,24 +111,30 @@ export class SpvApplicationTransactionsService {
     currentStatusId: string,
     tx: unknown,
   ) {
-    const documents =
-      await this.spvKycDocumentService.fetchDocumentsByApplicationId(
-        applicationId,
-      );
+    // Documents are no longer a standalone SPV flow status; they are merged
+    // into the trust deed step. Keep document patching independent of step
+    // progression so the next visible step after escrow remains credit_rating.
+    // const documents =
+    //   await this.spvKycDocumentService.fetchDocumentsByApplicationId(
+    //     applicationId,
+    //     tx,
+    //   );
+    //
+    // const allDocumentsCompleted =
+    //   documents.length > 0 && documents.every(document => document.status === 1);
+    //
+    // if (allDocumentsCompleted) {
+    //   return this.syncApplicationStatus(
+    //     applicationId,
+    //     currentStatusId,
+    //     'documents',
+    //     tx,
+    //   );
+    // }
 
-    const allDocumentsCompleted =
-      documents.length > 0 && documents.every(document => document.status === 1);
-
-    if (!allDocumentsCompleted) {
-      return this.statusService.fetchApplicationStatusById(currentStatusId);
-    }
-
-    return this.syncApplicationStatus(
-      applicationId,
-      currentStatusId,
-      'documents',
-      tx,
-    );
+    void applicationId;
+    void tx;
+    return this.statusService.fetchApplicationStatusById(currentStatusId);
   }
 
   async createOrUpdateBasicInfo(
@@ -209,9 +215,7 @@ export class SpvApplicationTransactionsService {
         applicationId,
       );
       const requestedEscrowSetupId = payload.escrowSetupId;
-      const collectionEscrowSetup = escrowSetups.find(
-        escrow => escrow.accountType === 'collection_escrow',
-      );
+      const escrowSetup = escrowSetups[0];
 
       if (requestedEscrowSetupId) {
         const matchedEscrowSetup = escrowSetups.find(
@@ -229,8 +233,7 @@ export class SpvApplicationTransactionsService {
         applicationId,
         {
           ...payload,
-          escrowSetupId:
-            requestedEscrowSetupId ?? collectionEscrowSetup?.id ?? undefined,
+          escrowSetupId: requestedEscrowSetupId ?? escrowSetup?.id ?? undefined,
         },
         tx,
       );
@@ -614,7 +617,7 @@ export class SpvApplicationTransactionsService {
         payload,
         tx,
       );
-      await this.syncDocumentsStepIfCompleted(
+      const currentStatus = await this.syncDocumentsStepIfCompleted(
         application.id,
         application.spvApplicationStatusMasterId,
         tx,
@@ -625,6 +628,11 @@ export class SpvApplicationTransactionsService {
       return {
         applicationId,
         document: updatedDocument,
+        currentStatus: {
+          id: currentStatus.id,
+          label: currentStatus.status,
+          code: currentStatus.value,
+        },
       };
     } catch (error) {
       await tx.rollback();
@@ -657,7 +665,7 @@ export class SpvApplicationTransactionsService {
         payload,
         tx,
       );
-      await this.syncDocumentsStepIfCompleted(
+      const currentStatus = await this.syncDocumentsStepIfCompleted(
         application.id,
         application.spvApplicationStatusMasterId,
         tx,
@@ -668,6 +676,11 @@ export class SpvApplicationTransactionsService {
       return {
         applicationId,
         document: updatedDocument,
+        currentStatus: {
+          id: currentStatus.id,
+          label: currentStatus.status,
+          code: currentStatus.value,
+        },
       };
     } catch (error) {
       await tx.rollback();

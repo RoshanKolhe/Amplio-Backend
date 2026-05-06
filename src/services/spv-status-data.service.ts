@@ -28,7 +28,7 @@ export class SpvStatusDataService {
     private spvKycDocumentService: SpvKycDocumentService,
     @inject('service.isinApplication.service')
     private isinApplicationService: IsinApplicationService,
-  ) {}
+  ) { }
 
   private async getDerivedIsinValues(applicationId: string): Promise<{
     issueSize?: string;
@@ -41,8 +41,8 @@ export class SpvStatusDataService {
 
     const creditRatingWithRelations = creditRating as
       | (SpvApplicationCreditRating & {
-          creditRatings?: CreditRatings;
-        })
+        creditRatings?: CreditRatings;
+      })
       | null;
 
     return {
@@ -100,18 +100,28 @@ export class SpvStatusDataService {
         return this.spvService.fetchSpvByApplicationId(applicationId);
       case 'pool_financials':
         return this.poolFinancialsService.fetchByApplicationId(applicationId);
-      case 'credit_rating':
-        return this.spvApplicationCreditRatingService.fetchByApplicationId(
-          applicationId,
-        );
+
       case 'ptc_parameters':
         return this.ptcParametersService.fetchByApplicationId(applicationId);
       case 'trust_deed':
-        return this.trustDeedService.fetchByApplicationId(applicationId);
+        return {
+          trustDeed: await this.trustDeedService.fetchByApplicationId(
+            applicationId,
+          ),
+          documents: await this.spvKycDocumentService.fetchDocumentsByApplicationId(
+            applicationId,
+          ),
+        };
       case 'escrow':
         return this.escrowSetupService.fetchByApplicationId(applicationId);
-      case 'documents':
-        return this.spvKycDocumentService.fetchDocumentsByApplicationId(
+      // Documents are no longer a standalone SPV step. They are returned with
+      // the trust_deed status data so the frontend can render the merged view.
+      // case 'documents':
+      //   return this.spvKycDocumentService.fetchDocumentsByApplicationId(
+      //     applicationId,
+      //   );
+      case 'credit_rating':
+        return this.spvApplicationCreditRatingService.fetchByApplicationId(
           applicationId,
         );
       case 'isin_application':

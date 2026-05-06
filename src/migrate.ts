@@ -99,6 +99,7 @@ export async function migrate(args: string[]) {
       'IsinApplication',
       'SpvKycDocument',
       'SpvKycDocumentType',
+      'UsersConsent'
     ],
   });
 
@@ -116,3 +117,4 @@ migrate(process.argv).catch(err => {
   console.error('Cannot migrate database schema', err);
   process.exit(1);
 });
+
