@@ -67,6 +67,22 @@ export class Media extends Entity {
   })
   updatedAt?: Date;
 
+  @property({
+    type: 'boolean',
+    default: true,
+  })
+  isActive?: boolean;
+
+  @property({
+    type: 'boolean',
+    default: false,
+  })
+  isDeleted?: boolean;
+
+  @property({
+    type: 'date',
+  })
+  deletedAt?: Date;
 
   constructor(data?: Partial<Media>) {
     super(data);

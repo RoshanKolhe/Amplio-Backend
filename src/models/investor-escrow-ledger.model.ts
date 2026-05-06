@@ -141,6 +141,17 @@ export class InvestorEscrowLedger extends Entity {
   isDeleted?: boolean;
 
   @property({
+    type: 'boolean',
+    default: true,
+  })
+  isActive?: boolean;
+
+  @property({
+    type: 'date',
+  })
+  deletedAt?: Date;
+
+  @property({
     type: 'string',
   })
   createdBy?: string;

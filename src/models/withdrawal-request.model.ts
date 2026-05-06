@@ -83,6 +83,17 @@ export class WithdrawalRequest extends Entity {
   })
   isDeleted?: boolean;
 
+  @property({
+    type: 'boolean',
+    default: true,
+  })
+  isActive?: boolean;
+
+  @property({
+    type: 'date',
+  })
+  deletedAt?: Date;
+
   constructor(data?: Partial<WithdrawalRequest>) {
     super(data);
   }
