@@ -93,9 +93,14 @@ export class PoolFinancials extends Entity {
   outstanding?: number;
 
   @property({
-    type: 'string'
+    type: 'string',
   })
-  dailyCutoffTime?: string;
+  morningCutoffTime?: string;
+
+  @property({
+    type: 'string',
+  })
+  eveningCutoffTime?: string;
 
   @property({
     type: 'boolean',

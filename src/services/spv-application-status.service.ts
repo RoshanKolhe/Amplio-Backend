@@ -9,6 +9,12 @@ export class SpvApplicationStatusService {
     private spvApplicationStatusMasterRepository: SpvApplicationStatusMasterRepository,
   ) {}
 
+  private isVisibleFlowStatus(status: SpvApplicationStatusMaster) {
+    // Documents are now handled inside the trust deed step in the SPV UI.
+    // Keep the DB row usable for old data, but skip it in step navigation.
+    return status.value !== 'documents';
+  }
+
   async verifyStatusValue(
     statusValue: string,
   ): Promise<SpvApplicationStatusMaster> {
@@ -42,15 +48,17 @@ export class SpvApplicationStatusService {
   async fetchNextStatus(
     sequenceOrder: number,
   ): Promise<SpvApplicationStatusMaster> {
-    const status = await this.spvApplicationStatusMasterRepository.findOne({
+    const statuses = await this.spvApplicationStatusMasterRepository.find({
       where: {
         and: [
-          {sequenceOrder: sequenceOrder + 1},
+          {sequenceOrder: {gt: sequenceOrder}},
           {isActive: true},
           {isDeleted: false},
         ],
       },
+      order: ['sequenceOrder ASC'],
     });
+    const status = statuses.find(item => this.isVisibleFlowStatus(item));
 
     if (!status) {
       throw new HttpErrors.NotFound('Status is missing');
@@ -84,21 +92,18 @@ export class SpvApplicationStatusService {
   > {
     const completedSteps: {id: string; label: string; code: string}[] = [];
 
-    for (let count = 1; count <= currentSequenceOrder; count++) {
-      const status = await this.spvApplicationStatusMasterRepository.findOne({
-        where: {
-          and: [
-            {sequenceOrder: count},
-            {isActive: true},
-            {isDeleted: false},
-          ],
-        },
-      });
+    const statuses = await this.spvApplicationStatusMasterRepository.find({
+      where: {
+        and: [
+          {sequenceOrder: {lte: currentSequenceOrder}},
+          {isActive: true},
+          {isDeleted: false},
+        ],
+      },
+      order: ['sequenceOrder ASC'],
+    });
 
-      if (!status) {
-        throw new HttpErrors.BadRequest('Invalid Status value');
-      }
-
+    for (const status of statuses.filter(item => this.isVisibleFlowStatus(item))) {
       completedSteps.push({
         id: status.id,
         label: status.status,

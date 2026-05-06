@@ -26,16 +26,6 @@ export class EscrowSetup extends Entity {
   ifscCode: string;
 
   @property({
-    type: 'string',
-    required: true,
-    default: 'collection_escrow',
-    jsonSchema: {
-      enum: ['collection_escrow', 'reserve_escrow'],
-    },
-  })
-  accountType: string;
-
-  @property({
     type: 'boolean',
     default: true,
   })

@@ -127,7 +127,8 @@ export class PoolService {
           Number(poolFinancials.reserveBufferPercent ?? 0),
         ),
         reserveAmount: configuredReserveAmount,
-        dailyCutoffTime: poolFinancials.dailyCutoffTime ?? null,
+        morningCutoffTime: poolFinancials.morningCutoffTime ?? null,
+        eveningCutoffTime: poolFinancials.eveningCutoffTime ?? null,
       },
       metrics: {
         totalFunded: this.normalizeAmount(Number(poolFinancials.totalFunded ?? 0)),

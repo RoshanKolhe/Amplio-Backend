@@ -18,7 +18,6 @@ export class EscrowSetupService {
       where: {
         and: [
           {spvApplicationId},
-          {accountType: payload.accountType},
           {isActive: true},
           {isDeleted: false},
         ],

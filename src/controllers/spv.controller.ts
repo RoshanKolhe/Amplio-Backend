@@ -269,7 +269,12 @@ async fetchApplicationById(
               targetYield: {type: 'number'},
               reserveBufferPercent: {type: 'number'},
               reserveAmount: {type: 'number'},
-              dailyCutoffTime: {type: 'string'},
+              morningCutoffTime: {
+                type: 'string',
+              },
+              eveningCutoffTime: {
+                type: 'string',
+              },
               escrowSetupId: {type: 'string'},
             },
           },
@@ -497,7 +502,7 @@ async fetchApplicationById(
               trusteeEntity: {type: 'string'},
               settlor: {type: 'string'},
               governingLaw: {type: 'string'},
-              bankruptcyClause: {type: 'string'},
+              // bankruptcyClause: {type: 'string'},
               trustDuration: {type: 'string'},
               stampDutyAndRegistrationId: {type: 'string'},
             },
@@ -571,16 +576,12 @@ async fetchApplicationById(
         'application/json': {
           schema: {
             type: 'object',
-            required: ['bankName', 'accountNumber', 'ifscCode', 'accountType'],
+            required: ['bankName', 'accountNumber', 'ifscCode'],
             properties: {
               bankName: {type: 'string'},
               branchDetails: {type: 'string'},
               accountNumber: {type: 'string'},
               ifscCode: {type: 'string'},
-              accountType: {
-                type: 'string',
-                enum: ['collection_escrow', 'reserve_escrow'],
-              },
             },
           },
         },

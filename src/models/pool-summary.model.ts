@@ -14,7 +14,8 @@ export type PoolSummaryTerms = {
   maturityDays: number;
   reserveBufferPercent: number;
   reserveAmount: number;
-  dailyCutoffTime: string | null;
+  morningCutoffTime: string | null;
+  eveningCutoffTime: string | null;
 };
 
 export type PoolSummaryMetrics = {

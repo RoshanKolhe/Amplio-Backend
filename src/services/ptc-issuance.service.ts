@@ -494,7 +494,6 @@ export class PtcIssuanceService {
         where: {
           and: [
             {spvApplicationId},
-            {accountType: 'collection_escrow'},
             {isActive: true},
             {isDeleted: false},
           ],
@@ -601,7 +600,6 @@ export class PtcIssuanceService {
         where: {
           and: [
             {spvApplicationId},
-            {accountType: 'collection_escrow'},
             {isActive: true},
             {isDeleted: false},
           ],

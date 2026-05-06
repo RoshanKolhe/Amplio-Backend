@@ -33,7 +33,11 @@ async function getTableColumns(
   );
 
   return new Set(
-    (rows ?? []).map((row: {columnName?: string}) => row.columnName ?? ''),
+    (rows ?? [])
+      .map((row: {column_name?: string; columnName?: string}) => {
+        return row.column_name ?? row.columnName ?? '';
+      })
+      .filter(Boolean),
   );
 }
 
@@ -102,7 +106,8 @@ export async function runLegacySpvBackfillMigration(
         totalfunded,
         totalsettled,
         outstanding,
-        dailycutofftime,
+        morningcutofftime,
+        eveningcutofftime,
         isactive,
         isdeleted,
         createdat,
@@ -138,6 +143,7 @@ export async function runLegacySpvBackfillMigration(
           'outstanding',
           '0::double precision',
         )},
+        NULL::text,
         ${selectLegacyColumn(
           legacyPoolColumns,
           'dailycutofftime',

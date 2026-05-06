@@ -238,29 +238,33 @@ export class SpvKycDocumentService {
 
   async fetchDocumentsByApplicationId(
     spvApplicationId: string,
+    tx?: Transaction,
   ): Promise<SpvKycDocumentWithSigningDetails[]> {
-    const documents = await this.spvKycDocumentRepository.find({
-      where: {
-        spvApplicationId,
-        isActive: true,
-        isDeleted: false,
+    const documents = await this.spvKycDocumentRepository.find(
+      {
+        where: {
+          spvApplicationId,
+          isActive: true,
+          isDeleted: false,
+        },
+        include: [
+          {
+            relation: 'spvKycDocumentType',
+            scope: {
+              fields: ['id', 'name', 'value', 'description', 'draftingMode'],
+            },
+          },
+          {
+            relation: 'media',
+            scope: {
+              fields: ['id', 'fileUrl', 'fileName'],
+            },
+          },
+        ],
+        order: ['sequenceOrder ASC', 'createdAt ASC'],
       },
-      include: [
-        {
-          relation: 'spvKycDocumentType',
-          scope: {
-            fields: ['id', 'name', 'value', 'description', 'draftingMode'],
-          },
-        },
-        {
-          relation: 'media',
-          scope: {
-            fields: ['id', 'fileUrl', 'fileName'],
-          },
-        },
-      ],
-      order: ['sequenceOrder ASC', 'createdAt ASC'],
-    });
+      tx ? {transaction: tx} : undefined,
+    );
 
     return documents.map(document => this.buildSigningResponse(document));
   }
