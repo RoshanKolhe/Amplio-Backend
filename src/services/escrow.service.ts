@@ -1,4 +1,4 @@
-import {inject} from '@loopback/core';
+import {Getter, inject} from '@loopback/core';
 import {Options, repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {v4 as uuidv4} from 'uuid';
@@ -9,6 +9,7 @@ import {
   Transaction,
 } from '../models';
 import {EscrowTransactionRepository, TransactionRepository} from '../repositories';
+import {PoolService} from './pool.service';
 import {SpvService} from './spv.service';
 
 const ESCROW_PENDING_STATUS = 'PENDING';
@@ -32,6 +33,8 @@ export class EscrowService {
     private transactionRepository: TransactionRepository,
     @inject('service.spv.service')
     private spvService: SpvService,
+    @inject.getter('service.pool.service')
+    private poolServiceGetter: Getter<PoolService>,
   ) {}
 
   private getOptions(tx?: unknown): Options | undefined {
@@ -40,6 +43,19 @@ export class EscrowService {
 
   private normalizeAmount(amount: number): number {
     return Number(Number(amount ?? 0).toFixed(2));
+  }
+
+  private async triggerPoolRecompute(spvId: string): Promise<void> {
+    try {
+      const poolService = await this.poolServiceGetter();
+      await poolService.recomputePoolFinancials(spvId);
+    } catch (error) {
+      if (error instanceof HttpErrors.NotFound) {
+        return;
+      }
+
+      throw error;
+    }
   }
 
   private async findExistingEscrowTransaction(
@@ -264,6 +280,8 @@ export class EscrowService {
       status: ESCROW_MATCHED_STATUS,
       matchedAt: new Date(),
     });
+
+    await this.triggerPoolRecompute(escrowTransaction.spvId);
 
     return true;
   }
