@@ -46,6 +46,16 @@ export class Spv extends Entity {
   })
   spvName: string;
 
+  @property({
+    type: 'string',
+  })
+  registrationNumber?: string;
+
+  @property({
+    type: 'date',
+  })
+  incorporationDate?: Date;
+
   @belongsTo(() => SpvApplication)
   spvApplicationId: string;
 
