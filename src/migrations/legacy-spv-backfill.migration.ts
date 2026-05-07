@@ -25,7 +25,7 @@ async function getTableColumns(
 ): Promise<Set<string>> {
   const rows = await datasource.execute(
     `
-      SELECT column_name
+      SELECT column_name AS "columnName"
       FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = $1
     `,
@@ -33,11 +33,7 @@ async function getTableColumns(
   );
 
   return new Set(
-    (rows ?? [])
-      .map((row: {column_name?: string; columnName?: string}) => {
-        return row.column_name ?? row.columnName ?? '';
-      })
-      .filter(Boolean),
+    (rows ?? []).map((row: {columnName?: string}) => row.columnName ?? '').filter(Boolean),
   );
 }
 
