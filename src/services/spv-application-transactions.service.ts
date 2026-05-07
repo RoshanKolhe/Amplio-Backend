@@ -33,7 +33,7 @@ type TrustDeedSavePayload = Pick<TrustDeed, 'trustName'> &
       | 'settlor'
       | 'governingLaw'
       // | 'bankruptcyClause'
-      | 'trustDuration'
+      // | 'trustDuration'
       | 'isActive'
       | 'isDeleted'
     >
