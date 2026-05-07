@@ -102,6 +102,14 @@ export class InvestorEscrowLedger extends Entity {
 
   @property({
     type: 'string',
+    postgresql: {
+      dataType: 'uuid',
+    },
+  })
+  referenceMovementId?: string;
+
+  @property({
+    type: 'string',
     required: true,
   })
   referenceType: string;

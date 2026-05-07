@@ -2,6 +2,20 @@ import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {Spv} from './spv.model';
 import {Transaction} from './transaction.model';
 
+export enum EscrowTransactionType {
+  INVESTMENT_INFLOW = 'INVESTMENT_INFLOW',
+  REDEMPTION_OUTFLOW = 'REDEMPTION_OUTFLOW',
+  POOL_FUNDING = 'POOL_FUNDING',
+  REVERSAL = 'REVERSAL',
+  SETTLEMENT = 'SETTLEMENT',
+  WITHDRAWAL = 'WITHDRAWAL',
+}
+
+export enum EscrowTransactionDirection {
+  CREDIT = 'CREDIT',
+  DEBIT = 'DEBIT',
+}
+
 @model({
   settings: {
     postgresql: {
@@ -33,6 +47,27 @@ export class EscrowTransaction extends Entity {
     },
   })
   amount: number;
+
+  @property({
+    type: 'string',
+    jsonSchema: {
+      enum: Object.values(EscrowTransactionType),
+    },
+  })
+  transactionType?: EscrowTransactionType;
+
+  @property({
+    type: 'string',
+    jsonSchema: {
+      enum: Object.values(EscrowTransactionDirection),
+    },
+  })
+  direction?: EscrowTransactionDirection;
+
+  @property({
+    type: 'string',
+  })
+  referenceMovementId?: string;
 
   @property({
     type: 'string',
