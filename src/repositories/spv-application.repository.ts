@@ -45,6 +45,11 @@ export class SpvApplicationRepository extends TimeStampRepositoryMixin<
     typeof SpvApplication.prototype.id
   >;
 
+  public readonly linkedSpv: BelongsToAccessor<
+    Spv,
+    typeof SpvApplication.prototype.id
+  >;
+
   public readonly spv: HasOneRepositoryFactory<
     Spv,
     typeof SpvApplication.prototype.id
@@ -96,6 +101,14 @@ export class SpvApplicationRepository extends TimeStampRepositoryMixin<
     this.registerInclusionResolver(
       'trusteeProfiles',
       this.trusteeProfiles.inclusionResolver,
+    );
+    this.linkedSpv = this.createBelongsToAccessorFor(
+      'linkedSpv',
+      spvRepositoryGetter,
+    );
+    this.registerInclusionResolver(
+      'linkedSpv',
+      this.linkedSpv.inclusionResolver,
     );
   }
 }

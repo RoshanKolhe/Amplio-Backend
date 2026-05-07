@@ -101,6 +101,7 @@ async fetchApplicationById(
   applicationData: {
     id: string;
     reviewStatus: number;
+    linkedSpv: string | undefined;
     completedSteps: {
       id: string;
       label: string;
@@ -185,6 +186,45 @@ async fetchApplicationById(
 
   @authenticate('jwt')
   @authorize({roles: ['trustee']})
+  @post('/spv-pre/new-pool-application/{spvId}')
+  async createNewPoolApplication(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @param.path.string('spvId') spvId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    application: {
+      id: string;
+      currentStatus: {
+        id: string;
+        label: string;
+        code: string;
+      };
+      isActive: boolean;
+      spvId: string;
+    };
+  }> {
+    const trusteeProfile = await this.verifyTrustee(currentUser.id);
+    const newApplication =
+      await this.spvApplicationService.createNewPoolApplication(
+        trusteeProfile.id,
+        spvId,
+      );
+
+    return {
+      success: true,
+      message: 'New Pool Application created',
+      application: {
+        id: newApplication.id,
+        currentStatus: newApplication.currentStatus,
+        isActive: newApplication.isActive ?? true,
+        spvId: newApplication.spvId,
+      },
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['trustee']})
   @patch('/spv-pre/basic-info/{applicationId}')
   async updateBasicInfo(
     @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
@@ -199,6 +239,8 @@ async fetchApplicationById(
               pspMasterId: {type: 'string'},
               originatorName: {type: 'string'},
               spvName: {type: 'string'},
+              legalStructure: {type: 'string'},
+              incorporationDate: {type: 'string', format: 'date'},
             },
           },
         },

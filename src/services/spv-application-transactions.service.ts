@@ -159,6 +159,29 @@ export class SpvApplicationTransactionsService {
         );
       }
 
+        if (application.linkedSpvId) {
+        const existingSpv = await this.spvService.fetchSpvByIdOrFail(application.linkedSpvId);
+
+        const currentStatus = await this.syncApplicationStatus(
+          application.id,
+          application.spvApplicationStatusMasterId,
+          'spv_basic_info',
+          tx,
+        );
+
+        await tx.commit();
+
+        return {
+          applicationId: application.id,
+          spv: existingSpv,
+          currentStatus: {
+            id: currentStatus.id,
+            label: currentStatus.status,
+            code: currentStatus.value,
+          },
+        };
+      }
+
       const response = await this.spvService.createOrUpdateSpv(
         applicationId,
         spvData,
@@ -233,6 +256,7 @@ export class SpvApplicationTransactionsService {
         applicationId,
         {
           ...payload,
+          spvId: application.linkedSpvId,
           escrowSetupId: requestedEscrowSetupId ?? escrowSetup?.id ?? undefined,
         },
         tx,

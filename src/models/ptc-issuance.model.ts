@@ -55,6 +55,14 @@ export class PtcIssuance extends Entity {
 
   @property({
     type: 'number',
+    postgresql: {
+      dataType: 'float',
+    },
+  })
+  investedAmount?: number;
+
+  @property({
+    type: 'number',
     required: true,
   })
   totalUnits: number;
@@ -76,7 +84,15 @@ export class PtcIssuance extends Entity {
     required: true,
     default: 'ACTIVE',
     jsonSchema: {
-      enum: ['ACTIVE', 'SOLD_OUT', 'INACTIVE'],
+      enum: [
+        'ACTIVE',
+        'SOLD_OUT',
+        'INACTIVE',
+        'AVAILABLE',
+        'RESERVED',
+        'ALLOCATED',
+        'REDEEMED',
+      ],
     },
   })
   status: string;

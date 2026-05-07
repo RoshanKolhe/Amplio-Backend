@@ -70,6 +70,9 @@ export class SpvApplication extends Entity {
   @belongsTo(() => Users)
   usersId: string;
 
+  @belongsTo(() => Spv, {name: 'linkedSpv'})
+  linkedSpvId: string;
+
   @hasOne(() => Spv)
   spv: Spv;
 
@@ -114,6 +117,7 @@ export interface SpvApplicationRelations {
   spvApplicationStatusMaster?: SpvApplicationStatusMaster;
   trusteeProfiles?: TrusteeProfiles;
   users?: Users;
+  linkedSpv?: Spv;
   spv?: Spv;
   spvApplicationCreditRating?: SpvApplicationCreditRating;
 }
