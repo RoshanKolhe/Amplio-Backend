@@ -1,14 +1,28 @@
 import {inject} from '@loopback/core';
-import {repository} from '@loopback/repository';
+import {Options, repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {v4 as uuidv4} from 'uuid';
-import {EscrowTransaction, Transaction} from '../models';
+import {
+  EscrowTransaction,
+  EscrowTransactionDirection,
+  EscrowTransactionType,
+  Transaction,
+} from '../models';
 import {EscrowTransactionRepository, TransactionRepository} from '../repositories';
 import {SpvService} from './spv.service';
 
 const ESCROW_PENDING_STATUS = 'PENDING';
 const ESCROW_MATCHED_STATUS = 'MATCHED';
 const TRANSACTION_SETTLED_STATUS = 'SETTLED';
+
+export type CreateMatchedEscrowLedgerEntryPayload = {
+  transactionId: string;
+  spvId: string;
+  amount: number;
+  transactionType: EscrowTransactionType;
+  direction: EscrowTransactionDirection;
+  referenceMovementId: string;
+};
 
 export class EscrowService {
   constructor(
@@ -19,6 +33,10 @@ export class EscrowService {
     @inject('service.spv.service')
     private spvService: SpvService,
   ) {}
+
+  private getOptions(tx?: unknown): Options | undefined {
+    return tx ? {transaction: tx} : undefined;
+  }
 
   private normalizeAmount(amount: number): number {
     return Number(Number(amount ?? 0).toFixed(2));
@@ -34,6 +52,28 @@ export class EscrowService {
       },
       order: ['createdAt DESC'],
     });
+  }
+
+  private async findExistingLedgerMovement(
+    payload: CreateMatchedEscrowLedgerEntryPayload,
+    tx?: unknown,
+  ): Promise<EscrowTransaction | null> {
+    return this.escrowTransactionRepository.findOne(
+      {
+        where: {
+          and: [
+            {transactionId: payload.transactionId},
+            {spvId: payload.spvId},
+            {referenceMovementId: payload.referenceMovementId},
+            {transactionType: payload.transactionType},
+            {direction: payload.direction},
+            {isDeleted: false},
+          ],
+        },
+        order: ['createdAt DESC'],
+      },
+      this.getOptions(tx),
+    );
   }
 
   private async getTransactionForSpvOrFail(
@@ -146,6 +186,45 @@ export class EscrowService {
     };
   }
 
+  async createMatchedLedgerEntry(
+    payload: CreateMatchedEscrowLedgerEntryPayload,
+    tx?: unknown,
+  ): Promise<EscrowTransaction> {
+    const normalizedAmount = this.normalizeAmount(payload.amount);
+
+    if (normalizedAmount <= 0) {
+      throw new HttpErrors.BadRequest('Escrow amount must be greater than zero');
+    }
+
+    if (!payload.referenceMovementId?.trim()) {
+      throw new HttpErrors.BadRequest('referenceMovementId is required');
+    }
+
+    await this.spvService.fetchSpvByIdOrFail(payload.spvId);
+
+    const existingMovement = await this.findExistingLedgerMovement(payload, tx);
+    if (existingMovement) {
+      return existingMovement;
+    }
+
+    return this.escrowTransactionRepository.create(
+      {
+        id: uuidv4(),
+        transactionId: payload.transactionId,
+        spvId: payload.spvId,
+        amount: normalizedAmount,
+        transactionType: payload.transactionType,
+        direction: payload.direction,
+        referenceMovementId: payload.referenceMovementId,
+        status: ESCROW_MATCHED_STATUS,
+        matchedAt: new Date(),
+        isActive: true,
+        isDeleted: false,
+      },
+      this.getOptions(tx),
+    );
+  }
+
   async reconcileEscrowTransactionById(escrowTransactionId: string): Promise<boolean> {
     const escrowTransaction = await this.escrowTransactionRepository.findById(
       escrowTransactionId,
@@ -225,4 +304,5 @@ export class EscrowService {
       pending: escrowTransactions.length - matched,
     };
   }
+
 }

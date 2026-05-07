@@ -83,6 +83,7 @@ import {PspRepository} from './repositories/psp.repository';
 import {SpvRepository} from './repositories/spv.repository';
 import {TransactionRepository} from './repositories/transaction.repository';
 import {EscrowService} from './services/escrow.service';
+import {EscrowMovementService} from './services/escrow-movement.service';
 import {UserConsentService} from './services/user-consent.service';
 import {CompanyDataMapperService} from './services/company-brisk-data-mapper.service';
 import {PoolService} from './services/pool.service';
@@ -268,6 +269,9 @@ export class AmplioBackendApplication extends BootMixin(
     );
     this.bind('service.escrow.service').toClass(
       EscrowService,
+    );
+    this.bind('service.escrowMovement.service').toClass(
+      EscrowMovementService,
     );
     this.bind('service.spvStatusData.service').toClass(
       SpvStatusDataService,

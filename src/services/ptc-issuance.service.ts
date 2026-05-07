@@ -29,6 +29,7 @@ import {
   SpvRepository,
   TransactionRepository,
 } from '../repositories';
+import {EscrowMovementService} from './escrow-movement.service';
 
 export type PtcInventorySummary = {
   totalUnits: number;
@@ -177,6 +178,8 @@ export class PtcIssuanceService {
     private ptcParametersRepository: PtcParametersRepository,
     @repository(EscrowSetupRepository)
     private escrowSetupRepository: EscrowSetupRepository,
+    @inject('service.escrowMovement.service')
+    private escrowMovementService: EscrowMovementService,
   ) {}
 
   private normalizeAmount(value: number | undefined | null): number {
@@ -908,51 +911,6 @@ export class PtcIssuanceService {
     );
   }
 
-  private async createWalletLedgerEntry(
-    payload: {
-      investorEscrowAccountId: string;
-      investorId: string;
-      type: InvestorEscrowLedgerType;
-      amount: number;
-      balanceBefore: number;
-      balanceAfter: number;
-      transactionId?: string;
-      referenceType: string;
-      referenceId: string;
-      remarks?: string;
-      metadata?: object;
-      createdBy?: string;
-      status?: InvestorEscrowLedgerStatus;
-    },
-    tx: unknown,
-  ): Promise<{id: string}> {
-    const ledgerId = uuidv4();
-
-    await this.investorEscrowLedgerRepository.create(
-      {
-        id: ledgerId,
-        investorEscrowAccountId: payload.investorEscrowAccountId,
-        investorId: payload.investorId,
-        type: payload.type,
-        amount: this.normalizeAmount(payload.amount),
-        balanceBefore: this.normalizeAmount(payload.balanceBefore),
-        balanceAfter: this.normalizeAmount(payload.balanceAfter),
-        status: payload.status ?? InvestorEscrowLedgerStatus.SUCCESS,
-        transactionId: payload.transactionId,
-        referenceType: payload.referenceType,
-        referenceId: payload.referenceId,
-        remarks: payload.remarks,
-        metadata: payload.metadata,
-        createdBy: payload.createdBy,
-        updatedBy: payload.createdBy,
-        isDeleted: false,
-      },
-      this.getOptions(tx),
-    );
-
-    return {id: ledgerId};
-  }
-
   private buildBuyAllocationPlan(
     lockedIssuances: PtcIssuance[],
     allowedUnits: number,
@@ -1435,11 +1393,11 @@ export class PtcIssuanceService {
       );
 
       const transactionId = uuidv4();
-      await this.createWalletLedgerEntry(
+      await this.escrowMovementService.recordInvestmentMovement(
         {
           investorEscrowAccountId: lockedWallet.id,
           investorId: investorProfile.id,
-          type: InvestorEscrowLedgerType.BUY_DEBIT,
+          spvId,
           amount: finalDebitAmount,
           balanceBefore,
           balanceAfter,
@@ -1867,11 +1825,11 @@ export class PtcIssuanceService {
         this.getOptions(tx),
       );
 
-      const redemptionLedger = await this.createWalletLedgerEntry(
+      const movementResult = await this.escrowMovementService.recordRedemptionMovement(
         {
           investorEscrowAccountId: investorWallet.id,
           investorId: request.investorProfileId,
-          type: InvestorEscrowLedgerType.REDEMPTION_CREDIT,
+          spvId: request.spvId,
           amount: netPayout,
           balanceBefore,
           balanceAfter,
@@ -1915,7 +1873,7 @@ export class PtcIssuanceService {
           stampDutyAmount,
           annualInterestRate,
           poolFinancialsId: pool.id,
-          redemptionLedgerId: redemptionLedger.id,
+          redemptionLedgerId: movementResult.investorLedgerId,
           processedBy,
           holdingsBreakdown: redeemedHoldingsBreakdown,
         },

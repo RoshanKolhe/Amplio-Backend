@@ -284,6 +284,16 @@ describe('Investor PTC buy and wallet hardening', () => {
     const escrowSetupRepository = {
       findOne: sinon.stub().resolves(null),
     };
+    const escrowMovementService = {
+      recordInvestmentMovement: sinon.stub().resolves({
+        referenceMovementId: 'movement-1',
+        investorLedgerId: 'escrow-ledger-1',
+      }),
+      recordRedemptionMovement: sinon.stub().resolves({
+        referenceMovementId: 'movement-2',
+        investorLedgerId: 'escrow-ledger-2',
+      }),
+    };
     const investorClosedInvestmentRepository = {
       findOne: sinon.stub().callsFake(({where}: {where: {and: object[]}}) => {
         const requestCondition = where.and.find(condition =>
@@ -333,6 +343,7 @@ describe('Investor PTC buy and wallet hardening', () => {
       poolFinancialsRepository as never,
       ptcParametersRepository as never,
       escrowSetupRepository as never,
+      escrowMovementService as never,
     );
 
     return {
@@ -345,6 +356,7 @@ describe('Investor PTC buy and wallet hardening', () => {
       investorEscrowAccountRepository,
       investorEscrowLedgerRepository,
       investorClosedInvestmentRepository,
+      escrowMovementService,
     };
   }
 
