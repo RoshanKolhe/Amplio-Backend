@@ -91,6 +91,7 @@ import {TrusteeKycDocumentService} from './services/trustee-kyc-document.service
 import {MerchantPayoutService} from './services/merchant-payout.service';
 import {MerchantPayoutExecutorService} from './services/merchant-payout-executor.service';
 import {WalletWithdrawalService} from './services/wallet-withdrawal.service';
+import {SpvManagementService} from './services/spv-management.service';
 
 export {ApplicationConfig};
 
@@ -308,6 +309,9 @@ export class AmplioBackendApplication extends BootMixin(
     );
     this.bind('service.walletWithdrawal.service').toClass(
       WalletWithdrawalService,
+    );
+    this.bind('service.spvManagement.service').toClass(
+      SpvManagementService,
     );
   }
 

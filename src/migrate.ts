@@ -1,6 +1,8 @@
 import {AmplioBackendApplication} from './application';
+import {runEscrowLedgerArchitectureMigration} from './migrations/escrow-ledger-architecture.migration';
 import {runFintechIntegrityMigration} from './migrations/fintech-integrity.migration';
 import {runLegacySpvBackfillMigration} from './migrations/legacy-spv-backfill.migration';
+import {runSpvLegalMetadataMigration} from './migrations/spv-legal-metadata.migration';
 import {runWalletSchemaMigration} from './migrations/wallet-schema.migration';
 
 export async function migrate(args: string[]) {
@@ -106,6 +108,8 @@ export async function migrate(args: string[]) {
   });
 
   await runLegacySpvBackfillMigration(app);
+  await runSpvLegalMetadataMigration(app);
+  await runEscrowLedgerArchitectureMigration(app);
   await runWalletSchemaMigration(app);
   await runFintechIntegrityMigration(app);
 

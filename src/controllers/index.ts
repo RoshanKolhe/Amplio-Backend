@@ -39,6 +39,7 @@ export * from './ptc.controller';
 export * from './roles.controller';
 export * from './screens.controller';
 export * from './spv-kyc-document-type.controller';
+export * from './spv-management.controller';
 export * from './spv-super-admin.controller';
 export * from './transaction.controller';
 export * from './trustee-entity-types.controller';
