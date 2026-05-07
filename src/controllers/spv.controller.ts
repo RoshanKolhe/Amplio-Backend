@@ -503,7 +503,7 @@ async fetchApplicationById(
               settlor: {type: 'string'},
               governingLaw: {type: 'string'},
               // bankruptcyClause: {type: 'string'},
-              trustDuration: {type: 'string'},
+              // trustDuration: {type: 'string'},
               stampDutyAndRegistrationId: {type: 'string'},
             },
           },

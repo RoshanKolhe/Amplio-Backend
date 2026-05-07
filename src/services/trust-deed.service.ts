@@ -28,7 +28,7 @@ export type TrustDeedDetailsPayload = Partial<
     | 'settlor'
     | 'governingLaw'
     // | 'bankruptcyClause'
-    | 'trustDuration'
+    // | 'trustDuration'
     | 'stampDutyAndRegistrationId'
     | 'isActive'
     | 'isDeleted'

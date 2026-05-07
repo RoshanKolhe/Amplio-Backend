@@ -27,8 +27,8 @@ export class TrustDeed extends Entity {
   // @property({type: 'string'})
   // bankruptcyClause?: string;
 
-  @property({type: 'string'})
-  trustDuration?: string;
+  // @property({type: 'string'})
+  // trustDuration?: string;
 
   @belongsTo(() => Media)
   stampDutyAndRegistrationId?: string;
