@@ -223,6 +223,32 @@ async fetchApplicationById(
     };
   }
 
+
+  @authenticate('jwt')
+@authorize({roles: ['trustee']})
+@get('/spv-pre/generate-spv-name/{pspMasterId}')
+async generateSpvName(
+  @inject(AuthenticationBindings.CURRENT_USER)
+  currentUser: UserProfile,
+
+  @param.path.string('pspMasterId')
+  pspMasterId: string,
+): Promise<{
+  success: boolean;
+  spvName: string;
+}> {
+
+  const response =
+    await this.spvApplicationTransactionsService.generateSpvName(
+      pspMasterId,
+    );
+
+  return {
+    success: true,
+    spvName: response.spvName,
+  };
+}
+
   @authenticate('jwt')
   @authorize({roles: ['trustee']})
   @patch('/spv-pre/basic-info/{applicationId}')

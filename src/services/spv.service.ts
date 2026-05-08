@@ -2,6 +2,7 @@ import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {Spv} from '../models';
 import {
+  PspMasterRepository,
   SpvApplicationRepository,
   SpvRepository,
   TrusteeProfilesRepository,
@@ -15,7 +16,9 @@ export class SpvService {
     private spvApplicationRepository: SpvApplicationRepository,
     @repository(TrusteeProfilesRepository)
     private trusteeProfilesRepository: TrusteeProfilesRepository,
-  ) {}
+    @repository(PspMasterRepository)
+    private pspMasterRepository: PspMasterRepository,
+  ) { }
 
   private normalizeSpvName(spvName: string): string {
     return spvName.trim().toLowerCase();
@@ -47,7 +50,7 @@ export class SpvService {
       existing =>
         existing.id !== currentSpvId &&
         this.normalizeSpvName(existing.spvName) ===
-          this.normalizeSpvName(trimmedSpvName),
+        this.normalizeSpvName(trimmedSpvName),
     );
 
     if (duplicateSpv) {
@@ -87,6 +90,64 @@ export class SpvService {
 
     return `${prefix}${String(nextSequence).padStart(4, '0')}`;
   }
+
+  async generateSpvName(pspMasterId: string): Promise<string> {
+    const psp = await this.pspMasterRepository.findById(pspMasterId);
+
+    if (!psp) {
+      throw new HttpErrors.NotFound('PSP not found');
+    }
+
+    const getPspCode = (name = '') =>
+      name
+        .split(' ')
+        .map(word => word[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 4) || 'SPV';
+
+    const pspCode = getPspCode(psp.name);
+
+    const now = new Date();
+
+    const year = now.getFullYear();
+
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+
+    const prefix = `${pspCode}${year}${month}`;
+
+    const latestSpv = await this.spvRepository.findOne({
+      where: {
+        and: [
+          {
+            spvName: {
+              like: `${prefix}%`,
+            },
+          },
+          {isActive: true},
+          {isDeleted: false},
+        ],
+      },
+      order: ['spvName DESC'],
+    });
+
+    let nextSequence = 1;
+
+    if (latestSpv?.spvName) {
+
+      const lastSequence =
+        latestSpv.spvName.replace(prefix, '');
+
+      const parsedSequence = Number(lastSequence);
+
+      if (Number.isFinite(parsedSequence)) {
+        nextSequence = parsedSequence + 1;
+      }
+    }
+
+    return `${prefix}${String(nextSequence).padStart(2, '0')}`;
+  }
+
 
   async createOrUpdateSpv(
     applicationId: string,

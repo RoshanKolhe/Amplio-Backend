@@ -159,7 +159,7 @@ export class SpvApplicationTransactionsService {
         );
       }
 
-        if (application.linkedSpvId) {
+      if (application.linkedSpvId) {
         const existingSpv = await this.spvService.fetchSpvByIdOrFail(application.linkedSpvId);
 
         const currentStatus = await this.syncApplicationStatus(
@@ -843,4 +843,15 @@ export class SpvApplicationTransactionsService {
       throw error;
     }
   }
+
+  async generateSpvName(
+    pspMasterId: string,
+  ) {
+    const spvName =
+      await this.spvService.generateSpvName(pspMasterId);
+    return {
+      spvName,
+    };
+  }
+
 }

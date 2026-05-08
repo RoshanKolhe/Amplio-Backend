@@ -13,8 +13,15 @@ import {SpvApplication} from './spv-application.model';
       table: 'spv',
       schema: 'public',
     },
+    indexes: {
+      uniqueSpvName: {
+        keys: {spvName: 1},
+        options: {unique: true},
+      },
+    },
   },
 })
+
 export class Spv extends Entity {
 
   @property({
