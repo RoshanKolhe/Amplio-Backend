@@ -240,7 +240,7 @@ async fetchApplicationById(
               originatorName: {type: 'string'},
               spvName: {type: 'string'},
               legalStructure: {type: 'string'},
-              incorporationDate: {type: 'string', format: 'date'},
+              incorporationDate: {type: 'string'},
             },
           },
         },
@@ -255,7 +255,7 @@ async fetchApplicationById(
       | 'createdAt'
       | 'updatedAt'
       | 'deletedAt'
-    >,
+    > & {incorporationDate?: string | Date},
   ): Promise<{
     success: boolean;
     message: string;
