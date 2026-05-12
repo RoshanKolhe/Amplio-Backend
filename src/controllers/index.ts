@@ -13,6 +13,7 @@ export * from './company-kyc-document-requirements.controller';
 export * from './company-kyc-document-users.controller';
 export * from './company-kyc-document.controller';
 export * from './company-sector-type.controller';
+export * from './consent-template.controller';
 export * from './credit-rating-agencies.controller';
 export * from './credit-ratings.controller';
 export * from './document-extraction.controller';

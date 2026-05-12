@@ -6,6 +6,12 @@ import {Entity, model, property} from '@loopback/repository';
       table: 'consenttemplate',
       schema: 'public',
     },
+    indexes: {
+      uniqueConsentTemplateSlug: {
+        keys: {slug: 1},
+        options: {unique: true},
+      },
+    },
   },
 })
 export class ConsentTemplate extends Entity {
@@ -19,6 +25,18 @@ export class ConsentTemplate extends Entity {
     },
   })
   id: string;
+
+  @property({
+    type: 'string',
+    required: true,
+  })
+  slug: string;
+
+  @property({
+    type: 'string',
+    required: true,
+  })
+  roleType: string;
 
   @property({
     type: 'string',

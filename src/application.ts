@@ -84,6 +84,7 @@ import {SpvRepository} from './repositories/spv.repository';
 import {TransactionRepository} from './repositories/transaction.repository';
 import {EscrowService} from './services/escrow.service';
 import {EscrowMovementService} from './services/escrow-movement.service';
+import {ConsentTemplateService} from './services/consent-template.service';
 import {UserConsentService} from './services/user-consent.service';
 import {CompanyDataMapperService} from './services/company-brisk-data-mapper.service';
 import {PoolService} from './services/pool.service';
@@ -291,6 +292,9 @@ export class AmplioBackendApplication extends BootMixin(
     );
     this.bind('service.spv.service').toClass(
       SpvService,
+    );
+    this.bind('service.consentTemplateService.service').toClass(
+      ConsentTemplateService,
     );
     this.bind('service.userConsentService.service').toClass(
       UserConsentService
