@@ -26,10 +26,10 @@ import {
   BankDetailsRepository,
   KycApplicationsRepository,
   MerchantKycDocumentRepository,
+  MerchantPanCardRepository,
   MerchantPayoutBatchItemRepository,
   MerchantPayoutBatchRepository,
   MerchantPayoutConfigRepository,
-  MerchantPanCardRepository,
   MerchantProfilesRepository,
   OtpRepository,
   PspRepository,
@@ -37,8 +37,8 @@ import {
   RolesRepository,
   TransactionRepository,
   UboDetailsRepository,
-  UsersConsentRepository,
   UserRolesRepository,
+  UsersConsentRepository,
   UsersRepository,
 } from '../repositories';
 import {AddressDetailsService} from '../services/address-details.service';
@@ -104,7 +104,7 @@ export class MerchantProfilesController {
     private kycService: KycService,
     @inject('service.media.service')
     private mediaService: MediaService,
-  ) {}
+  ) { }
 
   async getKycApplicationStatus(applicationId: string): Promise<string[]> {
     const kycApplication =
@@ -319,11 +319,11 @@ export class MerchantProfilesController {
 
       const deletedMerchantPayoutBatchItems = merchantPayoutBatchIds.length
         ? await this.merchantPayoutBatchItemRepository.deleteAll(
-            {
-              merchantPayoutBatchId: {inq: merchantPayoutBatchIds},
-            },
-            {transaction: tx},
-          )
+          {
+            merchantPayoutBatchId: {inq: merchantPayoutBatchIds},
+          },
+          {transaction: tx},
+        )
         : {count: 0};
 
       const deletedMerchantPayoutBatches =
@@ -346,9 +346,9 @@ export class MerchantProfilesController {
 
       const deletedTransactions = pspIds.length
         ? await this.transactionRepository.deleteAll(
-            {pspId: {inq: pspIds}},
-            {transaction: tx},
-          )
+          {pspId: {inq: pspIds}},
+          {transaction: tx},
+        )
         : {count: 0};
 
       const deletedPsps = await this.pspRepository.deleteAll(
@@ -420,12 +420,12 @@ export class MerchantProfilesController {
 
       const deletedMerchantUserRoles = merchantRole
         ? await this.userRolesRepository.deleteAll(
-            {
-              usersId: merchantProfile.usersId,
-              rolesId: merchantRole.id,
-            },
-            {transaction: tx},
-          )
+          {
+            usersId: merchantProfile.usersId,
+            rolesId: merchantRole.id,
+          },
+          {transaction: tx},
+        )
         : {count: 0};
 
       const deletedRegistrationSessions =
@@ -727,34 +727,34 @@ export class MerchantProfilesController {
         }
       ).merchantDealershipType
         ? {
-            id: (
-              merchantProfile as MerchantProfiles & {
-                merchantDealershipType: {
-                  id: string;
-                  label: string;
-                  value: string;
-                };
-              }
-            ).merchantDealershipType.id,
-            label: (
-              merchantProfile as MerchantProfiles & {
-                merchantDealershipType: {
-                  id: string;
-                  label: string;
-                  value: string;
-                };
-              }
-            ).merchantDealershipType.label,
-            value: (
-              merchantProfile as MerchantProfiles & {
-                merchantDealershipType: {
-                  id: string;
-                  label: string;
-                  value: string;
-                };
-              }
-            ).merchantDealershipType.value,
-          }
+          id: (
+            merchantProfile as MerchantProfiles & {
+              merchantDealershipType: {
+                id: string;
+                label: string;
+                value: string;
+              };
+            }
+          ).merchantDealershipType.id,
+          label: (
+            merchantProfile as MerchantProfiles & {
+              merchantDealershipType: {
+                id: string;
+                label: string;
+                value: string;
+              };
+            }
+          ).merchantDealershipType.label,
+          value: (
+            merchantProfile as MerchantProfiles & {
+              merchantDealershipType: {
+                id: string;
+                label: string;
+                value: string;
+              };
+            }
+          ).merchantDealershipType.value,
+        }
         : null;
 
       const documentsResponse =
@@ -2019,7 +2019,7 @@ export class MerchantProfilesController {
       ...body.bankDetails,
       usersId: merchant.usersId,
       mode: 1,
-      status: 0,
+      status: 1,
       roleValue: 'merchant',
     });
 
@@ -2148,43 +2148,43 @@ export class MerchantProfilesController {
 
 
   @authenticate('jwt')
-@authorize({roles: ['merchant']})
-@patch('/merchant-profiles/bank-details/{accountId}/primary')
-async updatePrimaryBankAccount(
-  @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
-  @param.path.string('accountId') accountId: string,
-): Promise<{success: boolean; message: string}> {
-  const tx = await this.merchantProfilesRepository.dataSource.beginTransaction(
-    {IsolationLevel: IsolationLevel.READ_COMMITTED},
-  );
-
-  try {
-    const merchantProfile = await this.merchantProfilesRepository.findOne(
-      {
-        where: {
-          and: [{usersId: currentUser.id}, {isDeleted: false}],
-        },
-      },
-      {transaction: tx},
+  @authorize({roles: ['merchant']})
+  @patch('/merchant-profiles/bank-details/{accountId}/primary')
+  async updatePrimaryBankAccount(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @param.path.string('accountId') accountId: string,
+  ): Promise<{success: boolean; message: string}> {
+    const tx = await this.merchantProfilesRepository.dataSource.beginTransaction(
+      {IsolationLevel: IsolationLevel.READ_COMMITTED},
     );
 
-    if (!merchantProfile) {
-      throw new HttpErrors.NotFound('Merchant not found');
-    }
-
-    const bankDetailsResponse =
-      await this.bankDetailsService.markAccountAsPrimaryAccount(
-        accountId,
-        tx,
+    try {
+      const merchantProfile = await this.merchantProfilesRepository.findOne(
+        {
+          where: {
+            and: [{usersId: currentUser.id}, {isDeleted: false}],
+          },
+        },
+        {transaction: tx},
       );
 
-    await tx.commit();
-    return bankDetailsResponse;
-  } catch (error) {
-    await tx.rollback();
-    throw error;
+      if (!merchantProfile) {
+        throw new HttpErrors.NotFound('Merchant not found');
+      }
+
+      const bankDetailsResponse =
+        await this.bankDetailsService.markAccountAsPrimaryAccount(
+          accountId,
+          tx,
+        );
+
+      await tx.commit();
+      return bankDetailsResponse;
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
   }
-}
 
   @authenticate('jwt')
   @authorize({roles: ['merchant']})
@@ -2521,14 +2521,14 @@ async updatePrimaryBankAccount(
         body.udyamRegistrationNumber?.trim();
       const normalizedUdyamRegistrationNumber =
         trimmedUdyamRegistrationNumber &&
-        trimmedUdyamRegistrationNumber.length > 0
+          trimmedUdyamRegistrationNumber.length > 0
           ? trimmedUdyamRegistrationNumber
           : null;
 
       if (
         normalizedUdyamRegistrationNumber &&
         normalizedUdyamRegistrationNumber !==
-          merchantProfile.udyamRegistrationNumber
+        merchantProfile.udyamRegistrationNumber
       ) {
         const duplicateUdyam = await this.merchantProfilesRepository.findOne(
           {

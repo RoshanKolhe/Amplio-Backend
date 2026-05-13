@@ -1,4 +1,4 @@
-import {Entity, model, property, belongsTo} from '@loopback/repository';
+import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {SpvApplication} from './spv-application.model';
 
 
@@ -30,6 +30,8 @@ export class PtcParameters extends Entity {
 
   @property({type: 'number'})
   maxInvestors?: number;
+
+  // Need to remove the windofrequency and winndowDurationssss
 
   @property({type: 'string'})
   windowFrequency?: string;

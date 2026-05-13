@@ -18,6 +18,7 @@ import {
   RolesRepository,
   TrusteePanCardsRepository,
   TrusteeProfilesRepository,
+  UsersConsentRepository,
   UserRolesRepository,
   UsersRepository,
 } from '../repositories';
@@ -58,6 +59,8 @@ export class AuthController {
     private merchantProfileRepository: MerchantProfilesRepository,
     @repository(MerchantPanCardRepository)
     private merchantPanCardRepository: MerchantPanCardRepository,
+    @repository(UsersConsentRepository)
+    private usersConsentRepository: UsersConsentRepository,
     @inject('service.hasher')
     private hasher: BcryptHasher,
     @inject('service.user.service')
@@ -3530,6 +3533,19 @@ export class AuthController {
           merchantDealershipTypeId: body.merchantDealershipTypeId,
           isActive: false,
           isDeleted: false,
+        },
+        {transaction: tx},
+      );
+
+      // Dynamic consent logic: once merchant profile is created, link all
+      // onboarding session-based consent rows to the permanent identifierId.
+      await this.usersConsentRepository.updateAll(
+        {identifierId: newCompanyProfile.id},
+        {
+          and: [
+            {sessionId: body.sessionId},
+            {isDeleted: false},
+          ],
         },
         {transaction: tx},
       );

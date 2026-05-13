@@ -1,8 +1,11 @@
 import {AmplioBackendApplication} from './application';
+import {runConsentTemplateSlugMigration} from './migrations/consent-template-slug.migration';
 import {runEscrowLedgerArchitectureMigration} from './migrations/escrow-ledger-architecture.migration';
 import {runFintechIntegrityMigration} from './migrations/fintech-integrity.migration';
 import {runLegacySpvBackfillMigration} from './migrations/legacy-spv-backfill.migration';
 import {runSpvLegalMetadataMigration} from './migrations/spv-legal-metadata.migration';
+import {runUsersConsentIdentifierIdNullableMigration} from './migrations/users-consent-identifierid-nullable.migration';
+import {runUsersConsentIsCheckedMigration} from './migrations/users-consent-ischecked.migration';
 import {runWalletSchemaMigration} from './migrations/wallet-schema.migration';
 
 export async function migrate(args: string[]) {
@@ -108,6 +111,9 @@ export async function migrate(args: string[]) {
   });
 
   await runLegacySpvBackfillMigration(app);
+  await runConsentTemplateSlugMigration(app);
+  await runUsersConsentIsCheckedMigration(app);
+  await runUsersConsentIdentifierIdNullableMigration(app);
   await runSpvLegalMetadataMigration(app);
   await runEscrowLedgerArchitectureMigration(app);
   await runWalletSchemaMigration(app);

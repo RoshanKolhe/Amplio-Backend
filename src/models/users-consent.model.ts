@@ -1,4 +1,4 @@
-import {Entity, model, property, belongsTo} from '@loopback/repository';
+import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {ConsentTemplate} from './consent-template.model';
 
 @model({
@@ -23,16 +23,28 @@ export class UsersConsent extends Entity {
 
   @property({
     type: 'string',
-    required: true,
     postgresql: {dataType: 'uuid'},
   })
-  identifierId: string;
+  identifierId?: string;
+
+  @property({
+    type: 'string',
+    postgresql: {dataType: 'uuid'},
+  })
+  sessionId?: string;
 
   @property({
     type: 'date',
     default: () => new Date(),
   })
   acceptedAt: Date;
+
+  @property({
+    type: 'boolean',
+    required: true,
+    default: false,
+  })
+  isChecked: boolean;
 
   @property({
     type: 'string',
