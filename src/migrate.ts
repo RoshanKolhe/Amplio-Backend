@@ -2,11 +2,13 @@ import {AmplioBackendApplication} from './application';
 import {runConsentTemplateSlugMigration} from './migrations/consent-template-slug.migration';
 import {runEscrowLedgerArchitectureMigration} from './migrations/escrow-ledger-architecture.migration';
 import {runFintechIntegrityMigration} from './migrations/fintech-integrity.migration';
+import {runInvestmentOrderFoundationMigration} from './migrations/investment-order-foundation.migration';
 import {runLegacySpvBackfillMigration} from './migrations/legacy-spv-backfill.migration';
+import {runReservationSchemaMigration} from './migrations/reservation-schema.migration';
 import {runSpvLegalMetadataMigration} from './migrations/spv-legal-metadata.migration';
+import {runSpvPaymentVerificationMigration} from './migrations/spv-payment-verification.migration';
 import {runUsersConsentIdentifierIdNullableMigration} from './migrations/users-consent-identifierid-nullable.migration';
 import {runUsersConsentIsCheckedMigration} from './migrations/users-consent-ischecked.migration';
-import {runWalletSchemaMigration} from './migrations/wallet-schema.migration';
 
 export async function migrate(args: string[]) {
   const existingSchema = args.includes('--rebuild') ? 'drop' : 'alter';
@@ -49,11 +51,8 @@ export async function migrate(args: string[]) {
 
       // investor profile models..
       'InvestorProfile',
-      'InvestorEscrowAccount',
-      'InvestorEscrowLedger',
       'InvestorClosedInvestment',
       'InvestorPtcHolding',
-      'WithdrawalRequest',
       'InvestorPanCards',
       'BusinessKycCollateralAssets',
       'OwnershipTypes',
@@ -106,7 +105,13 @@ export async function migrate(args: string[]) {
       'IsinApplication',
       'SpvKycDocument',
       'SpvKycDocumentType',
-      'UsersConsent'
+      'UsersConsent',
+      'SpvPaymentVerification',
+      'RedemptionPayout',
+      'InvestmentOrder',
+      'PaymentAttempt',
+      'PtcFreeze',
+      'Escalation',
     ],
   });
 
@@ -116,8 +121,10 @@ export async function migrate(args: string[]) {
   await runUsersConsentIdentifierIdNullableMigration(app);
   await runSpvLegalMetadataMigration(app);
   await runEscrowLedgerArchitectureMigration(app);
-  await runWalletSchemaMigration(app);
+  await runSpvPaymentVerificationMigration(app);
   await runFintechIntegrityMigration(app);
+  await runReservationSchemaMigration(app);
+  await runInvestmentOrderFoundationMigration(app);
 
   // Connectors usually keep a pool of opened connections,
   // this keeps the process running even after all work is done.
