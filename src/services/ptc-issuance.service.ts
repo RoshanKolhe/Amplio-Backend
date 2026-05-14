@@ -11,9 +11,11 @@ import {
   PoolFinancials,
   PtcIssuance,
   PtcParameters,
+  RedemptionPayoutStatus,
   Spv,
 } from '../models';
 import {
+  BankDetailsRepository,
   EscrowSetupRepository,
   InvestorClosedInvestmentRepository,
   InvestorProfileRepository,
@@ -21,10 +23,12 @@ import {
   PoolFinancialsRepository,
   PtcIssuanceRepository,
   PtcParametersRepository,
+  RedemptionPayoutRepository,
   SpvRepository,
   TransactionRepository,
 } from '../repositories';
 import {EscrowMovementService} from './escrow-movement.service';
+import {ScheduleRedemptionPayoutPayload} from './redemption-payout.service';
 
 export type PtcInventorySummary = {
   totalUnits: number;
@@ -89,6 +93,13 @@ export type PendingRedemptionRequest = {
   status: string;
   transactionId?: string | null;
   failureReason?: string | null;
+  // Settlement scheduling — populated by redeemUnits() before processing
+  submittedAt?: Date;
+  submittedAfterCutoff?: boolean;
+  extraInterestDays?: number;
+  expectedPayoutDate?: Date;
+  bankAccountId?: string;
+  bankAccountSnapshot?: object;
 };
 
 export type ProcessedRedemptionResult = {
@@ -170,6 +181,10 @@ export class PtcIssuanceService {
     private escrowSetupRepository: EscrowSetupRepository,
     @inject('service.escrowMovement.service')
     private escrowMovementService: EscrowMovementService,
+    @repository(BankDetailsRepository)
+    private bankDetailsRepository: BankDetailsRepository,
+    @repository(RedemptionPayoutRepository)
+    private redemptionPayoutRepository: RedemptionPayoutRepository,
   ) {}
 
   private normalizeAmount(value: number | undefined | null): number {
@@ -1270,6 +1285,9 @@ export class PtcIssuanceService {
     availableUnitsBefore: number;
     remainingUnits: number;
     unitPrice: number;
+    expectedPayoutDate: Date | undefined;
+    submittedAfterCutoff: boolean;
+    payoutBankAccountId: string | undefined;
   }> {
     const normalizedRequestedUnits = this.validatePositiveIntegerUnits(
       requestedUnits,
@@ -1279,6 +1297,25 @@ export class PtcIssuanceService {
     const spv = await this.fetchSpvOrFail(spvId);
     const ptcParameters = await this.fetchPtcParametersForSpvOrFail(spv);
     this.ensureRedemptionWindowOrFail(ptcParameters);
+
+    // ── Validate primary bank account BEFORE deducting any units ─────────
+    const primaryBank = await this.bankDetailsRepository.findOne({
+      where: {
+        and: [
+          {usersId: currentUser.id},
+          {isPrimary: true},
+          {status: 1},      // 1 = approved/verified
+          {isActive: true},
+          {isDeleted: false},
+        ],
+      },
+    });
+
+    if (!primaryBank) {
+      throw new HttpErrors.UnprocessableEntity(
+        'No verified primary bank account found. Please add and verify a bank account before withdrawing.',
+      );
+    }
 
     const investorProfile = await this.fetchInvestorProfileOrFail(currentUser.id);
     const holdings = await this.fetchInvestorHoldingsForRedemption(
@@ -1315,6 +1352,38 @@ export class PtcIssuanceService {
       throw new HttpErrors.Conflict('Unable to determine redemption unit price');
     }
 
+    // ── Calculate 5 PM IST settlement schedule ────────────────────────────
+    const submittedAt = new Date();
+    const istOffsetMs = PtcIssuanceService.IST_OFFSET_MINUTES * 60 * 1000;
+    const istNow = new Date(submittedAt.getTime() + istOffsetMs);
+    const submittedAfterCutoff =
+      istNow.getUTCHours() >= PtcIssuanceService.IST_INTEREST_CUTOFF_HOUR;
+    const extraInterestDays = submittedAfterCutoff ? 0 : 1;
+
+    // expectedPayoutDate: T+1 if before cutoff, T+2 if after; skip weekends
+    const todayIst = new Date(istNow);
+    todayIst.setUTCHours(0, 0, 0, 0);
+    const dayOffset = submittedAfterCutoff ? 2 : 1;
+    const candidateIst = new Date(todayIst.getTime() + dayOffset * 86400000);
+    const candidateDay = candidateIst.getUTCDay();
+    if (candidateDay === 0) candidateIst.setUTCDate(candidateIst.getUTCDate() + 1);
+    if (candidateDay === 6) candidateIst.setUTCDate(candidateIst.getUTCDate() + 2);
+    const expectedPayoutDate = new Date(candidateIst.getTime() - istOffsetMs);
+    expectedPayoutDate.setUTCHours(0, 0, 0, 0);
+
+    // ── Bank snapshot — captured at submission time so immutable ─────────
+    const bankAccountSnapshot = {
+      id: primaryBank.id,
+      bankName: primaryBank.bankName,
+      bankShortCode: primaryBank.bankShortCode,
+      ifscCode: primaryBank.ifscCode,
+      branchName: primaryBank.branchName,
+      accountType: primaryBank.accountType,
+      accountHolderName: primaryBank.accountHolderName,
+      accountNumber: primaryBank.accountNumber,
+      verifiedAt: primaryBank.verifiedAt,
+    };
+
     const pendingRequest: PendingRedemptionRequest = {
       id: uuidv4(),
       investorProfileId: investorProfile.id,
@@ -1324,6 +1393,12 @@ export class PtcIssuanceService {
       status: 'PENDING',
       transactionId: uuidv4(),
       failureReason: null,
+      submittedAt,
+      submittedAfterCutoff,
+      extraInterestDays,
+      expectedPayoutDate,
+      bankAccountId: primaryBank.id,
+      bankAccountSnapshot,
     };
 
     const redemptionResult = await this.processPendingRedemption(
@@ -1341,6 +1416,9 @@ export class PtcIssuanceService {
       availableUnitsBefore,
       remainingUnits,
       unitPrice,
+      expectedPayoutDate,
+      submittedAfterCutoff,
+      payoutBankAccountId: primaryBank.id,
     };
   }
 
@@ -2199,9 +2277,12 @@ export class PtcIssuanceService {
         }
 
         const redeemedPrincipal = principalAllocations[index] ?? 0;
-        const accruedDays = this.calculateAccruedInterestDays(
+        const baseDays = this.calculateAccruedInterestDays(
           holding.createdAt ? new Date(holding.createdAt) : undefined,
         );
+        // Add 1 extra day if submitted before 5 PM IST (investor earns the day's interest)
+        const extraInterestDays = request.extraInterestDays ?? 1;
+        const accruedDays = baseDays + extraInterestDays;
         const interestForHolding = this.normalizeAmount(
           redeemedCostForHolding * dailyInterestRate * accruedDays,
         );
@@ -2293,6 +2374,47 @@ export class PtcIssuanceService {
         },
         tx,
       );
+
+      // ── Create scheduled payout record inside the same transaction ────────
+      // This ensures the payout record and unit deduction are atomic: either
+      // both commit or both roll back.
+      if (request.bankAccountId) {
+        const idempotencyKey =
+          `${request.investorProfileId}:${request.spvId}:${transactionId}`;
+
+        await this.redemptionPayoutRepository.create(
+          {
+            id: uuidv4(),
+            investorProfileId: request.investorProfileId,
+            spvId: request.spvId,
+            transactionId,
+            redemptionRequestId: request.id,
+            units: normalizedRequestedUnits,
+            grossPayout,
+            netPayout,
+            principalPayout,
+            interestPayout,
+            capitalGain,
+            stampDutyAmount,
+            stampDutyRate,
+            annualInterestRate: this.normalizeAmount(annualInterestRate),
+            status: RedemptionPayoutStatus.REQUESTED,
+            submittedAt: request.submittedAt ?? new Date(),
+            submittedAfterCutoff: request.submittedAfterCutoff ?? false,
+            extraInterestDays: request.extraInterestDays ?? 1,
+            expectedPayoutDate: request.expectedPayoutDate,
+            bankAccountId: request.bankAccountId,
+            bankAccountSnapshot: request.bankAccountSnapshot,
+            idempotencyKey,
+            retryCount: 0,
+            isActive: true,
+            isDeleted: false,
+            createdBy: processedBy,
+            updatedBy: processedBy,
+          } as ScheduleRedemptionPayoutPayload & {id: string; status: RedemptionPayoutStatus; idempotencyKey: string; retryCount: number; isActive: boolean; isDeleted: boolean},
+          this.getOptions(tx) as object,
+        );
+      }
 
       request.status = 'SUCCESS';
       request.failureReason = null;

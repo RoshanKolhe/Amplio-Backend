@@ -78,6 +78,7 @@ import {IsinApplicationService} from './services/isin-application.service';
 import {EscalationSlaCron} from './crons/escalation-sla.cron';
 import {MerchantPayoutCron} from './crons/merchant-payout.cron';
 import {PaymentWindowTimeoutCron} from './crons/payment-window-timeout.cron';
+import {RedemptionPayoutCron} from './crons/redemption-payout.cron';
 import {SpvPoolCron} from './crons/spv-pool.cron';
 import {SpvReservationCron} from './crons/spv-reservation.cron';
 import {TransactionCron} from './crons/transaction.cron';
@@ -115,6 +116,7 @@ export class AmplioBackendApplication extends BootMixin(
   private spvReservationCron?: SpvReservationCron;
   private paymentWindowTimeoutCron?: PaymentWindowTimeoutCron;
   private escalationSlaCron?: EscalationSlaCron;
+  private redemptionPayoutCron?: RedemptionPayoutCron;
 
   constructor(options: ApplicationConfig = {}) {
     super(options);
@@ -366,7 +368,8 @@ export class AmplioBackendApplication extends BootMixin(
       this.spvPoolCron &&
       this.spvReservationCron &&
       this.paymentWindowTimeoutCron &&
-      this.escalationSlaCron
+      this.escalationSlaCron &&
+      this.redemptionPayoutCron
     ) {
       return;
     }
@@ -490,6 +493,15 @@ export class AmplioBackendApplication extends BootMixin(
       this.escalationSlaCron = new EscalationSlaCron(escalationRepository);
       this.escalationSlaCron.start();
       console.log('[Cron] Escalation SLA cron started');
+    }
+
+    if (!this.redemptionPayoutCron) {
+      const redemptionPayoutService = await this.get<RedemptionPayoutService>(
+        'service.redemptionPayout.service',
+      );
+      this.redemptionPayoutCron = new RedemptionPayoutCron(redemptionPayoutService);
+      this.redemptionPayoutCron.start();
+      console.log('[Cron] Redemption payout cron started');
     }
   }
 }

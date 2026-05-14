@@ -3,6 +3,7 @@ import {runConsentTemplateSlugMigration} from './migrations/consent-template-slu
 import {runEscrowLedgerArchitectureMigration} from './migrations/escrow-ledger-architecture.migration';
 import {runFintechIntegrityMigration} from './migrations/fintech-integrity.migration';
 import {runInvestmentOrderFoundationMigration} from './migrations/investment-order-foundation.migration';
+import {runRedemptionPayoutSettlementMigration} from './migrations/redemption-payout-settlement.migration';
 import {runLegacySpvBackfillMigration} from './migrations/legacy-spv-backfill.migration';
 import {runReservationSchemaMigration} from './migrations/reservation-schema.migration';
 import {runSpvLegalMetadataMigration} from './migrations/spv-legal-metadata.migration';
@@ -125,6 +126,7 @@ export async function migrate(args: string[]) {
   await runFintechIntegrityMigration(app);
   await runReservationSchemaMigration(app);
   await runInvestmentOrderFoundationMigration(app);
+  await runRedemptionPayoutSettlementMigration(app);
 
   // Connectors usually keep a pool of opened connections,
   // this keeps the process running even after all work is done.
