@@ -6,9 +6,6 @@ import {v4 as uuidv4} from 'uuid';
 import {AmplioDataSource} from '../datasources';
 import {
   InvestorClosedInvestmentStatus,
-  InvestorEscrowLedgerStatus,
-  InvestorEscrowLedgerType,
-  InvestorEscrowAccount,
   InvestorProfile,
   InvestorPtcHolding,
   PoolFinancials,
@@ -19,8 +16,6 @@ import {
 import {
   EscrowSetupRepository,
   InvestorClosedInvestmentRepository,
-  InvestorEscrowAccountRepository,
-  InvestorEscrowLedgerRepository,
   InvestorProfileRepository,
   InvestorPtcHoldingRepository,
   PoolFinancialsRepository,
@@ -42,6 +37,19 @@ export type PtcInventorySummary = {
   soldPercentage: number;
   poolEscrowSetupId: string | null;
 };
+
+export type UnitReservation = {
+  ptcIssuanceId: string;
+  reservedUnits: number;
+};
+
+export type ReserveUnitsResult = {
+  reservations: UnitReservation[];
+  totalReservedUnits: number;
+  expiresAt: Date;
+};
+
+const RESERVATION_EXPIRY_MINUTES = 30;
 
 type BuyAllocationPlanItem = {
   issuance: PtcIssuance;
@@ -128,30 +136,16 @@ type ClosedInvestmentSnapshotPayload = {
   stampDutyAmount: number;
   annualInterestRate: number;
   poolFinancialsId: string;
-  redemptionLedgerId: string;
+  redemptionLedgerId?: string;
   processedBy: string;
   holdingsBreakdown: RedemptionHoldingBreakdown[];
-};
-
-type InvestorEscrowLedgerHistoryRow = {
-  id?: string;
-  amount?: number | string | null;
-  createdat?: Date | string | null;
-  createdAt?: Date | string | null;
-  metadata?: unknown;
-};
-
-type InvestorSpvLedgerEntry = {
-  amount: number;
-  createdAt: Date;
-  metadata: Record<string, unknown>;
 };
 
 export class PtcIssuanceService {
   private static readonly REDEMPTION_TIMEZONE = 'Asia/Kolkata';
   private static readonly DEFAULT_IST_REDEMPTION_DAY_INDEX = 2;
   private static readonly IST_OFFSET_MINUTES = 330;
-  private static readonly IST_INTEREST_CUTOFF_HOUR = 20;
+  private static readonly IST_INTEREST_CUTOFF_HOUR = 17;
 
   constructor(
     @inject('datasources.amplio')
@@ -160,10 +154,6 @@ export class PtcIssuanceService {
     private ptcIssuanceRepository: PtcIssuanceRepository,
     @repository(InvestorPtcHoldingRepository)
     private investorPtcHoldingRepository: InvestorPtcHoldingRepository,
-    @repository(InvestorEscrowAccountRepository)
-    private investorEscrowAccountRepository: InvestorEscrowAccountRepository,
-    @repository(InvestorEscrowLedgerRepository)
-    private investorEscrowLedgerRepository: InvestorEscrowLedgerRepository,
     @repository(InvestorClosedInvestmentRepository)
     private investorClosedInvestmentRepository: InvestorClosedInvestmentRepository,
     @repository(InvestorProfileRepository)
@@ -201,90 +191,6 @@ export class PtcIssuanceService {
     return tx ? {transaction: tx} : undefined;
   }
 
-  private toFiniteNumber(value: unknown): number {
-    if (typeof value === 'number') {
-      return Number.isFinite(value) ? value : 0;
-    }
-
-    if (typeof value === 'string') {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : 0;
-    }
-
-    return 0;
-  }
-
-  private parseLedgerMetadata(metadata: unknown): Record<string, unknown> {
-    if (!metadata) {
-      return {};
-    }
-
-    if (typeof metadata === 'string') {
-      try {
-        const parsed = JSON.parse(metadata);
-        return parsed && typeof parsed === 'object'
-          ? (parsed as Record<string, unknown>)
-          : {};
-      } catch {
-        return {};
-      }
-    }
-
-    return metadata && typeof metadata === 'object'
-      ? (metadata as Record<string, unknown>)
-      : {};
-  }
-
-  private parseLedgerCreatedAt(
-    createdAtValue: Date | string | null | undefined,
-  ): Date | null {
-    if (!createdAtValue) {
-      return null;
-    }
-
-    const parsed = new Date(createdAtValue);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-
-  private async fetchInvestorLedgerHistoryForSpv(
-    investorProfileId: string,
-    spvId: string,
-    type: InvestorEscrowLedgerType,
-    tx: unknown,
-  ): Promise<InvestorSpvLedgerEntry[]> {
-    const rows = (await this.datasource.execute(
-      `
-      SELECT id, amount, createdat, metadata
-      FROM public.investor_escrow_ledgers
-      WHERE investorid = $1
-        AND type = $2
-        AND status = $3
-        AND isdeleted = false
-        AND metadata IS NOT NULL
-        AND metadata->>'spvId' = $4
-      ORDER BY createdat ASC, id ASC
-      `,
-      [investorProfileId, type, InvestorEscrowLedgerStatus.SUCCESS, spvId],
-      this.getOptions(tx),
-    )) as InvestorEscrowLedgerHistoryRow[];
-
-    return rows
-      .map(row => {
-        const createdAt = this.parseLedgerCreatedAt(
-          row.createdat ?? row.createdAt,
-        );
-        if (!createdAt) {
-          return null;
-        }
-
-        return {
-          amount: this.normalizeAmount(this.toFiniteNumber(row.amount)),
-          createdAt,
-          metadata: this.parseLedgerMetadata(row.metadata),
-        };
-      })
-      .filter((row): row is InvestorSpvLedgerEntry => Boolean(row));
-  }
 
   private validatePositiveIntegerUnits(
     requestedUnits: number,
@@ -328,35 +234,6 @@ export class PtcIssuanceService {
       [investorProfileId, referenceId],
       this.getOptions(tx),
     );
-  }
-
-  private async findIdempotentBuyResult(
-    investorProfileId: string,
-    referenceId: string,
-    tx: unknown,
-  ): Promise<BuyUnitsResult | null> {
-    const existingLedger = await this.investorEscrowLedgerRepository.findOne(
-      {
-        where: {
-          and: [
-            {investorId: investorProfileId},
-            {type: InvestorEscrowLedgerType.BUY_DEBIT},
-            {referenceType: 'PTC_BUY_IDEMPOTENCY'},
-            {referenceId},
-            {status: InvestorEscrowLedgerStatus.SUCCESS},
-            {isDeleted: false},
-          ],
-        },
-      },
-      this.getOptions(tx),
-    );
-
-    const metadata =
-      existingLedger?.metadata && typeof existingLedger.metadata === 'object'
-        ? (existingLedger.metadata as {allocationResult?: BuyUnitsResult})
-        : undefined;
-
-    return metadata?.allocationResult ?? null;
   }
 
   private toIstPseudoDate(date: Date): Date {
@@ -645,31 +522,6 @@ export class PtcIssuanceService {
     return investorProfile;
   }
 
-  private async fetchInvestorWalletOrFail(
-    investorProfileId: string,
-    tx?: unknown,
-  ): Promise<InvestorEscrowAccount> {
-    const investorWallet = await this.investorEscrowAccountRepository.findOne(
-      {
-        where: {
-          and: [
-            {investorProfileId},
-            {isActive: true},
-            {isDeleted: false},
-            {status: {neq: 'inactive'}},
-          ],
-        },
-      },
-      this.getOptions(tx),
-    );
-
-    if (!investorWallet) {
-      throw new HttpErrors.BadRequest('Investor wallet not found');
-    }
-
-    return investorWallet;
-  }
-
   private async fetchInvestorOwnedUnits(
     investorProfileId: string,
     spvId: string,
@@ -876,21 +728,6 @@ export class PtcIssuanceService {
        WHERE id = ANY($1::uuid[])
        FOR UPDATE`,
       [issuanceIds],
-      this.getOptions(tx),
-    );
-  }
-
-  private async lockInvestorWalletRow(
-    investorProfileId: string,
-    tx: unknown,
-  ): Promise<void> {
-    await this.datasource.execute(
-      `SELECT id FROM public.investor_escrow_accounts
-       WHERE investorprofileid = $1
-         AND isactive = true
-         AND isdeleted = false
-       FOR UPDATE`,
-      [investorProfileId],
       this.getOptions(tx),
     );
   }
@@ -1191,19 +1028,8 @@ export class PtcIssuanceService {
           idempotencyReferenceId,
           tx,
         );
-        const idempotentResult = await this.findIdempotentBuyResult(
-          investorProfile.id,
-          idempotencyReferenceId,
-          tx,
-        );
-
-        if (idempotentResult) {
-          await tx.commit();
-          return idempotentResult;
-        }
       }
 
-      await this.fetchInvestorWalletOrFail(investorProfile.id, tx);
       const pool = await this.fetchPoolForSpvOrFail(spvId, tx);
       const spv = await this.fetchSpvOrFail(spvId, tx);
       const ptcParameters = await this.fetchPtcParametersForSpvOrFail(spv, tx);
@@ -1232,16 +1058,10 @@ export class PtcIssuanceService {
         this.getOptions(tx),
       );
 
-      await this.lockInvestorWalletRow(investorProfile.id, tx);
       await this.lockInvestorInventoryRows(
         investorProfile.id,
         spvId,
         issuances.map(issuance => issuance.id),
-        tx,
-      );
-
-      const lockedWallet = await this.fetchInvestorWalletOrFail(
-        investorProfile.id,
         tx,
       );
 
@@ -1299,12 +1119,6 @@ export class PtcIssuanceService {
       const {allocationPlan, allocatedUnits, totalInvestmentCost} =
         this.buildBuyAllocationPlan(lockedIssuances, allowedUnits);
       const finalDebitAmount = this.normalizeAmount(totalInvestmentCost);
-      const balanceBefore = this.normalizeAmount(lockedWallet.currentBalance);
-      const blockedBalance = this.normalizeAmount(lockedWallet.blockedBalance);
-      const availableBalanceBefore = this.normalizeAmount(
-        balanceBefore - blockedBalance,
-      );
-      const balanceAfter = this.normalizeAmount(balanceBefore - finalDebitAmount);
 
       // validation
       if (allocatedUnits !== allowedUnits) {
@@ -1313,14 +1127,6 @@ export class PtcIssuanceService {
 
       if (finalDebitAmount <= 0) {
         throw new HttpErrors.BadRequest('Total investment cost must be greater than zero');
-      }
-
-      if (availableBalanceBefore < finalDebitAmount) {
-        throw new HttpErrors.BadRequest('Insufficient available wallet balance');
-      }
-
-      if (balanceAfter < blockedBalance) {
-        throw new HttpErrors.BadRequest('Insufficient available wallet balance');
       }
 
       // transaction
@@ -1383,30 +1189,20 @@ export class PtcIssuanceService {
         }
       }
 
-      await this.investorEscrowAccountRepository.updateById(
-        lockedWallet.id,
-        {
-          currentBalance: balanceAfter,
-          blockedBalance,
-        },
-        this.getOptions(tx),
-      );
-
       const transactionId = uuidv4();
       await this.escrowMovementService.recordInvestmentMovement(
         {
-          investorEscrowAccountId: lockedWallet.id,
           investorId: investorProfile.id,
           spvId,
           amount: finalDebitAmount,
-          balanceBefore,
-          balanceAfter,
+          balanceBefore: 0,
+          balanceAfter: 0,
           transactionId,
           referenceType: idempotencyReferenceId
             ? 'PTC_BUY_IDEMPOTENCY'
             : 'PTC_BUY',
           referenceId: idempotencyReferenceId ?? spvId,
-          remarks: `Wallet debited for ${allocatedUnits} PTC unit(s)`,
+          remarks: `PTC buy: ${allocatedUnits} unit(s) pending SPV payment verification`,
           metadata: {
             spvId,
             requestedUnits: normalizedRequestedUnits,
@@ -1428,9 +1224,9 @@ export class PtcIssuanceService {
               ),
               poolEscrowSetupId,
               transactionId,
-              balanceBefore,
-              balanceAfter,
-              availableBalanceBefore,
+              balanceBefore: 0,
+              balanceAfter: 0,
+              availableBalanceBefore: 0,
             },
           },
           createdBy: currentUser.id,
@@ -1455,9 +1251,9 @@ export class PtcIssuanceService {
         investorRemainingLimit: Math.max(investorRemainingLimit - allocatedUnits, 0),
         poolEscrowSetupId,
         transactionId,
-        balanceBefore,
-        balanceAfter,
-        availableBalanceBefore,
+        balanceBefore: 0,
+        balanceAfter: 0,
+        availableBalanceBefore: 0,
       };
     } catch (error) {
       await tx.rollback();
@@ -1548,6 +1344,640 @@ export class PtcIssuanceService {
     };
   }
 
+  async reserveUnitsForVerification(
+    spvId: string,
+    units: number,
+    verificationId: string,
+    externalTx?: unknown,
+  ): Promise<ReserveUnitsResult> {
+    const normalizedUnits = this.validatePositiveIntegerUnits(units);
+    const isOwnTx = !externalTx;
+    const tx = externalTx ?? await this.datasource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const pool = await this.fetchPoolForSpvOrFail(spvId, tx);
+
+      const issuanceIds = await this.ptcIssuanceRepository
+        .find(
+          {
+            where: {
+              and: [
+                {spvId},
+                {poolFinancialsId: pool.id},
+                {isDeleted: false},
+                {isActive: true},
+              ],
+            },
+            fields: {id: true},
+            order: ['createdAt ASC'],
+          },
+          this.getOptions(tx),
+        )
+        .then(rows => rows.map(r => r.id));
+
+      if (issuanceIds.length > 0) {
+        await this.datasource.execute(
+          `SELECT id FROM public.ptc_issuances WHERE id = ANY($1::uuid[]) FOR UPDATE`,
+          [issuanceIds],
+          this.getOptions(tx),
+        );
+      }
+
+      const lockedIssuances = await this.ptcIssuanceRepository.find(
+        {
+          where: {
+            and: [
+              {spvId},
+              {poolFinancialsId: pool.id},
+              {isDeleted: false},
+              {isActive: true},
+            ],
+          },
+          order: ['createdAt ASC'],
+        },
+        this.getOptions(tx),
+      );
+
+      const totalAvailable = lockedIssuances.reduce(
+        (sum, i) => sum + Number(i.remainingUnits ?? 0),
+        0,
+      );
+
+      if (totalAvailable < normalizedUnits) {
+        throw new HttpErrors.BadRequest(
+          `Insufficient units available for reservation: ${totalAvailable} available, ${normalizedUnits} requested`,
+        );
+      }
+
+      const reservations: UnitReservation[] = [];
+      let remaining = normalizedUnits;
+
+      for (const issuance of lockedIssuances) {
+        if (remaining <= 0) break;
+
+        const available = Number(issuance.remainingUnits ?? 0);
+        if (available <= 0) continue;
+
+        const toReserve = Math.min(remaining, available);
+        reservations.push({ptcIssuanceId: issuance.id, reservedUnits: toReserve});
+
+        await this.ptcIssuanceRepository.updateById(
+          issuance.id,
+          {
+            reservedUnits: Number(issuance.reservedUnits ?? 0) + toReserve,
+            remainingUnits: available - toReserve,
+          },
+          this.getOptions(tx),
+        );
+
+        remaining -= toReserve;
+      }
+
+      if (isOwnTx) {
+        await (tx as {commit(): Promise<void>}).commit();
+      }
+
+      const expiresAt = new Date(
+        Date.now() + RESERVATION_EXPIRY_MINUTES * 60 * 1000,
+      );
+
+      console.log(
+        `[PtcIssuance] Reserved ${normalizedUnits} units for verification ${verificationId} across ${reservations.length} issuance(s), expires ${expiresAt.toISOString()}`,
+      );
+
+      return {reservations, totalReservedUnits: normalizedUnits, expiresAt};
+    } catch (error) {
+      if (isOwnTx) {
+        await (tx as {rollback(): Promise<void>}).rollback();
+      }
+      throw error;
+    }
+  }
+
+  async releaseUnitsReservation(
+    reservations: UnitReservation[],
+    reason?: string,
+    externalTx?: unknown,
+  ): Promise<void> {
+    if (!reservations.length) return;
+
+    const isOwnTx = !externalTx;
+    const tx = externalTx ?? await this.datasource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      const issuanceIds = reservations.map(r => r.ptcIssuanceId);
+
+      await this.datasource.execute(
+        `SELECT id FROM public.ptc_issuances WHERE id = ANY($1::uuid[]) FOR UPDATE`,
+        [issuanceIds],
+        this.getOptions(tx),
+      );
+
+      for (const reservation of reservations) {
+        const issuance = await this.ptcIssuanceRepository.findById(
+          reservation.ptcIssuanceId,
+          undefined,
+          this.getOptions(tx),
+        );
+
+        const currentReserved = Number(issuance.reservedUnits ?? 0);
+        const toRelease = Math.min(reservation.reservedUnits, currentReserved);
+
+        if (toRelease <= 0) continue;
+
+        const newReserved = currentReserved - toRelease;
+        const newRemaining = Number(issuance.remainingUnits ?? 0) + toRelease;
+
+        await this.ptcIssuanceRepository.updateById(
+          reservation.ptcIssuanceId,
+          {
+            reservedUnits: newReserved,
+            remainingUnits: newRemaining,
+            // If previously SOLD_OUT but now has remaining, restore to ACTIVE
+            status: issuance.status === 'SOLD_OUT' ? 'ACTIVE' : issuance.status,
+          },
+          this.getOptions(tx),
+        );
+      }
+
+      if (isOwnTx) {
+        await (tx as {commit(): Promise<void>}).commit();
+      }
+
+      console.log(
+        `[PtcIssuance] Released reservation for ${reservations.length} issuance(s)${reason ? ` (${reason})` : ''}`,
+      );
+    } catch (error) {
+      if (isOwnTx) {
+        await (tx as {rollback(): Promise<void>}).rollback();
+      }
+      throw error;
+    }
+  }
+
+  async allocateUnitsForVerifiedPayment(
+    investorProfileId: string,
+    spvId: string,
+    units: number,
+    verificationId: string,
+    createdBy: string,
+    existingReservations?: UnitReservation[],
+  ): Promise<BuyUnitsResult> {
+    const normalizedRequestedUnits = this.validatePositiveIntegerUnits(units);
+
+    const tx = await this.datasource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
+    });
+
+    try {
+      await this.lockBuyIdempotencyKey(investorProfileId, verificationId, tx);
+
+      const statusRows = await this.datasource.execute(
+        'SELECT status FROM public.spv_payment_verifications WHERE id = $1 FOR UPDATE',
+        [verificationId],
+        this.getOptions(tx),
+      ) as Array<{status: string}>;
+
+      if (statusRows?.[0]?.status === 'ALLOCATED') {
+        await tx.commit();
+        return {
+          spvId,
+          requestedUnits: normalizedRequestedUnits,
+          allocatedUnits: normalizedRequestedUnits,
+          partialAllocation: false,
+          totalInvestment: 0,
+          totalUnits: 0,
+          soldUnits: 0,
+          availableUnits: 0,
+          maxUnitsPerInvestor: 0,
+          investorRemainingLimit: 0,
+          poolEscrowSetupId: null,
+          transactionId: '',
+          balanceBefore: 0,
+          balanceAfter: 0,
+          availableBalanceBefore: 0,
+        };
+      }
+
+      const pool = await this.fetchPoolForSpvOrFail(spvId, tx);
+      const spv = await this.fetchSpvOrFail(spvId, tx);
+      const ptcParameters = await this.fetchPtcParametersForSpvOrFail(spv, tx);
+      const poolEscrowSetupId = await this.findPoolEscrowSetupId(
+        pool,
+        spv.spvApplicationId,
+        tx,
+      );
+
+      if (!poolEscrowSetupId) {
+        throw new HttpErrors.BadRequest('Pool escrow account is not configured');
+      }
+
+      // Reservation conversion path: units were pre-deducted from remainingUnits at
+      // UTR submission time. Convert reservedUnits → soldUnits without re-touching remainingUnits.
+      if (existingReservations && existingReservations.length > 0) {
+        const rsvIssuanceIds = existingReservations.map(r => r.ptcIssuanceId);
+
+        await this.datasource.execute(
+          `SELECT id FROM public.ptc_issuances WHERE id = ANY($1::uuid[]) FOR UPDATE`,
+          [rsvIssuanceIds],
+          this.getOptions(tx),
+        );
+
+        const rsvLockedIssuances = await Promise.all(
+          rsvIssuanceIds.map(id =>
+            this.ptcIssuanceRepository.findById(id, undefined, this.getOptions(tx)),
+          ),
+        );
+        const rsvIssuanceMap = new Map(rsvLockedIssuances.map(i => [i.id, i]));
+
+        let rsvTotalCost = 0;
+        const rsvPlan: {
+          issuance: PtcIssuance;
+          allocatedUnits: number;
+          costForThisBatch: number;
+        }[] = [];
+
+        for (const rsv of existingReservations) {
+          const issuance = rsvIssuanceMap.get(rsv.ptcIssuanceId);
+          if (!issuance) {
+            throw new HttpErrors.NotFound(
+              `Issuance ${rsv.ptcIssuanceId} not found during reservation conversion`,
+            );
+          }
+          const cost = this.normalizeAmount(
+            rsv.reservedUnits * Number(issuance.unitPrice ?? 0),
+          );
+          rsvPlan.push({issuance, allocatedUnits: rsv.reservedUnits, costForThisBatch: cost});
+          rsvTotalCost = this.normalizeAmount(rsvTotalCost + cost);
+        }
+
+        const rsvAllocatedUnits = existingReservations.reduce(
+          (sum, r) => sum + r.reservedUnits,
+          0,
+        );
+        const rsvFinalDebit = this.normalizeAmount(rsvTotalCost);
+
+        if (rsvFinalDebit <= 0) {
+          throw new HttpErrors.BadRequest(
+            'Total investment cost must be greater than zero',
+          );
+        }
+
+        const rsvInvestorProfile = await this.investorProfileRepository.findById(
+          investorProfileId,
+          undefined,
+          this.getOptions(tx),
+        );
+
+        for (const planItem of rsvPlan) {
+          const currentReserved = Math.max(
+            Number(planItem.issuance.reservedUnits ?? 0),
+            0,
+          );
+          const nextSoldUnits =
+            Number(planItem.issuance.soldUnits ?? 0) + planItem.allocatedUnits;
+          const nextReservedUnits = Math.max(
+            currentReserved - planItem.allocatedUnits,
+            0,
+          );
+          const nextRemainingUnits = Number(planItem.issuance.remainingUnits ?? 0);
+
+          await this.ptcIssuanceRepository.updateById(
+            planItem.issuance.id,
+            {
+              soldUnits: nextSoldUnits,
+              reservedUnits: nextReservedUnits,
+              status:
+                nextRemainingUnits === 0 && nextReservedUnits === 0
+                  ? 'SOLD_OUT'
+                  : 'ACTIVE',
+            },
+            this.getOptions(tx),
+          );
+
+          const rsvHolding = await this.investorPtcHoldingRepository.findOne(
+            {
+              where: {
+                and: [
+                  {ptcIssuanceId: planItem.issuance.id},
+                  {investorProfileId},
+                  {isDeleted: false},
+                ],
+              },
+            },
+            this.getOptions(tx),
+          );
+
+          if (rsvHolding) {
+            await this.investorPtcHoldingRepository.updateById(
+              rsvHolding.id,
+              {
+                ownedUnits:
+                  Number(rsvHolding.ownedUnits ?? 0) + planItem.allocatedUnits,
+                investedAmount: this.normalizeAmount(
+                  Number(rsvHolding.investedAmount ?? 0) +
+                    planItem.costForThisBatch,
+                ),
+              },
+              this.getOptions(tx),
+            );
+          } else {
+            await this.investorPtcHoldingRepository.create(
+              {
+                id: uuidv4(),
+                ptcIssuanceId: planItem.issuance.id,
+                investorProfileId,
+                usersId: rsvInvestorProfile.usersId,
+                spvId,
+                poolFinancialsId: pool.id,
+                ownedUnits: planItem.allocatedUnits,
+                investedAmount: planItem.costForThisBatch,
+                isActive: true,
+                isDeleted: false,
+              },
+              this.getOptions(tx),
+            );
+          }
+        }
+
+        const rsvTotalUnits = rsvLockedIssuances.reduce(
+          (sum, i) => sum + Number(i.totalUnits ?? 0),
+          0,
+        );
+        const rsvSoldUnitsBefore = rsvLockedIssuances.reduce(
+          (sum, i) => sum + Number(i.soldUnits ?? 0),
+          0,
+        );
+        const rsvTotalRemaining = rsvLockedIssuances.reduce(
+          (sum, i) => sum + Number(i.remainingUnits ?? 0),
+          0,
+        );
+        const rsvMaxPerInvestor = Number(ptcParameters.maxUnitsPerInvestor ?? 0);
+        const rsvOwnedUnits = await this.fetchInvestorOwnedUnits(
+          investorProfileId,
+          spvId,
+          tx,
+        );
+        const rsvInvestorLimit =
+          rsvMaxPerInvestor > 0
+            ? Math.max(rsvMaxPerInvestor - rsvOwnedUnits, 0)
+            : rsvTotalRemaining;
+
+        const rsvTransactionId = uuidv4();
+        const rsvAllocationResult: BuyUnitsResult = {
+          spvId,
+          requestedUnits: normalizedRequestedUnits,
+          allocatedUnits: rsvAllocatedUnits,
+          partialAllocation: false,
+          totalInvestment: rsvTotalCost,
+          totalUnits: rsvTotalUnits,
+          soldUnits: rsvSoldUnitsBefore + rsvAllocatedUnits,
+          availableUnits: Math.max(rsvTotalRemaining, 0),
+          maxUnitsPerInvestor: rsvMaxPerInvestor,
+          investorRemainingLimit: Math.max(rsvInvestorLimit - rsvAllocatedUnits, 0),
+          poolEscrowSetupId,
+          transactionId: rsvTransactionId,
+          balanceBefore: 0,
+          balanceAfter: 0,
+          availableBalanceBefore: 0,
+        };
+
+        await this.escrowMovementService.recordInvestmentMovement(
+          {
+            investorId: investorProfileId,
+            spvId,
+            amount: rsvFinalDebit,
+            balanceBefore: 0,
+            balanceAfter: 0,
+            transactionId: rsvTransactionId,
+            referenceType: 'SPV_PAYMENT_VERIFICATION',
+            referenceId: verificationId,
+            remarks: `PTC buy: ${rsvAllocatedUnits} unit(s) allocated from reservation via verified payment`,
+            metadata: {
+              spvId,
+              requestedUnits: normalizedRequestedUnits,
+              allocatedUnits: rsvAllocatedUnits,
+              totalInvestmentCost: rsvTotalCost,
+              verificationId,
+              allocationResult: rsvAllocationResult,
+              fromReservation: true,
+            },
+            createdBy,
+          },
+          tx,
+        );
+
+        await tx.commit();
+        return rsvAllocationResult;
+      }
+
+      const issuances = await this.ptcIssuanceRepository.find(
+        {
+          where: {
+            and: [
+              {spvId},
+              {poolFinancialsId: pool.id},
+              {isDeleted: false},
+              {isActive: true},
+            ],
+          },
+          order: ['createdAt ASC'],
+        },
+        this.getOptions(tx),
+      );
+
+      await this.lockInvestorInventoryRows(
+        investorProfileId,
+        spvId,
+        issuances.map(i => i.id),
+        tx,
+      );
+
+      const lockedIssuances = await this.ptcIssuanceRepository.find(
+        {
+          where: {
+            and: [
+              {spvId},
+              {poolFinancialsId: pool.id},
+              {isDeleted: false},
+              {isActive: true},
+            ],
+          },
+          order: ['createdAt ASC'],
+        },
+        this.getOptions(tx),
+      );
+
+      const alreadyOwnedUnits = await this.fetchInvestorOwnedUnits(
+        investorProfileId,
+        spvId,
+        tx,
+      );
+      const totalUnits = lockedIssuances.reduce(
+        (sum, i) => sum + Number(i.totalUnits ?? 0),
+        0,
+      );
+      const soldUnitsBefore = lockedIssuances.reduce(
+        (sum, i) => sum + Number(i.soldUnits ?? 0),
+        0,
+      );
+      const totalAvailableUnits = lockedIssuances.reduce(
+        (sum, i) => sum + Number(i.remainingUnits ?? 0),
+        0,
+      );
+      const maxUnitsPerInvestor = Number(ptcParameters.maxUnitsPerInvestor ?? 0);
+      const investorRemainingLimit =
+        maxUnitsPerInvestor > 0
+          ? Math.max(maxUnitsPerInvestor - alreadyOwnedUnits, 0)
+          : totalAvailableUnits;
+      const allowedUnits = Math.min(
+        normalizedRequestedUnits,
+        totalAvailableUnits,
+        investorRemainingLimit,
+      );
+
+      if (allowedUnits <= 0) {
+        throw new HttpErrors.BadRequest('Units not available for allocation');
+      }
+
+      const {allocationPlan, allocatedUnits, totalInvestmentCost} =
+        this.buildBuyAllocationPlan(lockedIssuances, allowedUnits);
+      const finalDebitAmount = this.normalizeAmount(totalInvestmentCost);
+
+      if (allocatedUnits !== allowedUnits) {
+        throw new HttpErrors.Conflict('Unable to allocate the requested units');
+      }
+
+      if (finalDebitAmount <= 0) {
+        throw new HttpErrors.BadRequest(
+          'Total investment cost must be greater than zero',
+        );
+      }
+
+      const investorProfile = await this.investorProfileRepository.findById(
+        investorProfileId,
+        undefined,
+        this.getOptions(tx),
+      );
+
+      for (const planItem of allocationPlan) {
+        const availableInIssuance = Number(planItem.issuance.remainingUnits ?? 0);
+        const nextSoldUnits =
+          Number(planItem.issuance.soldUnits ?? 0) + planItem.allocatedUnits;
+        const nextRemainingUnits = availableInIssuance - planItem.allocatedUnits;
+
+        await this.ptcIssuanceRepository.updateById(
+          planItem.issuance.id,
+          {
+            soldUnits: nextSoldUnits,
+            remainingUnits: nextRemainingUnits,
+            status: nextRemainingUnits === 0 ? 'SOLD_OUT' : 'ACTIVE',
+          },
+          this.getOptions(tx),
+        );
+
+        const holding = await this.investorPtcHoldingRepository.findOne(
+          {
+            where: {
+              and: [
+                {ptcIssuanceId: planItem.issuance.id},
+                {investorProfileId},
+                {isDeleted: false},
+              ],
+            },
+          },
+          this.getOptions(tx),
+        );
+
+        if (holding) {
+          await this.investorPtcHoldingRepository.updateById(
+            holding.id,
+            {
+              ownedUnits:
+                Number(holding.ownedUnits ?? 0) + planItem.allocatedUnits,
+              investedAmount: this.normalizeAmount(
+                Number(holding.investedAmount ?? 0) + planItem.costForThisBatch,
+              ),
+            },
+            this.getOptions(tx),
+          );
+        } else {
+          await this.investorPtcHoldingRepository.create(
+            {
+              id: uuidv4(),
+              ptcIssuanceId: planItem.issuance.id,
+              investorProfileId,
+              usersId: investorProfile.usersId,
+              spvId,
+              poolFinancialsId: pool.id,
+              ownedUnits: planItem.allocatedUnits,
+              investedAmount: planItem.costForThisBatch,
+              isActive: true,
+              isDeleted: false,
+            },
+            this.getOptions(tx),
+          );
+        }
+      }
+
+      const transactionId = uuidv4();
+      const allocationResult: BuyUnitsResult = {
+        spvId,
+        requestedUnits: normalizedRequestedUnits,
+        allocatedUnits,
+        partialAllocation: allocatedUnits < normalizedRequestedUnits,
+        totalInvestment: totalInvestmentCost,
+        totalUnits,
+        soldUnits: soldUnitsBefore + allocatedUnits,
+        availableUnits: Math.max(totalAvailableUnits - allocatedUnits, 0),
+        maxUnitsPerInvestor,
+        investorRemainingLimit: Math.max(
+          investorRemainingLimit - allocatedUnits,
+          0,
+        ),
+        poolEscrowSetupId,
+        transactionId,
+        balanceBefore: 0,
+        balanceAfter: 0,
+        availableBalanceBefore: 0,
+      };
+
+      await this.escrowMovementService.recordInvestmentMovement(
+        {
+          investorId: investorProfileId,
+          spvId,
+          amount: finalDebitAmount,
+          balanceBefore: 0,
+          balanceAfter: 0,
+          transactionId,
+          referenceType: 'SPV_PAYMENT_VERIFICATION',
+          referenceId: verificationId,
+          remarks: `PTC buy: ${allocatedUnits} unit(s) allocated via verified payment`,
+          metadata: {
+            spvId,
+            requestedUnits: normalizedRequestedUnits,
+            allocatedUnits,
+            totalInvestmentCost,
+            verificationId,
+            allocationResult,
+          },
+          createdBy,
+        },
+        tx,
+      );
+
+      await tx.commit();
+      return allocationResult;
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
+  }
+
   async processPendingRedemption(
     request: PendingRedemptionRequest,
     processedBy: string,
@@ -1573,7 +2003,6 @@ export class PtcIssuanceService {
         throw new HttpErrors.BadRequest('Redemption transactionId is required');
       }
 
-      await this.lockInvestorWalletRow(request.investorProfileId, tx);
       await this.lockInvestorInventoryRows(
         request.investorProfileId,
         request.spvId,
@@ -1581,10 +2010,6 @@ export class PtcIssuanceService {
         tx,
       );
 
-      const investorWallet = await this.fetchInvestorWalletOrFail(
-        request.investorProfileId,
-        tx,
-      );
       const holdings = await this.fetchInvestorHoldingsForRedemption(
         request.investorProfileId,
         request.spvId,
@@ -1806,7 +2231,6 @@ export class PtcIssuanceService {
       }
 
       grossPayout = this.normalizeAmount(principalPayout + interestPayout);
-      const balanceBefore = this.normalizeAmount(investorWallet.currentBalance);
       const capitalGain = this.normalizeAmount(principalPayout - redeemedCostBasis);
       const stampDutyRate = this.getConfiguredRedemptionStampDutyRate();
       const stampDutyAmount = this.normalizeAmount(
@@ -1815,28 +2239,18 @@ export class PtcIssuanceService {
       const netPayout = this.normalizeAmount(
         Math.max(grossPayout - stampDutyAmount, 0),
       );
-      const balanceAfter = this.normalizeAmount(balanceBefore + netPayout);
-
-      await this.investorEscrowAccountRepository.updateById(
-        investorWallet.id,
-        {
-          currentBalance: balanceAfter,
-        },
-        this.getOptions(tx),
-      );
 
       const movementResult = await this.escrowMovementService.recordRedemptionMovement(
         {
-          investorEscrowAccountId: investorWallet.id,
           investorId: request.investorProfileId,
           spvId: request.spvId,
           amount: netPayout,
-          balanceBefore,
-          balanceAfter,
+          balanceBefore: 0,
+          balanceAfter: 0,
           transactionId,
           referenceType: 'REDEMPTION_REQUEST',
           referenceId: request.id,
-          remarks: `Wallet credited for redemption of ${normalizedRequestedUnits} unit(s)`,
+          remarks: `PTC redemption: ${normalizedRequestedUnits} unit(s) pending payout`,
           metadata: {
             redemptionRequestId: request.id,
             transactionId,
@@ -1873,7 +2287,7 @@ export class PtcIssuanceService {
           stampDutyAmount,
           annualInterestRate,
           poolFinancialsId: pool.id,
-          redemptionLedgerId: movementResult.investorLedgerId,
+          redemptionLedgerId: undefined,
           processedBy,
           holdingsBreakdown: redeemedHoldingsBreakdown,
         },
@@ -1898,8 +2312,8 @@ export class PtcIssuanceService {
         capitalGain,
         stampDutyAmount,
         stampDutyRate,
-        balanceBefore,
-        balanceAfter,
+        balanceBefore: 0,
+        balanceAfter: 0,
       };
     } catch (error) {
       await tx.rollback();
