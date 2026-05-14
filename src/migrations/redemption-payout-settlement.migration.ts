@@ -25,9 +25,9 @@ export async function runRedemptionPayoutSettlementMigration(
   await ds.execute(`
     UPDATE public.redemption_payouts
        SET status = 'REQUESTED',
-           submitted_at = created_at
+           submitted_at = createdAt
      WHERE status = 'PENDING'
-       AND is_deleted = FALSE
+       AND isDeleted = FALSE
   `);
 
   // ── Index for cron: find payouts ready to promote ─────────────────────────
@@ -35,7 +35,7 @@ export async function runRedemptionPayoutSettlementMigration(
     CREATE INDEX IF NOT EXISTS idx_redemption_payouts_settlement_cron
       ON public.redemption_payouts(expected_payout_date, status)
       WHERE status IN ('REQUESTED', 'PENDING_SETTLEMENT', 'READY_FOR_PAYOUT', 'RETRY_PENDING')
-        AND is_deleted = FALSE
+        AND isDeleted = FALSE
   `);
 
   // ── Idempotency unique index ───────────────────────────────────────────────
@@ -43,7 +43,7 @@ export async function runRedemptionPayoutSettlementMigration(
     CREATE UNIQUE INDEX IF NOT EXISTS idx_redemption_payouts_idempotency_key
       ON public.redemption_payouts(idempotency_key)
       WHERE idempotency_key IS NOT NULL
-        AND is_deleted = FALSE
+        AND isDeleted = FALSE
   `);
 
   console.log('[Migration] redemption-payout-settlement: done');
