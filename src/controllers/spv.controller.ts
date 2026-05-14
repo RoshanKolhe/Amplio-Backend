@@ -495,8 +495,6 @@ async generateSpvName(
               minInvestment: {type: 'number'},
               maxUnitsPerInvestor: {type: 'number'},
               maxInvestors: {type: 'number'},
-              // windowFrequency: {type: 'string'},
-              // windowDurationHours: {type: 'number'},
             },
           },
         },

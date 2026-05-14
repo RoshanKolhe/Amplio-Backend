@@ -351,29 +351,6 @@ export class PtcIssuanceService {
     return Math.min(Math.max(normalizedRate, 0), 1);
   }
 
-  private ensureRedemptionWindowOrFail(ptcParameters: PtcParameters): void {
-    const now = new Date();
-    const weekdayIndex = this.getIstWeekdayIndex(now);
-    const redemptionDayIndex = this.getConfiguredRedemptionDayIndex();
-    const redemptionDayLabel =
-      this.getRedemptionWeekdayLabel(redemptionDayIndex);
-    const configuredHours = Number(ptcParameters.windowDurationHours ?? 24);
-    const allowedHours = Math.max(1, Math.min(Math.trunc(configuredHours), 24));
-    const hourOfDay = this.getIstHourOfDay(now);
-    const isRedemptionDay = weekdayIndex === redemptionDayIndex;
-    const withinHours = hourOfDay < allowedHours;
-
-    if (isRedemptionDay && withinHours) {
-      return;
-    }
-
-    const nextWindowStartsAt = this.findNextRedemptionWindowStart(now);
-    throw new HttpErrors.BadRequest(
-      `Redemption window is closed. Redemptions are allowed every ${redemptionDayLabel} for ${allowedHours} hour(s) in IST. Next window starts at ${this.formatIstDateTime(
-        nextWindowStartsAt,
-      )}.`,
-    );
-  }
 
   private async findPoolEscrowSetupId(
     pool: PoolFinancials,
@@ -1293,10 +1270,6 @@ export class PtcIssuanceService {
       requestedUnits,
       'Redeem units',
     );
-
-    const spv = await this.fetchSpvOrFail(spvId);
-    const ptcParameters = await this.fetchPtcParametersForSpvOrFail(spv);
-    this.ensureRedemptionWindowOrFail(ptcParameters);
 
     // ── Validate primary bank account BEFORE deducting any units ─────────
     const primaryBank = await this.bankDetailsRepository.findOne({

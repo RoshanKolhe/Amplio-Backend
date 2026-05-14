@@ -172,8 +172,6 @@ export async function runLegacySpvBackfillMigration(
     const ptcFallbackColumns = [
       'maxunitsperinvestor',
       'maxinvestors',
-      'windowfrequency',
-      'windowdurationhours',
       'isactive',
       'isdeleted',
       'createdat',
@@ -190,8 +188,6 @@ export async function runLegacySpvBackfillMigration(
         mininvestment,
         maxunitsperinvestor,
         maxinvestors,
-        windowfrequency,
-        windowdurationhours,
         isactive,
         isdeleted,
         createdat,
@@ -211,16 +207,6 @@ export async function runLegacySpvBackfillMigration(
         ${selectLegacyColumn(
           legacyPtcColumns,
           'maxinvestors',
-          'NULL::double precision',
-        )},
-        ${selectLegacyColumn(
-          legacyPtcColumns,
-          'windowfrequency',
-          'NULL::text',
-        )},
-        ${selectLegacyColumn(
-          legacyPtcColumns,
-          'windowdurationhours',
           'NULL::double precision',
         )},
         ${selectLegacyColumn(legacyPtcColumns, 'isactive', 'TRUE')},

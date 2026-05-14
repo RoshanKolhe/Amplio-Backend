@@ -283,35 +283,6 @@ export class InvestorInvestmentsService {
     return `${year}-${month}-${day}`;
   }
 
-  private getPayoutConfig(windowFrequency?: string): {
-    label: string;
-  } {
-    const normalized = String(windowFrequency ?? '')
-      .trim()
-      .toUpperCase();
-
-    if (normalized.includes('MONTH')) {
-      return {
-        label: 'Monthly Repayment Cycle',
-      };
-    }
-
-    if (normalized.includes('QUARTER')) {
-      return {
-        label: 'Quarterly Repayment Cycle',
-      };
-    }
-
-    if (normalized.includes('DAY')) {
-      return {
-        label: 'Daily Repayment Cycle',
-      };
-    }
-
-    return {
-      label: 'Weekly Repayment Cycle',
-    };
-  }
 
   private async ensureInvestorProfileOrFail(
     currentUser: UserProfile,
@@ -543,7 +514,7 @@ export class InvestorInvestmentsService {
 
     const {pool, poolSummary} = poolDetails;
 
-    const payoutConfig = this.getPayoutConfig(ptcParameters?.windowFrequency);
+    const payoutConfig = {label: 'Daily Repayment Cycle'};
     const minimumAmount =
       Number(ptcParameters?.minInvestment) ||
       Number(ptcInventory?.unitPrice ?? 0) ||
@@ -796,7 +767,7 @@ export class InvestorInvestmentsService {
         date: this.formatDate(
           i.closedAt ? new Date(String(i.closedAt)) : i.createdAt ?? new Date(),
         ),
-        status: 'credit' as const,
+        status: 'debit' as const,
         amount: this.normalizeAmount(i.netPayout),
       })),
     ]
@@ -954,22 +925,14 @@ export class InvestorInvestmentsService {
 
     const totalEarnings = accruedInterestActive;
     const currentPrincipal = investedTillDate;
+    const currentTotalValue = this.normalizeAmount(currentPrincipal + accruedInterestActive);
 
     const expectedWeeklyInterestPayout = this.estimatePeriodicEarnings(
       currentPrincipal,
       interestRate,
     );
 
-    const ptcParameters = await this.ptcParametersRepository.findOne({
-      where: {
-        and: [
-          {spvApplicationId: spv.spvApplicationId},
-          {isActive: true},
-          {isDeleted: false},
-        ],
-      },
-    });
-    const payoutLabel = this.getPayoutConfig(ptcParameters?.windowFrequency).label;
+    const payoutLabel = 'Daily Repayment Cycle';
     const unitValue =
       totalOwnedUnits > 0
         ? this.normalizeAmount(investedTillDate / totalOwnedUnits)
@@ -992,11 +955,11 @@ export class InvestorInvestmentsService {
         poolName: spv.spvName || spv.originatorName || ONLINE_PAYMENTS_TITLE,
         title: ONLINE_PAYMENTS_TITLE,
         totalEarnings,
-        currentlyInvested: currentPrincipal,
-        deployed: currentPrincipal,
+        currentlyInvested: currentTotalValue,
+        deployed: currentTotalValue,
         expectedWeeklyEarnings: expectedWeeklyInterestPayout,
         interestRate,
-        currentInvestment: currentPrincipal,
+        currentInvestment: currentTotalValue,
         expectedWeeklyInterestPayout,
         expectedUpcomingPayoutDate: spvTimeline.nextLiquidityEvent,
         interestPayoutFrequency: payoutLabel.replace(' Repayment Cycle', ''),
@@ -1171,7 +1134,7 @@ export class InvestorInvestmentsService {
         tnsId: i.transactionId ?? i.id,
         type: 'PTC sell',
         createdAt: i.closedAt ? new Date(String(i.closedAt)) : i.createdAt ?? new Date(),
-        txStatus: 'credit' as const,
+        txStatus: 'debit' as const,
         amount: this.normalizeAmount(i.netPayout),
       }));
     } else {

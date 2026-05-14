@@ -31,14 +31,6 @@ export class PtcParameters extends Entity {
   @property({type: 'number'})
   maxInvestors?: number;
 
-  // Need to remove the windofrequency and winndowDurationssss
-
-  @property({type: 'string'})
-  windowFrequency?: string;
-
-  @property({type: 'number'})
-  windowDurationHours?: number;
-
   @property({
     type: 'boolean',
     default: true,

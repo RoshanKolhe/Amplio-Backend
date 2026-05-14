@@ -1,37 +1,38 @@
 import {inject} from '@loopback/core';
-import {CronJob, cronJob} from '@loopback/cron';
+import cron, {ScheduledTask} from 'node-cron';
 import {RedemptionPayoutService} from '../services/redemption-payout.service';
 
-/**
- * RedemptionPayoutCron — runs every 5 minutes.
- *
- * Three-phase pipeline (all phases use FOR UPDATE SKIP LOCKED):
- *   1. promoteReadyPayouts   — advance REQUESTED/PENDING_SETTLEMENT → READY_FOR_PAYOUT
- *                             once expectedPayoutDate is reached
- *   2. dispatchPendingTransfers — process READY_FOR_PAYOUT → PAYOUT_PROCESSING → PAID
- *   3. retryFailedPayouts    — re-queue RETRY_PENDING payouts under the retry cap
- *
- * Safe for horizontal scaling: SKIP LOCKED prevents two instances from
- * processing the same row simultaneously.
- */
-@cronJob()
-export class RedemptionPayoutCron extends CronJob {
+const REDEMPTION_PAYOUT_CRON_SCHEDULE = '*/5 * * * *';
+
+export class RedemptionPayoutCron {
+  private job?: ScheduledTask;
+
   constructor(
     @inject('service.redemptionPayout.service')
     private redemptionPayoutService: RedemptionPayoutService,
-  ) {
-    super({
-      name: 'redemption-payout-cron',
-      onTick: async () => {
-        await this.execute();
-      },
-      cronTime: '*/5 * * * *',
-      start: false,
-      runOnInit: false,
+  ) {}
+
+  start() {
+    if (this.job) return;
+
+    console.log(
+      `[RedemptionPayoutCron] Scheduling with expression "${REDEMPTION_PAYOUT_CRON_SCHEDULE}"`,
+    );
+
+    this.job = cron.schedule(REDEMPTION_PAYOUT_CRON_SCHEDULE, async () => {
+      await this.execute();
     });
   }
 
-  async execute(): Promise<void> {
+  stop() {
+    const stopResult = this.job?.stop();
+    if (stopResult instanceof Promise) {
+      stopResult.catch(() => undefined);
+    }
+    this.job = undefined;
+  }
+
+  private async execute(): Promise<void> {
     console.log(`[RedemptionPayoutCron] tick at ${new Date().toISOString()}`);
 
     try {
