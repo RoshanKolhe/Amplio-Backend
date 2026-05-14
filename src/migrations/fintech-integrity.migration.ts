@@ -36,13 +36,25 @@ export async function runFintechIntegrityMigration(
           CHECK (remainingunits >= 0) NOT VALID;
       END IF;
 
+      -- Drop old version of units_balance constraint if it doesn't account for reservedunits
+      IF EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'ptc_issuances_units_balance'
+      ) THEN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_get_constraintdef((SELECT oid FROM pg_constraint WHERE conname = 'ptc_issuances_units_balance'))
+          WHERE pg_get_constraintdef ~* 'reservedunits'
+        ) THEN
+          ALTER TABLE public.ptc_issuances DROP CONSTRAINT ptc_issuances_units_balance;
+        END IF;
+      END IF;
+
       IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ptc_issuances_units_balance'
       ) THEN
         ALTER TABLE public.ptc_issuances
           ADD CONSTRAINT ptc_issuances_units_balance
-          CHECK ((soldunits + remainingunits) = totalunits) NOT VALID;
+          CHECK ((soldunits + remainingunits + COALESCE(reservedunits, 0)) = totalunits) NOT VALID;
       END IF;
 
       IF NOT EXISTS (
