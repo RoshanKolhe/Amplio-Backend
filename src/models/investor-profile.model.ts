@@ -1,5 +1,4 @@
 import {belongsTo, Entity, hasOne, model, property} from '@loopback/repository';
-import {InvestorEscrowAccount} from './investor-escrow-account.model';
 import {InvestorPanCards} from './investor-pan-cards.model';
 import {InvestorType} from './investor-type.model';
 import {KycApplications} from './kyc-applications.model';
@@ -210,11 +209,6 @@ export class InvestorProfile extends Entity {
 
   @hasOne(() => InvestorPanCards)
   investorPanCards: InvestorPanCards;
-
-  @hasOne(() => InvestorEscrowAccount)
-  investorEscrowAccount: InvestorEscrowAccount;
-
-
 
   constructor(data?: Partial<InvestorProfile>) {
     super(data);

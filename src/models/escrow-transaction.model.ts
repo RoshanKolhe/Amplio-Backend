@@ -8,7 +8,6 @@ export enum EscrowTransactionType {
   POOL_FUNDING = 'POOL_FUNDING',
   REVERSAL = 'REVERSAL',
   SETTLEMENT = 'SETTLEMENT',
-  WITHDRAWAL = 'WITHDRAWAL',
 }
 
 export enum EscrowTransactionDirection {

@@ -102,6 +102,14 @@ export class PoolFinancials extends Entity {
   })
   eveningCutoffTime?: string;
 
+  // Feature flag: when true, createPaymentIntent validates the 9AM–3PM window.
+  // Defaults to false so existing pools are unaffected until opted in via admin.
+  @property({
+    type: 'boolean',
+    default: false,
+  })
+  enforceCutoffWindow?: boolean;
+
   @property({
     type: 'boolean',
     default: true,

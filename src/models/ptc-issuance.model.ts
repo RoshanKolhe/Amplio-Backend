@@ -80,6 +80,12 @@ export class PtcIssuance extends Entity {
   remainingUnits: number;
 
   @property({
+    type: 'number',
+    default: 0,
+  })
+  reservedUnits?: number;
+
+  @property({
     type: 'string',
     required: true,
     default: 'ACTIVE',
