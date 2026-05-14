@@ -1333,16 +1333,20 @@ export class PtcIssuanceService {
       istNow.getUTCHours() >= PtcIssuanceService.IST_INTEREST_CUTOFF_HOUR;
     const extraInterestDays = submittedAfterCutoff ? 0 : 1;
 
-    // expectedPayoutDate: T+1 if before cutoff, T+2 if after; skip weekends
-    const todayIst = new Date(istNow);
-    todayIst.setUTCHours(0, 0, 0, 0);
+    // expectedPayoutDate: T+1 if before cutoff, T+2 if after; skip weekends.
+    // Use Date.UTC with IST calendar components directly — avoids the offset-subtraction
+    // trap where subtracting 5:30h before truncation crosses a date boundary → T+0 bug.
+    const todayIst = new Date(Date.UTC(
+      istNow.getUTCFullYear(),
+      istNow.getUTCMonth(),
+      istNow.getUTCDate(),
+    ));
     const dayOffset = submittedAfterCutoff ? 2 : 1;
     const candidateIst = new Date(todayIst.getTime() + dayOffset * 86400000);
     const candidateDay = candidateIst.getUTCDay();
     if (candidateDay === 0) candidateIst.setUTCDate(candidateIst.getUTCDate() + 1);
     if (candidateDay === 6) candidateIst.setUTCDate(candidateIst.getUTCDate() + 2);
-    const expectedPayoutDate = new Date(candidateIst.getTime() - istOffsetMs);
-    expectedPayoutDate.setUTCHours(0, 0, 0, 0);
+    const expectedPayoutDate = candidateIst; // UTC midnight representing IST calendar date
 
     // ── Bank snapshot — captured at submission time so immutable ─────────
     const bankAccountSnapshot = {
@@ -1577,10 +1581,12 @@ export class PtcIssuanceService {
     verificationId: string,
     createdBy: string,
     existingReservations?: UnitReservation[],
+    externalTx?: unknown,
   ): Promise<BuyUnitsResult> {
     const normalizedRequestedUnits = this.validatePositiveIntegerUnits(units);
 
-    const tx = await this.datasource.beginTransaction({
+    const isOwnTx = !externalTx;
+    const tx = externalTx ?? await this.datasource.beginTransaction({
       isolationLevel: IsolationLevel.READ_COMMITTED,
     });
 
@@ -1594,7 +1600,7 @@ export class PtcIssuanceService {
       ) as Array<{status: string}>;
 
       if (statusRows?.[0]?.status === 'ALLOCATED') {
-        await tx.commit();
+        if (isOwnTx) await (tx as {commit(): Promise<void>}).commit();
         return {
           spvId,
           requestedUnits: normalizedRequestedUnits,
@@ -1822,7 +1828,7 @@ export class PtcIssuanceService {
           tx,
         );
 
-        await tx.commit();
+        if (isOwnTx) await (tx as {commit(): Promise<void>}).commit();
         return rsvAllocationResult;
       }
 
@@ -2021,10 +2027,10 @@ export class PtcIssuanceService {
         tx,
       );
 
-      await tx.commit();
+      if (isOwnTx) await (tx as {commit(): Promise<void>}).commit();
       return allocationResult;
     } catch (error) {
-      await tx.rollback();
+      if (isOwnTx) await (tx as {rollback(): Promise<void>}).rollback();
       throw error;
     }
   }
@@ -2053,6 +2059,14 @@ export class PtcIssuanceService {
       if (!transactionId) {
         throw new HttpErrors.BadRequest('Redemption transactionId is required');
       }
+
+      // Serialise concurrent redemption requests for the same investor+SPV.
+      // pg_advisory_xact_lock is released automatically at transaction end.
+      await this.datasource.execute(
+        'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+        [request.investorProfileId, request.spvId],
+        this.getOptions(tx),
+      );
 
       await this.lockInvestorInventoryRows(
         request.investorProfileId,

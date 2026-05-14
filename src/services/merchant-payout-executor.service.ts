@@ -487,25 +487,28 @@ export class MerchantPayoutExecutorService {
   }
 
   async executePendingBatches(referenceAt: Date = new Date()) {
-    const batches = await this.merchantPayoutBatchRepository.find({
-      where: {
-        and: [
-          {status: {inq: EXECUTABLE_BATCH_STATUSES}},
-          {isDeleted: false},
-        ],
-      },
-      order: ['scheduledFor ASC', 'createdAt ASC'],
-    });
+    // FOR UPDATE SKIP LOCKED prevents a concurrent cron pod from picking up
+    // the same batch and causing double-payment.
+    const ds = (this.merchantPayoutBatchRepository as any).dataSource;
+    const rows: {id: string}[] = await ds.execute(
+      `SELECT id
+         FROM public.merchant_payout_batch
+        WHERE status IN ('created', 'pending', 'processing')
+          AND isdeleted = FALSE
+        ORDER BY scheduledfor ASC, createdat ASC
+        FOR UPDATE SKIP LOCKED`,
+    );
+
     const summaries: BatchExecutionSummary[] = [];
 
-    for (const batch of batches) {
+    for (const row of rows) {
       try {
-        summaries.push(await this.executeBatch(batch.id, referenceAt));
+        summaries.push(await this.executeBatch(row.id, referenceAt));
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Unknown payout execution error';
         console.error(
-          `[MerchantPayoutExecutor] Failed batch ${batch.id}: ${message}`,
+          `[MerchantPayoutExecutor] Failed batch ${row.id}: ${message}`,
         );
       }
     }

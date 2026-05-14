@@ -1,3 +1,4 @@
+import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {
@@ -18,6 +19,7 @@ import {
   SpvPaymentVerificationRepository,
   UsersRepository,
 } from '../repositories';
+import {PtcIssuanceService, UnitReservation} from './ptc-issuance.service';
 
 export type AdminOrderFilters = {
   spvId?: string;
@@ -100,6 +102,9 @@ export class AdminInvestmentOrderService {
 
     @repository(UsersRepository)
     private usersRepository: UsersRepository,
+
+    @inject('service.ptcIssuance.service')
+    private ptcIssuanceService: PtcIssuanceService,
   ) {}
 
   // ── Order monitoring ────────────────────────────────────────────────────────
@@ -248,11 +253,32 @@ export class AdminInvestmentOrderService {
           SpvPaymentVerificationStatus.SUBMITTED,
         ];
         if (expirableVerifStatuses.includes(v.status)) {
+          // Release the inventory reservation before expiring, so units flow back
+          // to remainingUnits in ptc_issuances.  Without this the units stay locked
+          // even though no allocation will ever occur.
+          if (v.reservationStatus === 'RESERVED') {
+            try {
+              const meta = (v.metadata ?? {}) as {reservation?: UnitReservation[]};
+              const reservations = meta.reservation ?? [];
+              if (reservations.length > 0) {
+                await this.ptcIssuanceService.releaseUnitsReservation(
+                  reservations,
+                  `force-expired by admin ${adminId}`,
+                );
+              }
+            } catch (releaseErr) {
+              console.error(
+                `[AdminInvestmentOrderService] Failed to release reservation for verification ${order.verificationId}:`,
+                releaseErr,
+              );
+            }
+          }
+
           await this.spvPaymentVerificationRepository.updateById(
             order.verificationId,
             {
               status: SpvPaymentVerificationStatus.EXPIRED,
-              reservationStatus: 'RELEASED',
+              reservationStatus: v.reservationStatus === 'RESERVED' ? 'RELEASED' : v.reservationStatus,
               updatedBy: adminId,
             },
           );

@@ -61,8 +61,8 @@ export class SpvReservationCron {
   private async releaseExpiredReservations(): Promise<void> {
     const now = new Date();
 
-    // Fetch candidates without a lock — just collect IDs for the per-row safe processor
-    const candidates = await this.spvPaymentVerificationRepository.find({
+    // Sweep 1: SUBMITTED + RESERVED + reservation timer expired
+    const expiredCandidates = await this.spvPaymentVerificationRepository.find({
       where: {
         and: [
           {status: SpvPaymentVerificationStatus.SUBMITTED},
@@ -74,16 +74,118 @@ export class SpvReservationCron {
       fields: {id: true},
     });
 
-    if (!candidates.length) {
-      return;
+    if (expiredCandidates.length) {
+      console.log(
+        `[SpvReservationCron] Found ${expiredCandidates.length} expired RESERVED candidate(s)`,
+      );
+      for (const candidate of expiredCandidates) {
+        await this.processExpiredVerificationSafely(candidate.id, now);
+      }
     }
 
+    // Sweep 2: CONSUMING zombie — VERIFIED/AUTO_VERIFIED + CONSUMING + stale (>30 min).
+    // This catches verifications where approval set reservationStatus=CONSUMING but the
+    // allocation transaction rolled back, leaving units stuck in reservedUnits forever.
+    // After release the verification stays VERIFIED/AUTO_VERIFIED so admin can retry allocation.
+    await this.releaseStaleConsumingReservations(now);
+  }
+
+  private async releaseStaleConsumingReservations(now: Date): Promise<void> {
+    // If a verification has been in CONSUMING state for over 30 minutes it means
+    // the allocation transaction either crashed or was never committed.
+    const staleThreshold = new Date(now.getTime() - 30 * 60 * 1000);
+
+    const ds = (this.spvPaymentVerificationRepository as unknown as {dataSource: juggler.DataSource}).dataSource;
+
+    // Read candidate IDs without locking — per-row locks acquired below
+    const rows = await ds.execute(
+      `SELECT id FROM public.spv_payment_verifications
+       WHERE reservationstatus = 'CONSUMING'
+         AND status IN ('VERIFIED', 'AUTO_VERIFIED')
+         AND verifiedat <= $1
+         AND isdeleted = FALSE`,
+      [staleThreshold],
+    ) as Array<{id: string}>;
+
+    if (!rows.length) return;
+
     console.log(
-      `[SpvReservationCron] Found ${candidates.length} expired reservation candidate(s)`,
+      `[SpvReservationCron] Found ${rows.length} stale CONSUMING reservation(s) to release`,
     );
 
-    for (const candidate of candidates) {
-      await this.processExpiredVerificationSafely(candidate.id, now);
+    for (const row of rows) {
+      await this.releaseConsumingReservationSafely(row.id);
+    }
+  }
+
+  private async releaseConsumingReservationSafely(verificationId: string): Promise<void> {
+    const ds = (this.spvPaymentVerificationRepository as unknown as {dataSource: juggler.DataSource}).dataSource;
+    const tx = await ds.beginTransaction(IsolationLevel.READ_COMMITTED);
+
+    try {
+      // SKIP LOCKED: if another pod or the allocation retry is holding the row, skip
+      const locked = await ds.execute(
+        `SELECT id FROM public.spv_payment_verifications
+         WHERE id = $1
+           AND reservationstatus = 'CONSUMING'
+           AND status IN ('VERIFIED', 'AUTO_VERIFIED')
+         FOR UPDATE SKIP LOCKED`,
+        [verificationId],
+        {transaction: tx},
+      ) as Array<{id: string}>;
+
+      if (!locked.length) {
+        await tx.commit();
+        return;
+      }
+
+      const verification = await this.spvPaymentVerificationRepository.findById(
+        verificationId, undefined, {transaction: tx},
+      );
+
+      // Double-check authoritative state after acquiring lock
+      if (
+        verification.reservationStatus !== 'CONSUMING' ||
+        (verification.status !== SpvPaymentVerificationStatus.VERIFIED &&
+          verification.status !== SpvPaymentVerificationStatus.AUTO_VERIFIED)
+      ) {
+        await tx.commit();
+        return;
+      }
+
+      const meta = (verification.metadata ?? {}) as Record<string, unknown>;
+      const reservations = (meta.reservation as UnitReservation[] | undefined) ?? [];
+
+      if (reservations.length > 0) {
+        // releaseUnitsReservation uses Math.min(toRelease, currentReserved) so it is
+        // safe even if the allocation already moved units from reservedUnits → soldUnits
+        // (which cannot happen with the atomic fix but is safe regardless).
+        await this.ptcIssuanceService.releaseUnitsReservation(
+          reservations,
+          `stale CONSUMING reservation released for verification ${verificationId}`,
+          tx,
+        );
+      }
+
+      // Keep status as VERIFIED/AUTO_VERIFIED so admin can retry allocation.
+      // Mark reservationStatus RELEASED so downstream code won't try to convert
+      // the reservation (fresh allocation path will be used on retry).
+      await this.spvPaymentVerificationRepository.updateById(verification.id, {
+        reservationStatus: 'RELEASED',
+        updatedBy: 'system',
+      }, {transaction: tx});
+
+      await tx.commit();
+
+      console.log(
+        `[SpvReservationCron] Released stale CONSUMING reservation for verification ${verificationId} — admin retry required`,
+      );
+    } catch (error) {
+      await tx.rollback();
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error(
+        `[SpvReservationCron] Failed to release stale CONSUMING reservation ${verificationId}: ${message}`,
+      );
     }
   }
 

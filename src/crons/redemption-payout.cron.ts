@@ -36,6 +36,12 @@ export class RedemptionPayoutCron {
     console.log(`[RedemptionPayoutCron] tick at ${new Date().toISOString()}`);
 
     try {
+      await this.redemptionPayoutService.recoverStaleProcessingPayouts();
+    } catch (err) {
+      console.error('[RedemptionPayoutCron] recoverStaleProcessingPayouts failed', err);
+    }
+
+    try {
       await this.redemptionPayoutService.promoteReadyPayouts();
     } catch (err) {
       console.error('[RedemptionPayoutCron] promoteReadyPayouts failed', err);

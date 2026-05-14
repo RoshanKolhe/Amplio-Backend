@@ -301,6 +301,21 @@ export class InvestmentOrderService {
     // Release any active PTC freezes for this order
     await this.releaseOrderFreezes(orderId, PtcFreezeReleaseReason.CANCELLED, currentUser.id);
 
+    // Reject the linked verification and release its unit reservation atomically.
+    // Without this, the reserved units would stay locked even though the investor walked away.
+    if (order.verificationId) {
+      try {
+        await this.spvPaymentVerificationService.rejectVerification(
+          order.verificationId,
+          'Auto-rejected: linked investment order was cancelled by the investor',
+          currentUser.id,
+        );
+      } catch {
+        // Non-fatal: verification may already be in a terminal state (REJECTED, EXPIRED, ALLOCATED).
+        // The approveVerification guard (Fix #1B) prevents any admin from allocating after this point.
+      }
+    }
+
     await this.investmentOrderRepository.updateById(orderId, {
       status: InvestmentOrderStatus.CANCELLED,
       resolvedAt: new Date(),

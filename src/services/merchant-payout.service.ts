@@ -1957,6 +1957,9 @@ export class MerchantPayoutService {
       );
 
     try {
+      // Only soft-delete items that did NOT succeed — 'released' items represent payout
+      // history that has already been reconciled against the transaction ledger.
+      // Deleting them would destroy the audit trail and break reconciliation traceability.
       await this.merchantPayoutBatchItemRepository.updateAll(
         {
           isDeleted: true,
@@ -1965,6 +1968,7 @@ export class MerchantPayoutService {
         {
           merchantPayoutBatchId: failedBatch.id,
           isDeleted: false,
+          status: {neq: 'released'},
         },
         {transaction: tx},
       );

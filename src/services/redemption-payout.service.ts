@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {v4 as uuidv4} from 'uuid';
@@ -8,6 +9,7 @@ import {BankDetailsRepository, RedemptionPayoutRepository} from '../repositories
 const IST_OFFSET_MS = 330 * 60 * 1000; // UTC+5:30
 const PAYOUT_CUTOFF_HOUR_IST = 17;     // 5 PM IST
 const MAX_RETRY_ATTEMPTS = 3;
+const STALE_PROCESSING_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -89,14 +91,20 @@ export class RedemptionPayoutService {
    *   - At/After 5 PM IST → payout business day after next, no extra interest
    */
   calculateSettlementSchedule(submittedAt: Date): SettlementSchedule {
+    // Shift to IST — the resulting UTC components ARE the IST calendar components.
     const istDate = new Date(submittedAt.getTime() + IST_OFFSET_MS);
     const istHour = istDate.getUTCHours();
     const submittedAfterCutoff = istHour >= PAYOUT_CUTOFF_HOUR_IST;
     const extraInterestDays = submittedAfterCutoff ? 0 : 1;
 
-    // Start counting from IST "today" (midnight IST)
-    const todayIst = new Date(istDate);
-    todayIst.setUTCHours(0, 0, 0, 0);
+    // Build the IST calendar date as a UTC midnight using Date.UTC so no offset subtraction
+    // happens. The old approach subtracted IST_OFFSET_MS before truncating, which rolled
+    // the timestamp back across the date boundary and produced T+0 payouts instead of T+1.
+    const todayIst = new Date(Date.UTC(
+      istDate.getUTCFullYear(),
+      istDate.getUTCMonth(),
+      istDate.getUTCDate(),
+    ));
 
     // T+1 for before cutoff, T+2 for after cutoff
     const settlementDayOffset = submittedAfterCutoff ? 2 : 1;
@@ -105,11 +113,7 @@ export class RedemptionPayoutService {
     // Advance past any weekends
     const expectedPayoutDate = this.nextBusinessDayFrom(candidate);
 
-    // Convert back to UTC midnight (store as UTC date)
-    const expectedPayoutUtc = new Date(expectedPayoutDate.getTime() - IST_OFFSET_MS);
-    expectedPayoutUtc.setUTCHours(0, 0, 0, 0);
-
-    return {expectedPayoutDate: expectedPayoutUtc, submittedAfterCutoff, extraInterestDays};
+    return {expectedPayoutDate, submittedAfterCutoff, extraInterestDays};
   }
 
   /** Advances a date (IST pseudo-date) until it falls on a Mon–Fri. */
@@ -250,8 +254,8 @@ export class RedemptionPayoutService {
       `SELECT id
          FROM public.redemption_payouts
         WHERE status IN ('REQUESTED', 'PENDING_SETTLEMENT')
-          AND expected_payout_date <= $1
-          AND is_deleted = FALSE
+          AND expectedpayoutdate <= $1
+          AND isdeleted = FALSE
         FOR UPDATE SKIP LOCKED`,
       [todayUtc],
     );
@@ -281,8 +285,8 @@ export class RedemptionPayoutService {
       `SELECT id
          FROM public.redemption_payouts
         WHERE status = 'READY_FOR_PAYOUT'
-          AND is_deleted = FALSE
-        ORDER BY expected_payout_date ASC
+          AND isdeleted = FALSE
+        ORDER BY expectedpayoutdate ASC
         FOR UPDATE SKIP LOCKED`,
     );
 
@@ -318,17 +322,51 @@ export class RedemptionPayoutService {
   }
 
   /**
-   * Cron step 3: re-queue RETRY_PENDING records that haven't exceeded MAX_RETRY_ATTEMPTS.
+   * Cron step 3: recover payouts stuck in PAYOUT_PROCESSING after a crash.
+   * Any payout that has been in-flight for longer than STALE_PROCESSING_THRESHOLD_MS
+   * without being confirmed is moved back to RETRY_PENDING for re-dispatch.
+   */
+  async recoverStaleProcessingPayouts(): Promise<number> {
+    const staleThreshold = new Date(Date.now() - STALE_PROCESSING_THRESHOLD_MS);
+
+    const rows: {id: string}[] = await (this.redemptionPayoutRepository.dataSource as any).execute(
+      `SELECT id
+         FROM public.redemption_payouts
+        WHERE status = 'PAYOUT_PROCESSING'
+          AND lastattemptat <= $1
+          AND isdeleted = FALSE
+        FOR UPDATE SKIP LOCKED`,
+      [staleThreshold],
+    );
+
+    if (!rows.length) return 0;
+
+    await Promise.all(
+      rows.map(row =>
+        this.redemptionPayoutRepository.updateById(row.id, {
+          status: RedemptionPayoutStatus.RETRY_PENDING,
+          failureReason: 'Recovered from stale PAYOUT_PROCESSING state (likely crash)',
+          updatedBy: 'system:payout-cron',
+        }),
+      ),
+    );
+
+    console.log(`[RedemptionPayoutCron] Recovered ${rows.length} stale PAYOUT_PROCESSING payout(s) → RETRY_PENDING`);
+    return rows.length;
+  }
+
+  /**
+   * Cron step 4: re-queue RETRY_PENDING records that haven't exceeded MAX_RETRY_ATTEMPTS.
    */
   async retryFailedPayouts(): Promise<void> {
-    const rows: {id: string; retry_count: number}[] = await (
+    const rows: {id: string; retrycount: number}[] = await (
       this.redemptionPayoutRepository.dataSource as any
     ).execute(
-      `SELECT id, retry_count
+      `SELECT id, retrycount
          FROM public.redemption_payouts
         WHERE status = 'RETRY_PENDING'
-          AND retry_count < $1
-          AND is_deleted = FALSE
+          AND retrycount < $1
+          AND isdeleted = FALSE
         FOR UPDATE SKIP LOCKED`,
       [MAX_RETRY_ATTEMPTS],
     );

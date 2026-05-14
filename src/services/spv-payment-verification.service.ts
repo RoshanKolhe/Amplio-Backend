@@ -5,6 +5,7 @@ import {UserProfile} from '@loopback/security';
 import {v4 as uuidv4} from 'uuid';
 import {
   InvestmentOrder,
+  InvestmentOrderStatus,
   SpvPaymentVerification,
   SpvPaymentVerificationStatus,
 } from '../models';
@@ -779,6 +780,23 @@ export class SpvPaymentVerificationService {
       );
     }
 
+    // Guard: reject if the linked investment order has been cancelled.
+    // A cancelled order means the investor walked away — allocating units would create
+    // a ghost investment with no matching order record.
+    if (verification.orderId) {
+      try {
+        const order = await this.investmentOrderRepository.findById(verification.orderId);
+        if (order.status === InvestmentOrderStatus.CANCELLED) {
+          throw new HttpErrors.BadRequest(
+            `Cannot approve verification ${verificationId}: the linked investment order (${order.id}) was cancelled by the investor. Reject this verification instead.`,
+          );
+        }
+      } catch (err) {
+        if (err instanceof HttpErrors.HttpError) throw err;
+        // Order not found — allow approval (standalone verification not tied to an order)
+      }
+    }
+
     const updateFields: Partial<SpvPaymentVerification> = {
       status: SpvPaymentVerificationStatus.VERIFIED,
       verificationStatus: 1, // Approved
@@ -1037,37 +1055,57 @@ export class SpvPaymentVerificationService {
     spvId: string,
     amount: number,
   ): Promise<void> {
-    const candidates = await this.spvPaymentVerificationRepository.find({
-      where: {
-        and: [
-          {spvId},
-          {amount},
-          {status: SpvPaymentVerificationStatus.SUBMITTED},
-          {isDeleted: false},
-        ],
-      },
-      order: ['createdAt ASC'],
-      limit: 1,
-    });
+    const ds = (this.spvPaymentVerificationRepository as unknown as {dataSource: juggler.DataSource}).dataSource;
+    const tx = await ds.beginTransaction(IsolationLevel.READ_COMMITTED);
 
-    const verification = candidates[0];
+    let verification: SpvPaymentVerification | undefined;
 
-    if (!verification) {
-      return;
+    try {
+      // FOR UPDATE SKIP LOCKED prevents two pods from claiming the same SUBMITTED
+      // verification when a bank transaction arrives concurrently.
+      const rows: {id: string}[] = await ds.execute(
+        `SELECT id
+           FROM public.spv_payment_verifications
+          WHERE spvid = $1
+            AND amount = $2
+            AND status = $3
+            AND isdeleted = FALSE
+          ORDER BY createdat ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED`,
+        [spvId, amount, SpvPaymentVerificationStatus.SUBMITTED],
+        {transaction: tx},
+      );
+
+      if (!rows.length) {
+        await tx.commit();
+        return;
+      }
+
+      verification = await this.spvPaymentVerificationRepository.findById(
+        rows[0].id, undefined, {transaction: tx},
+      );
+
+      await this.spvPaymentVerificationRepository.updateById(verification.id, {
+        transactionId,
+        status: SpvPaymentVerificationStatus.AUTO_VERIFIED,
+        verifiedAt: new Date(),
+        updatedBy: 'system',
+        metadata: {
+          ...((verification.metadata ?? {}) as VerificationMetadata),
+          autoVerified: true,
+        },
+      }, {transaction: tx});
+
+      await tx.commit();
+    } catch (error) {
+      await tx.rollback();
+      throw error;
     }
 
-    await this.spvPaymentVerificationRepository.updateById(verification.id, {
-      transactionId,
-      status: SpvPaymentVerificationStatus.AUTO_VERIFIED,
-      verifiedAt: new Date(),
-      updatedBy: 'system',
-      metadata: {
-        ...((verification.metadata ?? {}) as VerificationMetadata),
-        autoVerified: true,
-      },
-    });
+    if (!verification) return;
 
-    // Sync in-memory so runAllocation sees transactionId is already set and won't overwrite it
+    // Sync in-memory so runAllocation sees transactionId and won't overwrite it
     verification.transactionId = transactionId;
 
     try {
@@ -1085,37 +1123,85 @@ export class SpvPaymentVerificationService {
     units: number,
     triggeredBy: string,
   ): Promise<void> {
-    const meta = (verification.metadata ?? {}) as VerificationMetadata;
-    const existingReservations =
-      (meta.reservation as UnitReservation[] | undefined) ?? [];
+    const ds = (this.spvPaymentVerificationRepository as unknown as {dataSource: juggler.DataSource}).dataSource;
+    const tx = await ds.beginTransaction(IsolationLevel.READ_COMMITTED);
 
-    const allocationResult = await this.ptcIssuanceService.allocateUnitsForVerifiedPayment(
-      verification.investorProfileId,
-      verification.spvId,
-      units,
-      verification.id,
-      triggeredBy,
-      existingReservations.length > 0 ? existingReservations : undefined,
-    );
+    try {
+      const meta = (verification.metadata ?? {}) as VerificationMetadata;
+      const existingReservations =
+        (meta.reservation as UnitReservation[] | undefined) ?? [];
 
-    const updatePayload: Partial<SpvPaymentVerification> = {
-      status: SpvPaymentVerificationStatus.ALLOCATED,
-      verificationStatus: 1, // Approved
-      allocatedUnits: units,
-      allocatedAt: new Date(),
-      updatedBy: triggeredBy,
-      reservationStatus:
-        existingReservations.length > 0 ? 'CONSUMED' : verification.reservationStatus,
-    };
+      // Only use the reservation conversion path when units are still held in reservedUnits
+      // (reservationStatus RESERVED or CONSUMING). If the cron already released the reservation
+      // back to remainingUnits (RELEASED), the fresh-allocation path must be used instead.
+      const useReservationPath =
+        existingReservations.length > 0 &&
+        verification.reservationStatus !== 'RELEASED';
 
-    // For manual approvals, verification.transactionId is null because no bank transaction
-    // was matched. Write the escrow movement's UUID so the row always has a transaction reference.
-    // For auto-verified cases the bank transaction ID is already on the in-memory object, so we skip.
-    if (!verification.transactionId && allocationResult.transactionId) {
-      updatePayload.transactionId = allocationResult.transactionId;
+      const allocationResult = await this.ptcIssuanceService.allocateUnitsForVerifiedPayment(
+        verification.investorProfileId,
+        verification.spvId,
+        units,
+        verification.id,
+        triggeredBy,
+        useReservationPath ? existingReservations : undefined,
+        tx,
+      );
+
+      // Re-read status within the same tx to handle the idempotency early-return case.
+      // If another concurrent pod already completed the allocation (and our call above
+      // returned early), we must not overwrite the ALLOCATED state.
+      const currentRows = await ds.execute(
+        'SELECT status FROM public.spv_payment_verifications WHERE id = $1',
+        [verification.id],
+        {transaction: tx},
+      ) as Array<{status: string}>;
+
+      if (currentRows[0]?.status === SpvPaymentVerificationStatus.ALLOCATED) {
+        await tx.commit();
+        return;
+      }
+
+      const allocatedAt = new Date();
+
+      const updatePayload: Partial<SpvPaymentVerification> = {
+        status: SpvPaymentVerificationStatus.ALLOCATED,
+        verificationStatus: 1,
+        allocatedUnits: units,
+        allocatedAt,
+        updatedBy: triggeredBy,
+        reservationStatus: useReservationPath ? 'CONSUMED' : verification.reservationStatus,
+      };
+
+      // For manual approvals transactionId is null (no bank match); use the escrow movement UUID.
+      // For auto-verified cases the bank transaction ID is already on the in-memory object.
+      if (!verification.transactionId && allocationResult.transactionId) {
+        updatePayload.transactionId = allocationResult.transactionId;
+      }
+
+      await this.spvPaymentVerificationRepository.updateById(
+        verification.id, updatePayload, {transaction: tx},
+      );
+
+      // Sync the linked order in the SAME transaction — atomic with the verification update.
+      if (verification.orderId) {
+        await this.investmentOrderRepository.updateById(
+          verification.orderId,
+          {
+            status: InvestmentOrderStatus.PAYMENT_SUCCESS,
+            allocatedUnits: units,
+            allocatedAt,
+            updatedBy: triggeredBy,
+          },
+          {transaction: tx},
+        );
+      }
+
+      await tx.commit();
+    } catch (error) {
+      await tx.rollback();
+      throw error;
     }
-
-    await this.spvPaymentVerificationRepository.updateById(verification.id, updatePayload);
   }
 
   async getPaymentInstructions(
