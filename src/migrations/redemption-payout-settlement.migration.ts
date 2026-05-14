@@ -8,42 +8,44 @@ export async function runRedemptionPayoutSettlementMigration(
   // ── Add settlement scheduling and bank account columns ───────────────────
   await ds.execute(`
     ALTER TABLE public.redemption_payouts
-      ADD COLUMN IF NOT EXISTS submitted_at           TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS submitted_after_cutoff BOOLEAN     NOT NULL DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS extra_interest_days    INTEGER     NOT NULL DEFAULT 1,
-      ADD COLUMN IF NOT EXISTS expected_payout_date   DATE,
-      ADD COLUMN IF NOT EXISTS settlement_date        DATE,
-      ADD COLUMN IF NOT EXISTS bank_account_id        UUID
+      ADD COLUMN IF NOT EXISTS submittedat           TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS submittedaftercutoff BOOLEAN     NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS extrainterestdays    INTEGER     NOT NULL DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS expectedpayoutdate   DATE,
+      ADD COLUMN IF NOT EXISTS settlementdate        DATE,
+      ADD COLUMN IF NOT EXISTS bankaccountid        UUID
         REFERENCES public.bank_details(id) ON DELETE SET NULL,
-      ADD COLUMN IF NOT EXISTS bank_account_snapshot  JSONB,
-      ADD COLUMN IF NOT EXISTS retry_count            INTEGER     NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS last_attempt_at        TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS idempotency_key        VARCHAR(256)
+      ADD COLUMN IF NOT EXISTS bankaccountsnapshot  JSONB,
+      ADD COLUMN IF NOT EXISTS retrycount            INTEGER     NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS lastattemptat        TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS idempotencykey        VARCHAR(256)
   `);
 
   // ── Migrate existing PENDING records to REQUESTED ────────────────────────
   await ds.execute(`
     UPDATE public.redemption_payouts
        SET status = 'REQUESTED',
-           submitted_at = createdAt
+           submittedat = createdat
      WHERE status = 'PENDING'
-       AND isDeleted = FALSE
+       AND isdeleted = FALSE
   `);
 
   // ── Index for cron: find payouts ready to promote ─────────────────────────
   await ds.execute(`
+    DROP INDEX IF EXISTS public.idx_redemption_payouts_settlement_cron;
     CREATE INDEX IF NOT EXISTS idx_redemption_payouts_settlement_cron
-      ON public.redemption_payouts(expected_payout_date, status)
+      ON public.redemption_payouts(expectedpayoutdate, status)
       WHERE status IN ('REQUESTED', 'PENDING_SETTLEMENT', 'READY_FOR_PAYOUT', 'RETRY_PENDING')
-        AND isDeleted = FALSE
+        AND isdeleted = FALSE
   `);
 
   // ── Idempotency unique index ───────────────────────────────────────────────
   await ds.execute(`
+    DROP INDEX IF EXISTS public.idx_redemption_payouts_idempotency_key;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_redemption_payouts_idempotency_key
-      ON public.redemption_payouts(idempotency_key)
-      WHERE idempotency_key IS NOT NULL
-        AND isDeleted = FALSE
+      ON public.redemption_payouts(idempotencykey)
+      WHERE idempotencykey IS NOT NULL
+        AND isdeleted = FALSE
   `);
 
   console.log('[Migration] redemption-payout-settlement: done');

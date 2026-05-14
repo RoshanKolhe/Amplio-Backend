@@ -108,7 +108,6 @@ export async function migrate(args: string[]) {
       'SpvKycDocumentType',
       'UsersConsent',
       'SpvPaymentVerification',
-      'RedemptionPayout',
       'InvestmentOrder',
       'PaymentAttempt',
       'PtcFreeze',
