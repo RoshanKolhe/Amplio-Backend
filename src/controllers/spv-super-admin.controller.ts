@@ -15,7 +15,6 @@ import {
   EscrowSetupRepository,
   EscrowTransactionRepository,
   InvestorClosedInvestmentRepository,
-  InvestorEscrowLedgerRepository,
   InvestorPtcHoldingRepository,
   IsinApplicationRepository,
   MerchantPayoutBatchItemRepository,
@@ -70,8 +69,6 @@ export class SpvSuperAdminController {
     private investorPtcHoldingRepository: InvestorPtcHoldingRepository,
     @repository(InvestorClosedInvestmentRepository)
     private investorClosedInvestmentRepository: InvestorClosedInvestmentRepository,
-    @repository(InvestorEscrowLedgerRepository)
-    private investorEscrowLedgerRepository: InvestorEscrowLedgerRepository,
     @repository(MerchantPayoutBatchItemRepository)
     private merchantPayoutBatchItemRepository: MerchantPayoutBatchItemRepository,
     @repository(TransactionRepository)
@@ -182,7 +179,6 @@ export class SpvSuperAdminController {
     spvApplicationId: string;
     deleted: {
       merchantPayoutBatchItems: number;
-      investorEscrowLedgers: number;
       investorPtcHoldings: number;
       investorClosedInvestments: number;
       escrowTransactions: number;
@@ -278,14 +274,6 @@ export class SpvSuperAdminController {
             {transaction: tx},
           )
         : {count: 0};
-
-      const deletedInvestorEscrowLedgers =
-        await this.investorEscrowLedgerRepository.deleteAll(
-          {
-            referenceId: spv.id,
-          },
-          {transaction: tx},
-        );
 
       const deletedInvestorPtcHoldings =
         await this.investorPtcHoldingRepository.deleteAll(
@@ -414,7 +402,6 @@ export class SpvSuperAdminController {
         spvApplicationId,
         deleted: {
           merchantPayoutBatchItems: deletedMerchantPayoutBatchItems.count,
-          investorEscrowLedgers: deletedInvestorEscrowLedgers.count,
           investorPtcHoldings: deletedInvestorPtcHoldings.count,
           investorClosedInvestments: deletedInvestorClosedInvestments.count,
           escrowTransactions: deletedEscrowTransactions.count,

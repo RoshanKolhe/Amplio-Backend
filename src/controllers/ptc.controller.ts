@@ -6,7 +6,6 @@ import {authorize} from '../authorization';
 import {InvestorInvestmentsService} from '../services/investor-investments.service';
 import {PoolService} from '../services/pool.service';
 import {PtcIssuanceService} from '../services/ptc-issuance.service';
-import {WalletWithdrawalService} from '../services/wallet-withdrawal.service';
 
 export interface BuyPtcRequest {
   units: number;
@@ -22,8 +21,6 @@ export class PtcController {
     private ptcIssuanceService: PtcIssuanceService,
     @inject('service.investorInvestments.service')
     private investorInvestmentsService: InvestorInvestmentsService,
-    @inject('service.walletWithdrawal.service')
-    private walletWithdrawalService: WalletWithdrawalService,
   ) {}
 
   @authenticate('jwt')
@@ -39,14 +36,12 @@ export class PtcController {
       spvId,
       currentUser.id,
     );
-    const wallet = await this.walletWithdrawalService.getWallet(currentUser);
 
     return {
       success: true,
       message: 'PTC data fetched successfully',
       data: {
         spvId,
-        wallet,
         pool,
         poolSummary,
         ptcInventory,
@@ -104,8 +99,6 @@ export class PtcController {
       currentUser.id,
     );
 
-    const wallet = await this.walletWithdrawalService.getWallet(currentUser);
-
     return {
       success: true,
       message: allocation.partialAllocation
@@ -113,7 +106,6 @@ export class PtcController {
         : 'PTC units purchased successfully',
       data: {
         allocation,
-        wallet,
         ptcInventory,
       },
     };
@@ -153,14 +145,12 @@ export class PtcController {
       spvId,
       currentUser.id,
     );
-    const wallet = await this.walletWithdrawalService.getWallet(currentUser);
 
     return {
       success: true,
       message: 'PTC units redeemed successfully',
       data: {
         redemption,
-        wallet,
         ptcInventory,
       },
     };

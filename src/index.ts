@@ -1,11 +1,26 @@
 import * as dotenv from 'dotenv';
 import {AmplioBackendApplication, ApplicationConfig} from './application';
+import {AmplioDataSource} from './datasources';
 export * from './application';
 dotenv.config();
+
+// Drops any stale unique indexes that were removed from the schema.
+// Safe to re-run — all statements are idempotent.
+async function dropLegacyIndexes(app: AmplioBackendApplication): Promise<void> {
+  try {
+    const ds = await app.get<AmplioDataSource>('datasources.amplio');
+    // Removed: investors are allowed to hold multiple concurrent orders per SPV
+    await ds.execute(`DROP INDEX IF EXISTS public.idx_investment_orders_active_per_investor_spv`);
+  } catch (err) {
+    // Non-fatal — log and continue
+    console.warn('[Startup] Could not drop legacy indexes:', err);
+  }
+}
 
 export async function main(options: ApplicationConfig = {}) {
   const app = new AmplioBackendApplication(options);
   await app.boot();
+  await dropLegacyIndexes(app);
   await app.start();
   await app.startCrons();
   console.log('port', process.env.PORT);

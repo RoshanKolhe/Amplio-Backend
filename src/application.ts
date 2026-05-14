@@ -51,7 +51,6 @@ import {CompanyKycDocumentRequirementsService} from './services/company-kyc-docu
 import {ComplianceAndDeclarationsService} from './services/compliance-and-declarations.service';
 import {InvestorKycDocumentService} from './services/investor-kyc-document.service';
 import {InvestorKycDocumentRequirementsService} from './services/investor-kyc-document-requirements.service';
-import {InvestorEscrowAccountService} from './services/investor-escrow-account.service';
 import {InvestmentMandateService} from './services/investment-mandate.service';
 import {InvestorInvestmentsService} from './services/investor-investments.service';
 import {MerchantKycDocumentService} from './services/merchant-kyc-document.service';
@@ -76,10 +75,17 @@ import {SpvService} from './services/spv.service';
 import {SpvStatusDataService} from './services/spv-status-data.service';
 import {TrustDeedService} from './services/trust-deed.service';
 import {IsinApplicationService} from './services/isin-application.service';
+import {EscalationSlaCron} from './crons/escalation-sla.cron';
 import {MerchantPayoutCron} from './crons/merchant-payout.cron';
+import {PaymentWindowTimeoutCron} from './crons/payment-window-timeout.cron';
 import {SpvPoolCron} from './crons/spv-pool.cron';
+import {SpvReservationCron} from './crons/spv-reservation.cron';
 import {TransactionCron} from './crons/transaction.cron';
+import {EscalationRepository} from './repositories/escalation.repository';
+import {InvestmentOrderRepository} from './repositories/investment-order.repository';
 import {PspRepository} from './repositories/psp.repository';
+import {PtcFreezeRepository} from './repositories/ptc-freeze.repository';
+import {SpvPaymentVerificationRepository} from './repositories/spv-payment-verification.repository';
 import {SpvRepository} from './repositories/spv.repository';
 import {TransactionRepository} from './repositories/transaction.repository';
 import {EscrowService} from './services/escrow.service';
@@ -91,8 +97,12 @@ import {PoolService} from './services/pool.service';
 import {TrusteeKycDocumentService} from './services/trustee-kyc-document.service';
 import {MerchantPayoutService} from './services/merchant-payout.service';
 import {MerchantPayoutExecutorService} from './services/merchant-payout-executor.service';
-import {WalletWithdrawalService} from './services/wallet-withdrawal.service';
 import {SpvManagementService} from './services/spv-management.service';
+import {SpvPaymentVerificationService} from './services/spv-payment-verification.service';
+import {RedemptionPayoutService} from './services/redemption-payout.service';
+import {AdminInvestmentOrderService} from './services/admin-investment-order.service';
+import {AdminReconciliationService} from './services/admin-reconciliation.service';
+import {InvestmentOrderService} from './services/investment-order.service';
 
 export {ApplicationConfig};
 
@@ -102,6 +112,9 @@ export class AmplioBackendApplication extends BootMixin(
   private transactionCron?: TransactionCron;
   private merchantPayoutCron?: MerchantPayoutCron;
   private spvPoolCron?: SpvPoolCron;
+  private spvReservationCron?: SpvReservationCron;
+  private paymentWindowTimeoutCron?: PaymentWindowTimeoutCron;
+  private escalationSlaCron?: EscalationSlaCron;
 
   constructor(options: ApplicationConfig = {}) {
     super(options);
@@ -214,9 +227,6 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.investorInvestments.service').toClass(
       InvestorInvestmentsService,
     );
-    this.bind('service.investorEscrowAccount.service').toClass(
-      InvestorEscrowAccountService,
-    );
     this.bind('service.platformAgreementService.service').toClass(
       PlatformAgreementService,
     );
@@ -311,11 +321,23 @@ export class AmplioBackendApplication extends BootMixin(
     this.bind('service.merchantPayoutExecutorService.service').toClass(
       MerchantPayoutExecutorService,
     );
-    this.bind('service.walletWithdrawal.service').toClass(
-      WalletWithdrawalService,
-    );
     this.bind('service.spvManagement.service').toClass(
       SpvManagementService,
+    );
+    this.bind('service.spvPaymentVerification.service').toClass(
+      SpvPaymentVerificationService,
+    );
+    this.bind('service.redemptionPayout.service').toClass(
+      RedemptionPayoutService,
+    );
+    this.bind('service.adminReconciliation.service').toClass(
+      AdminReconciliationService,
+    );
+    this.bind('service.investmentOrder.service').toClass(
+      InvestmentOrderService,
+    );
+    this.bind('service.adminInvestmentOrder.service').toClass(
+      AdminInvestmentOrderService,
     );
   }
 
@@ -338,7 +360,14 @@ export class AmplioBackendApplication extends BootMixin(
   }
 
   async startCrons() {
-    if (this.transactionCron && this.merchantPayoutCron && this.spvPoolCron) {
+    if (
+      this.transactionCron &&
+      this.merchantPayoutCron &&
+      this.spvPoolCron &&
+      this.spvReservationCron &&
+      this.paymentWindowTimeoutCron &&
+      this.escalationSlaCron
+    ) {
       return;
     }
 
@@ -407,6 +436,60 @@ export class AmplioBackendApplication extends BootMixin(
       );
       this.spvPoolCron.start();
       console.log('[Cron] SPV pool cron started');
+    }
+
+    if (!this.spvReservationCron) {
+      const spvPaymentVerificationRepository =
+        await this.get<SpvPaymentVerificationRepository>(
+          'repositories.SpvPaymentVerificationRepository',
+        );
+      const ptcIssuanceService = await this.get<PtcIssuanceService>(
+        'service.ptcIssuance.service',
+      );
+      const investmentOrderRepository =
+        await this.get<InvestmentOrderRepository>(
+          'repositories.InvestmentOrderRepository',
+        );
+      const ptcFreezeRepository = await this.get<PtcFreezeRepository>(
+        'repositories.PtcFreezeRepository',
+      );
+
+      this.spvReservationCron = new SpvReservationCron(
+        spvPaymentVerificationRepository,
+        ptcIssuanceService,
+        investmentOrderRepository,
+        ptcFreezeRepository,
+      );
+      this.spvReservationCron.start();
+      console.log('[Cron] SPV reservation cron started');
+    }
+
+    if (!this.paymentWindowTimeoutCron) {
+      const investmentOrderRepository =
+        await this.get<InvestmentOrderRepository>(
+          'repositories.InvestmentOrderRepository',
+        );
+      const spvPaymentVerificationRepository =
+        await this.get<SpvPaymentVerificationRepository>(
+          'repositories.SpvPaymentVerificationRepository',
+        );
+
+      this.paymentWindowTimeoutCron = new PaymentWindowTimeoutCron(
+        investmentOrderRepository,
+        spvPaymentVerificationRepository,
+      );
+      this.paymentWindowTimeoutCron.start();
+      console.log('[Cron] Payment window timeout cron started');
+    }
+
+    if (!this.escalationSlaCron) {
+      const escalationRepository = await this.get<EscalationRepository>(
+        'repositories.EscalationRepository',
+      );
+
+      this.escalationSlaCron = new EscalationSlaCron(escalationRepository);
+      this.escalationSlaCron.start();
+      console.log('[Cron] Escalation SLA cron started');
     }
   }
 }

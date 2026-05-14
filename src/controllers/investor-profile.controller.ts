@@ -31,8 +31,6 @@ import {
   ComplianceAndDeclarationsRepository,
   InvestmentMandateRepository,
   InvestorClosedInvestmentRepository,
-  InvestorEscrowAccountRepository,
-  InvestorEscrowLedgerRepository,
   InvestorKycDocumentRepository,
   InvestorPanCardsRepository,
   InvestorProfileRepository,
@@ -46,7 +44,6 @@ import {
   UserRolesRepository,
   UsersConsentRepository,
   UsersRepository,
-  WithdrawalRequestRepository,
 } from '../repositories';
 import {AddressDetailsService} from '../services/address-details.service';
 import {BankDetailsService} from '../services/bank-details.service';
@@ -84,16 +81,10 @@ export class InvestorProfileController {
     private investorPanCardsRepository: InvestorPanCardsRepository,
     @repository(InvestorKycDocumentRepository)
     private investorKycDocumentRepository: InvestorKycDocumentRepository,
-    @repository(InvestorEscrowAccountRepository)
-    private investorEscrowAccountRepository: InvestorEscrowAccountRepository,
-    @repository(InvestorEscrowLedgerRepository)
-    private investorEscrowLedgerRepository: InvestorEscrowLedgerRepository,
     @repository(InvestorPtcHoldingRepository)
     private investorPtcHoldingRepository: InvestorPtcHoldingRepository,
     @repository(InvestorClosedInvestmentRepository)
     private investorClosedInvestmentRepository: InvestorClosedInvestmentRepository,
-    @repository(WithdrawalRequestRepository)
-    private withdrawalRequestRepository: WithdrawalRequestRepository,
     @repository(AddressDetailsRepository)
     private addressDetailsRepository: AddressDetailsRepository,
     @repository(BankDetailsRepository)
@@ -269,11 +260,8 @@ export class InvestorProfileController {
       investorDocuments: number;
       addressDetails: number;
       bankDetails: number;
-      investorEscrowAccounts: number;
-      investorEscrowLedgers: number;
       investorPtcHoldings: number;
       investorClosedInvestments: number;
-      withdrawalRequests: number;
       uboDetails: number;
       signatories: number;
       complianceDeclarations: number;
@@ -388,19 +376,6 @@ export class InvestorProfileController {
         {transaction: tx},
       );
 
-      const investorEscrowAccounts =
-        await this.investorEscrowAccountRepository.find(
-          {
-            where: {
-              investorProfileId: investorProfile.id,
-            },
-          },
-          {transaction: tx},
-        );
-      const investorEscrowAccountIds = investorEscrowAccounts.map(
-        account => account.id,
-      );
-
       const mediaIds = Array.from(
         new Set(
           [
@@ -422,29 +397,6 @@ export class InvestorProfileController {
         ),
       );
 
-      const deletedInvestorEscrowLedgers =
-        await this.investorEscrowLedgerRepository.deleteAll(
-          investorEscrowAccountIds.length
-            ? {
-              or: [
-                {investorId: investorProfile.id},
-                {investorEscrowAccountId: {inq: investorEscrowAccountIds}},
-              ],
-            }
-            : {
-              investorId: investorProfile.id,
-            },
-          {transaction: tx},
-        );
-
-      const deletedWithdrawalRequests =
-        await this.withdrawalRequestRepository.deleteAll(
-          {
-            investorProfileId: investorProfile.id,
-          },
-          {transaction: tx},
-        );
-
       const deletedInvestorPtcHoldings =
         await this.investorPtcHoldingRepository.deleteAll(
           {
@@ -455,14 +407,6 @@ export class InvestorProfileController {
 
       const deletedInvestorClosedInvestments =
         await this.investorClosedInvestmentRepository.deleteAll(
-          {
-            investorProfileId: investorProfile.id,
-          },
-          {transaction: tx},
-        );
-
-      const deletedInvestorEscrowAccounts =
-        await this.investorEscrowAccountRepository.deleteAll(
           {
             investorProfileId: investorProfile.id,
           },
@@ -661,11 +605,8 @@ export class InvestorProfileController {
           investorDocuments: deletedInvestorDocuments.count,
           addressDetails: deletedAddressDetails.count,
           bankDetails: deletedBankDetails.count,
-          investorEscrowAccounts: deletedInvestorEscrowAccounts.count,
-          investorEscrowLedgers: deletedInvestorEscrowLedgers.count,
           investorPtcHoldings: deletedInvestorPtcHoldings.count,
           investorClosedInvestments: deletedInvestorClosedInvestments.count,
-          withdrawalRequests: deletedWithdrawalRequests.count,
           uboDetails: deletedUboDetails.count,
           signatories: deletedSignatories.count,
           complianceDeclarations: deletedComplianceDeclarations.count,

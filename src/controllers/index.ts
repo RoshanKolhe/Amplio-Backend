@@ -48,5 +48,8 @@ export * from './trustee-kyc-document-requirements.controller';
 export * from './trustee-profiles.controller';
 export * from './user-consent-controller.controller';
 export * from './users-consent-consent-template.controller';
-export * from './wallet-withdrawal.controller';
-
+export * from './spv-payment-verification.controller';
+export * from './admin-payment-verification.controller';
+export * from './admin-reconciliation.controller';
+export * from './investment-order.controller';
+export * from './admin-investment-order.controller';
