@@ -50,7 +50,7 @@ export class SpvPoolCron {
             escrowProcessed: escrowResult.processed,
             escrowMatched: escrowResult.matched,
             poolOutstanding: poolResult.pool.outstanding,
-            fundeedAdded: poolResult.fundedSync.addedCount,
+            fundedAdded: poolResult.fundedSync.addedCount,
             settledCount: poolResult.settledSync.settledCount,
           });
         } catch (error) {
