@@ -6,24 +6,20 @@ import {
   InvestorClosedInvestmentStatus,
   PoolFinancials,
   PoolSummary,
+  SpvPaymentVerificationStatus,
   Spv,
   Transaction,
 } from '../models';
 import {
-  InvestorEscrowLedgerStatus,
-  InvestorEscrowLedgerType,
-} from '../models/investor-escrow-ledger.model';
-import {
   InvestorClosedInvestmentRepository,
-  InvestorEscrowLedgerRepository,
   InvestorPtcHoldingRepository,
   InvestorProfileRepository,
   PtcParametersRepository,
   SpvApplicationCreditRatingRepository,
+  SpvPaymentVerificationRepository,
   SpvRepository,
   TransactionRepository,
 } from '../repositories';
-import {InvestorEscrowAccountService} from './investor-escrow-account.service';
 import {PoolFinancialsService} from './pool-financials.service';
 import {PoolService} from './pool.service';
 import {
@@ -36,6 +32,9 @@ export type InvestorInvestmentRecord = {
   id: string;
   name: string;
   spvId: string;
+  poolName: string;
+  spvName: string | null;
+  originatorName: string | null;
   poolSummary: PoolSummary | null;
   ptcInventory: PtcInventorySummary | null;
   product: {
@@ -57,7 +56,6 @@ export type InvestorInvestmentRecord = {
     couponRate: string;
     nextLiquidityEvent: string | null;
     finalMaturityDate: string | null;
-    walletAmount: string | null;
     units: {
       selected: number;
       available: number;
@@ -176,7 +174,7 @@ const DEFAULT_PAYOUT_LABEL = 'Interest payout';
 
 export class InvestorInvestmentsService {
   private static readonly IST_OFFSET_MINUTES = 330;
-  private static readonly IST_INTEREST_CUTOFF_HOUR = 20;
+  private static readonly IST_INTEREST_CUTOFF_HOUR = 17;
 
   private readonly currencyFormatter = new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -195,14 +193,12 @@ export class InvestorInvestmentsService {
     private spvApplicationCreditRatingRepository: SpvApplicationCreditRatingRepository,
     @repository(TransactionRepository)
     private transactionRepository: TransactionRepository,
-    @repository(InvestorEscrowLedgerRepository)
-    private investorEscrowLedgerRepository: InvestorEscrowLedgerRepository,
+    @repository(SpvPaymentVerificationRepository)
+    private spvPaymentVerificationRepository: SpvPaymentVerificationRepository,
     @repository(InvestorClosedInvestmentRepository)
     private investorClosedInvestmentRepository: InvestorClosedInvestmentRepository,
     @repository(InvestorPtcHoldingRepository)
     private investorPtcHoldingRepository: InvestorPtcHoldingRepository,
-    @inject('service.investorEscrowAccount.service')
-    private investorEscrowAccountService: InvestorEscrowAccountService,
     @inject('service.poolFinancials.service')
     private poolFinancialsService: PoolFinancialsService,
     @inject('service.pool.service')
@@ -520,7 +516,6 @@ export class InvestorInvestmentsService {
   private async buildCatalogEntry(
     currentUser: UserProfile,
     spv: Spv,
-    walletAmount: string,
   ): Promise<InvestmentCatalogEntry | null> {
     const [poolDetails, ptcParameters, creditRatingSummary, transactions, timeline, ptcInventory] =
       await Promise.all([
@@ -574,6 +569,9 @@ export class InvestorInvestmentsService {
         id: spv.id,
         name: ONLINE_PAYMENTS_TITLE,
         spvId: spv.id,
+        poolName: spv.spvName || spv.originatorName || ONLINE_PAYMENTS_TITLE,
+        spvName: spv.spvName || null,
+        originatorName: spv.originatorName || null,
         poolSummary,
         ptcInventory,
         product: {
@@ -596,7 +594,6 @@ export class InvestorInvestmentsService {
           couponRate: this.formatPercent(pool.targetYield),
           nextLiquidityEvent: timeline.nextLiquidityEvent,
           finalMaturityDate: timeline.finalMaturityDate,
-          walletAmount,
           units: {
             selected: availableUnits > 0 ? 1 : 0,
             available: availableUnits,
@@ -630,11 +627,6 @@ export class InvestorInvestmentsService {
   private async buildInvestmentCatalog(
     currentUser: UserProfile,
   ): Promise<InvestmentCatalogEntry[]> {
-    const investorProfile = await this.ensureInvestorProfileOrFail(currentUser);
-    const wallet = await this.investorEscrowAccountService.fetchByInvestorProfileId(
-      investorProfile.id,
-    );
-    const walletAmount = this.formatCurrency(wallet?.currentBalance ?? 0);
     const spvs = await this.spvRepository.find({
       where: {
         and: [{isActive: true}, {isDeleted: false}],
@@ -643,7 +635,7 @@ export class InvestorInvestmentsService {
     });
 
     const entries = await Promise.all(
-      spvs.map(spv => this.buildCatalogEntry(currentUser, spv, walletAmount)),
+      spvs.map(spv => this.buildCatalogEntry(currentUser, spv)),
     );
 
     return entries.filter(
@@ -774,51 +766,42 @@ export class InvestorInvestmentsService {
       },
     });
 
-    const ledgerRows = await this.investorEscrowLedgerRepository.find({
+    const buyVerificationsForClosed = await this.spvPaymentVerificationRepository.find({
       where: {
         and: [
-          {investorId: investorProfileId},
+          {investorProfileId},
+          {spvId: featuredClosedInvestment.spvId},
+          {status: SpvPaymentVerificationStatus.ALLOCATED},
           {isDeleted: false},
-          {status: InvestorEscrowLedgerStatus.SUCCESS},
-          {
-            type: {
-              inq: [
-                InvestorEscrowLedgerType.BUY_DEBIT,
-                InvestorEscrowLedgerType.REDEMPTION_CREDIT,
-              ],
-            },
-          },
         ],
       },
       order: ['createdAt DESC'],
     });
 
-    const filteredLedgers = ledgerRows.filter(ledger => {
-      const metadata =
-        ledger.metadata && typeof ledger.metadata === 'object'
-          ? (ledger.metadata as {spvId?: string})
-          : undefined;
-      const ledgerSpvId =
-        ledger.type === InvestorEscrowLedgerType.BUY_DEBIT
-          ? metadata?.spvId ?? ledger.referenceId
-          : metadata?.spvId;
+    const featuredSpvSells = closedInvestments.filter(
+      i => i.spvId === featuredClosedInvestment.spvId,
+    );
 
-      return ledgerSpvId === featuredClosedInvestment.spvId;
-    });
-
-    const transactionRows = filteredLedgers.slice(0, 10).map(ledger => ({
-      id: ledger.id,
-      type:
-        ledger.type === InvestorEscrowLedgerType.REDEMPTION_CREDIT
-          ? 'PTC sell'
-          : 'PTC purchase',
-      date: this.formatDate(ledger.createdAt ?? new Date()),
-      status:
-        ledger.type === InvestorEscrowLedgerType.REDEMPTION_CREDIT
-          ? ('credit' as const)
-          : ('debit' as const),
-      amount: this.normalizeAmount(ledger.amount),
-    }));
+    const transactionRows = [
+      ...buyVerificationsForClosed.map(v => ({
+        id: v.id,
+        type: 'PTC purchase',
+        date: this.formatDate(v.createdAt ?? new Date()),
+        status: 'debit' as const,
+        amount: this.normalizeAmount(v.amount),
+      })),
+      ...featuredSpvSells.map(i => ({
+        id: i.id,
+        type: 'PTC sell',
+        date: this.formatDate(
+          i.closedAt ? new Date(String(i.closedAt)) : i.createdAt ?? new Date(),
+        ),
+        status: 'credit' as const,
+        amount: this.normalizeAmount(i.netPayout),
+      })),
+    ]
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 10);
 
     const totalUnits = Number(featuredClosedInvestment.totalUnits ?? 0);
     const investedAmount = this.normalizeAmount(
@@ -925,60 +908,34 @@ export class InvestorInvestmentsService {
       };
     }
 
-    const [poolDetails, spvTimeline, spv, ledgerRows] = await Promise.all([
+    const [poolDetails, spvTimeline, spv, buyVerificationsActive] = await Promise.all([
       this.fetchPoolDetailsForSpv(featuredHolding.spvId),
       this.fetchSpvTimeline(featuredHolding.spvId),
       this.spvRepository.findById(featuredHolding.spvId),
-      this.investorEscrowLedgerRepository.find({
+      this.spvPaymentVerificationRepository.find({
         where: {
           and: [
-            {investorId: investorProfile.id},
+            {investorProfileId: investorProfile.id},
+            {spvId: featuredHolding.spvId},
+            {status: SpvPaymentVerificationStatus.ALLOCATED},
             {isDeleted: false},
-            {status: InvestorEscrowLedgerStatus.SUCCESS},
-            {
-              type: {
-                inq: [
-                  InvestorEscrowLedgerType.BUY_DEBIT,
-                  InvestorEscrowLedgerType.REDEMPTION_CREDIT,
-                ],
-              },
-            },
           ],
         },
         order: ['createdAt DESC'],
       }),
     ]);
 
-    const filteredLedgers = ledgerRows.filter(ledger => {
-      const metadata =
-        ledger.metadata && typeof ledger.metadata === 'object'
-          ? (ledger.metadata as {spvId?: string})
-          : undefined;
-      const ledgerSpvId =
-        ledger.type === InvestorEscrowLedgerType.BUY_DEBIT
-          ? metadata?.spvId ?? ledger.referenceId
-          : metadata?.spvId;
-
-      return ledgerSpvId === featuredHolding.spvId;
-    });
-
-    const transactionRows = filteredLedgers.slice(0, 10).map(ledger => ({
-      id: ledger.id,
-      type:
-        ledger.type === InvestorEscrowLedgerType.REDEMPTION_CREDIT
-          ? 'PTC sell'
-          : 'PTC purchase',
-      date: this.formatDate(ledger.createdAt ?? new Date()),
-      status:
-        ledger.type === InvestorEscrowLedgerType.REDEMPTION_CREDIT
-          ? ('credit' as const)
-          : ('debit' as const),
-      amount: this.normalizeAmount(ledger.amount),
+    const transactionRows = buyVerificationsActive.slice(0, 10).map(v => ({
+      id: v.id,
+      type: 'PTC purchase',
+      date: this.formatDate(v.createdAt ?? new Date()),
+      status: 'debit' as const,
+      amount: this.normalizeAmount(v.amount),
     }));
 
     const interestRate = this.normalizeAmount(poolDetails?.pool.targetYield ?? 0);
     const dailyInterestRate = Math.max(interestRate, 0) / 100 / 365;
-    
+
     // For active holdings, calculate accrued interest since purchase
     const accruedInterestActive = this.normalizeAmount(
       holdings.reduce((sum, holding) => {
@@ -1185,40 +1142,62 @@ export class InvestorInvestmentsService {
     const normalizedTab = String(params?.tab ?? 'active')
       .trim()
       .toLowerCase();
-    const ledgerTypeFilter =
-      normalizedTab === 'closed'
-        ? [InvestorEscrowLedgerType.REDEMPTION_CREDIT]
-        : [InvestorEscrowLedgerType.BUY_DEBIT];
+    type RawTxRow = {
+      id: string;
+      spvId: string | null;
+      tnsId: string;
+      type: string;
+      createdAt: Date;
+      txStatus: 'credit' | 'debit';
+      amount: number;
+    };
 
-    const ledgerRows = await this.investorEscrowLedgerRepository.find({
-      where: {
-        and: [
-          {investorId: investorProfile.id},
-          {isDeleted: false},
-          {status: InvestorEscrowLedgerStatus.SUCCESS},
-          {type: {inq: ledgerTypeFilter}},
-        ],
-      },
-      order: ['createdAt DESC'],
-    });
+    let rawRows: RawTxRow[];
 
-    const enrichedRows = ledgerRows
-      .map(ledger => {
-        const metadata =
-          ledger.metadata && typeof ledger.metadata === 'object'
-            ? (ledger.metadata as {spvId?: string})
-            : undefined;
-        const spvId =
-          ledger.type === InvestorEscrowLedgerType.BUY_DEBIT
-            ? metadata?.spvId ?? ledger.referenceId
-            : metadata?.spvId ?? null;
-
-        return {ledger, spvId};
-      })
-      .filter(item => (params?.spvId ? item.spvId === params.spvId : true));
+    if (normalizedTab === 'closed') {
+      const closedWhere: object[] = [
+        {investorProfileId: investorProfile.id},
+        {status: InvestorClosedInvestmentStatus.CLOSED},
+        {isDeleted: false},
+      ];
+      if (params?.spvId) closedWhere.push({spvId: params.spvId});
+      const sells = await this.investorClosedInvestmentRepository.find({
+        where: {and: closedWhere},
+        order: ['closedAt DESC', 'createdAt DESC'],
+      });
+      rawRows = sells.map(i => ({
+        id: i.id,
+        spvId: i.spvId,
+        tnsId: i.transactionId ?? i.id,
+        type: 'PTC sell',
+        createdAt: i.closedAt ? new Date(String(i.closedAt)) : i.createdAt ?? new Date(),
+        txStatus: 'credit' as const,
+        amount: this.normalizeAmount(i.netPayout),
+      }));
+    } else {
+      const buyWhere: object[] = [
+        {investorProfileId: investorProfile.id},
+        {status: SpvPaymentVerificationStatus.ALLOCATED},
+        {isDeleted: false},
+      ];
+      if (params?.spvId) buyWhere.push({spvId: params.spvId});
+      const buys = await this.spvPaymentVerificationRepository.find({
+        where: {and: buyWhere},
+        order: ['createdAt DESC'],
+      });
+      rawRows = buys.map(v => ({
+        id: v.id,
+        spvId: v.spvId,
+        tnsId: v.transactionId ?? v.referenceId,
+        type: 'PTC purchase',
+        createdAt: v.createdAt ?? new Date(),
+        txStatus: 'debit' as const,
+        amount: this.normalizeAmount(v.amount),
+      }));
+    }
 
     const uniqueSpvIds = Array.from(
-      new Set(enrichedRows.map(item => item.spvId).filter(Boolean)),
+      new Set(rawRows.map(r => r.spvId).filter(Boolean)),
     ) as string[];
     const spvMap = new Map<string, Spv>();
     if (uniqueSpvIds.length) {
@@ -1229,30 +1208,22 @@ export class InvestorInvestmentsService {
       spvs.forEach(spv => spvMap.set(spv.id, spv));
     }
 
-    const totalCount = enrichedRows.length;
-    const paginatedRows = enrichedRows.slice(skip, skip + limit);
-    const data = paginatedRows.map(({ledger, spvId}) => {
-      const spv = spvId ? spvMap.get(spvId) : undefined;
-      const poolName =
-        spv?.spvName ?? spv?.originatorName ?? ONLINE_PAYMENTS_TITLE;
-      const status: 'credit' | 'debit' =
-        ledger.type === InvestorEscrowLedgerType.REDEMPTION_CREDIT
-          ? 'credit'
-          : 'debit';
+    const totalCount = rawRows.length;
+    const paginatedRows = rawRows.slice(skip, skip + limit);
+    const data = paginatedRows.map(row => {
+      const spv = row.spvId ? spvMap.get(row.spvId) : undefined;
+      const poolName = spv?.spvName ?? spv?.originatorName ?? ONLINE_PAYMENTS_TITLE;
 
       return {
-        id: ledger.id,
-        spvId,
+        id: row.id,
+        spvId: row.spvId,
         poolName,
-        tnsId: ledger.transactionId ?? ledger.referenceId,
-        type:
-          ledger.type === InvestorEscrowLedgerType.REDEMPTION_CREDIT
-            ? 'PTC sell'
-            : 'PTC purchase',
-        createdAt: (ledger.createdAt ?? new Date()).toISOString(),
-        date: this.formatDate(ledger.createdAt ?? new Date()),
-        status,
-        amount: this.normalizeAmount(ledger.amount),
+        tnsId: row.tnsId,
+        type: row.type,
+        createdAt: (row.createdAt ?? new Date()).toISOString(),
+        date: this.formatDate(row.createdAt ?? new Date()),
+        status: row.txStatus,
+        amount: row.amount,
         pspStatus: null,
         pspSettlementStatus: null,
       };
@@ -1272,13 +1243,6 @@ export class InvestorInvestmentsService {
     units: number,
     options: BuyUnitsOptions = {},
   ) {
-    const investorProfile = await this.ensureInvestorProfileOrFail(currentUser);
-
-    // Keep escrow in sync with the approved investor bank account before purchase.
-    await this.investorEscrowAccountService.getOrCreateActiveEscrowForApprovedInvestor(
-      investorProfile.id,
-    );
-
     return this.ptcIssuanceService.buyUnits(currentUser, spvId, units, options);
   }
 }
