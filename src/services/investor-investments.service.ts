@@ -6,6 +6,7 @@ import {
   InvestorClosedInvestmentStatus,
   PoolFinancials,
   PoolSummary,
+  RedemptionPayoutStatus,
   SpvPaymentVerificationStatus,
   Spv,
   Transaction,
@@ -15,6 +16,7 @@ import {
   InvestorPtcHoldingRepository,
   InvestorProfileRepository,
   PtcParametersRepository,
+  RedemptionPayoutRepository,
   SpvApplicationCreditRatingRepository,
   SpvPaymentVerificationRepository,
   SpvRepository,
@@ -146,6 +148,9 @@ export type InvestorClosedInvestmentRecord = {
   closedAt: string | null;
   holdingPeriodDays: number;
   status: InvestorClosedInvestmentStatus;
+  payoutStatus: RedemptionPayoutStatus | null;
+  expectedPayoutDate: string | null;
+  payoutId: string | null;
   metadata?: object;
 };
 
@@ -197,6 +202,8 @@ export class InvestorInvestmentsService {
     private spvPaymentVerificationRepository: SpvPaymentVerificationRepository,
     @repository(InvestorClosedInvestmentRepository)
     private investorClosedInvestmentRepository: InvestorClosedInvestmentRepository,
+    @repository(RedemptionPayoutRepository)
+    private redemptionPayoutRepository: RedemptionPayoutRepository,
     @repository(InvestorPtcHoldingRepository)
     private investorPtcHoldingRepository: InvestorPtcHoldingRepository,
     @inject('service.poolFinancials.service')
@@ -217,6 +224,15 @@ export class InvestorInvestmentsService {
     netPayout?: number | null;
     totalInvestedAmount?: number | null;
   }): number {
+    const totalInvested = Number(investment.totalInvestedAmount ?? 0);
+    const netPayout = Number(investment.netPayout ?? 0);
+
+    // If we have the actual financial components, the most accurate total profit
+    // is the difference between what the investor got back and what they put in.
+    if (totalInvested > 0 && netPayout > 0) {
+      return this.normalizeAmount(netPayout - totalInvested);
+    }
+
     const metadata =
       investment.metadata && typeof investment.metadata === 'object'
         ? (investment.metadata as {profitLoss?: number | string | null})
@@ -225,14 +241,11 @@ export class InvestorInvestmentsService {
       investment.capitalGain ?? metadata?.profitLoss,
     );
 
-    if (Number.isFinite(explicitProfitLoss)) {
+    if (Number.isFinite(explicitProfitLoss) && explicitProfitLoss !== 0) {
       return this.normalizeAmount(explicitProfitLoss);
     }
 
-    return this.normalizeAmount(
-      Number(investment.netPayout ?? 0) -
-        Number(investment.totalInvestedAmount ?? 0),
-    );
+    return this.normalizeAmount(netPayout - totalInvested);
   }
 
   private toIstPseudoDate(date: Date): Date {
@@ -1038,12 +1051,96 @@ export class InvestorInvestmentsService {
       spvRows.forEach(spv => spvMap.set(spv.id, spv));
     }
 
+    // Batch-fetch payout records for all paginated rows in a single query.
+    // Use redemptionRequestId as the primary join key; fall back to transactionId
+    // for older records created before redemptionRequestId was populated.
+    const redemptionRequestIds = paginatedRows
+      .map(r => r.redemptionRequestId)
+      .filter((id): id is string => Boolean(id));
+
+    const transactionIds = paginatedRows
+      .map(r => r.transactionId)
+      .filter((id): id is string => Boolean(id));
+
+    const payoutOrClauses: object[] = [];
+    if (redemptionRequestIds.length > 0) {
+      payoutOrClauses.push({redemptionRequestId: {inq: redemptionRequestIds}});
+    }
+    if (transactionIds.length > 0) {
+      payoutOrClauses.push({transactionId: {inq: transactionIds}});
+    }
+
+    const payoutByRedemptionRequestId = new Map<string, {
+      id: string;
+      status: RedemptionPayoutStatus;
+      expectedPayoutDate: Date | undefined;
+      transactionId: string;
+    }>();
+    const payoutByTransactionId = new Map<string, {
+      id: string;
+      status: RedemptionPayoutStatus;
+      expectedPayoutDate: Date | undefined;
+      transactionId: string;
+    }>();
+
+    if (payoutOrClauses.length > 0) {
+      const payoutRows = await this.redemptionPayoutRepository.find({
+        where: {
+          and: [
+            {or: payoutOrClauses},
+            {isDeleted: false},
+          ],
+        },
+        fields: {
+          id: true,
+          status: true,
+          expectedPayoutDate: true,
+          redemptionRequestId: true,
+          transactionId: true,
+        },
+        order: ['createdAt DESC'],
+      });
+
+      for (const payout of payoutRows) {
+        const entry = {
+          id: payout.id,
+          status: payout.status,
+          expectedPayoutDate: payout.expectedPayoutDate,
+          transactionId: payout.transactionId,
+        };
+        if (payout.redemptionRequestId) {
+          // Keep only the most-recent payout per redemptionRequestId (list is DESC)
+          if (!payoutByRedemptionRequestId.has(payout.redemptionRequestId)) {
+            payoutByRedemptionRequestId.set(payout.redemptionRequestId, entry);
+          }
+        }
+        if (payout.transactionId) {
+          if (!payoutByTransactionId.has(payout.transactionId)) {
+            payoutByTransactionId.set(payout.transactionId, entry);
+          }
+        }
+      }
+    }
+
     const data = paginatedRows.map(investment => {
       const spv = spvMap.get(investment.spvId);
       const poolName =
         spv?.spvName ?? spv?.originatorName ?? ONLINE_PAYMENTS_TITLE;
       const startDate = this.normalizeDate(investment.startDate);
       const closedAt = this.normalizeDate(investment.closedAt);
+
+      const payout =
+        (investment.redemptionRequestId
+          ? payoutByRedemptionRequestId.get(investment.redemptionRequestId)
+          : undefined) ??
+        (investment.transactionId
+          ? payoutByTransactionId.get(investment.transactionId)
+          : undefined) ??
+        null;
+
+      const expectedPayoutDate = payout?.expectedPayoutDate
+        ? this.normalizeDate(payout.expectedPayoutDate)
+        : null;
 
       return {
         id: investment.id,
@@ -1060,9 +1157,7 @@ export class InvestorInvestmentsService {
         interestPayout: this.normalizeAmount(investment.interestPayout),
         stampDutyAmount: this.normalizeAmount(investment.stampDutyAmount),
         capitalGain: this.normalizeAmount(investment.capitalGain),
-        totalProfit: this.resolveClosedInvestmentProfitLoss(
-          investment,
-        ),
+        totalProfit: this.resolveClosedInvestmentProfitLoss(investment),
         annualInterestRate: Number(
           Number(investment.annualInterestRate ?? 0).toFixed(4),
         ),
@@ -1070,6 +1165,11 @@ export class InvestorInvestmentsService {
         closedAt: closedAt ? this.formatDate(closedAt) : null,
         holdingPeriodDays: this.calculateHoldingPeriodDays(startDate, closedAt),
         status: InvestorClosedInvestmentStatus.CLOSED,
+        payoutStatus: payout?.status ?? null,
+        expectedPayoutDate: expectedPayoutDate
+          ? this.formatDate(expectedPayoutDate)
+          : null,
+        payoutId: payout?.id ?? null,
         metadata: investment.metadata,
       };
     });
