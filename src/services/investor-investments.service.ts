@@ -954,7 +954,17 @@ export class InvestorInvestmentsService {
       totalOwnedUnits > 0
         ? this.normalizeAmount(totalEarnings / totalOwnedUnits)
         : 0;
-    const repaymentPerUnit = this.normalizeAmount(unitValue + accruedInterestPerUnit);
+    // Settlement-period interest: 1 day if before 5 PM IST (T+1), 2 days if after (T+2).
+    const IST_OFFSET_MS = 330 * 60 * 1000;
+    const IST_CUTOFF_HOUR = 17;
+    const istNow = new Date(Date.now() + IST_OFFSET_MS);
+    const settlementDays = istNow.getUTCHours() >= IST_CUTOFF_HOUR ? 2 : 1;
+    const settlementInterestPerUnit = this.normalizeAmount(
+      unitValue * dailyInterestRate * settlementDays,
+    );
+    const repaymentPerUnit = this.normalizeAmount(
+      unitValue + accruedInterestPerUnit + settlementInterestPerUnit,
+    );
 
     return {
       summary: {

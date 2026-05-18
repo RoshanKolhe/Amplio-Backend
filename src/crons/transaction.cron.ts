@@ -21,6 +21,15 @@ import {
   resolvePspSettlementStatus,
   resolveSettlementDetails,
 } from '../utils/transactions';
+// [MERCHANT-BYPASS-START] synthetic-transactions
+// PURPOSE: Injects fake Razorpay transactions for merchant testing when real PSP data is unavailable.
+//          Controlled by env flags ENABLE_SYNTHETIC_TRANSACTIONS and DISABLE_REAL_PSP_SYNC.
+// REMOVE WHEN: Merchants have live Razorpay accounts and real PSP transactions are flowing.
+// HOW TO REMOVE: Delete this import, remove the SyntheticTransactionService blocks below (marked with
+//                [MERCHANT-BYPASS-START] / [MERCHANT-BYPASS-END]), delete synthetic-transaction.service.ts
+//                and its unit test, and restore the original simple try/catch PSP fetch block.
+import {SyntheticTransactionService} from '../services/synthetic-transaction.service';
+// [MERCHANT-BYPASS-END]
 
 const TRANSACTION_CRON_SCHEDULE = '*/1 * * * *';
 const ENABLED_DEBUG_VALUES = new Set(['1', 'true', 'yes', 'on']);
@@ -376,19 +385,61 @@ export class TransactionCron {
 
       for (const psp of psps) {
         let transactions: RazorpayPayment[] = [];
+        let realSyncFailed = false;
 
-        try {
-          transactions = (await this.pspService.fetchTransactions(
-            psp,
-          )) as RazorpayPayment[];
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : 'Unknown PSP sync error';
-          console.error(
-            `[TransactionCron] Failed to sync PSP ${psp.id}: ${message}`,
+        // [MERCHANT-BYPASS-START] synthetic-transactions
+        // REMOVE WHEN: Real PSP transactions are available. Replace this block with the original:
+        //   try {
+        //     transactions = (await this.pspService.fetchTransactions(psp)) as RazorpayPayment[];
+        //   } catch (error) {
+        //     const message = error instanceof Error ? error.message : 'Unknown PSP sync error';
+        //     console.error(`[TransactionCron] Failed to sync PSP ${psp.id}: ${message}`);
+        //     continue;
+        //   }
+        if (!SyntheticTransactionService.isRealPspSyncDisabled()) {
+          try {
+            transactions = (await this.pspService.fetchTransactions(
+              psp,
+            )) as RazorpayPayment[];
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : 'Unknown PSP sync error';
+            console.error(
+              `[TransactionCron] Failed to sync PSP ${psp.id}: ${message}`,
+            );
+            realSyncFailed = true;
+          }
+        } else {
+          console.log(
+            `[TransactionCron] Real PSP sync disabled (DISABLE_REAL_PSP_SYNC); skipping live fetch for PSP ${psp.id}`,
           );
+        }
+
+        if (realSyncFailed && !SyntheticTransactionService.isSyntheticEnabled()) {
           continue;
         }
+
+        if (
+          SyntheticTransactionService.isSyntheticEnabled() &&
+          !(await SyntheticTransactionService.hasSyntheticTransactionsForToday(
+            psp.id,
+            this.transactionRepository,
+            referenceAt,
+          ))
+        ) {
+          const synthetics = SyntheticTransactionService.generateForPsp(
+            psp.id,
+            referenceAt,
+          );
+          transactions = [
+            ...transactions,
+            ...(synthetics as RazorpayPayment[]),
+          ];
+          console.log(
+            `[TransactionCron] Injected ${synthetics.length} synthetic transactions for PSP ${psp.id}`,
+          );
+        }
+        // [MERCHANT-BYPASS-END]
 
         let createdTransactions = 0;
         let updatedTransactions = 0;

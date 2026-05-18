@@ -13,6 +13,25 @@ export class CompanyDataMapperService {
     entityName: string,
     entityLabel: 'company' | 'merchant' | 'investor' | 'trustee',
   ) {
+    // [MERCHANT-BYPASS-START] merchant-verification-bypass
+    // PURPOSE: Allows merchant onboarding without real PAN/name validation against InstaFinancials.
+    // REMOVE WHEN: Real InstaFinancials API integration is live and merchants are validated against actual company data.
+    // HOW TO REMOVE: Delete this entire if-block (from [MERCHANT-BYPASS-START] to [MERCHANT-BYPASS-END]).
+    const bypassFlag = String(process.env.BYPASS_MERCHANT_VERIFICATION ?? '').trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(bypassFlag)) {
+      console.log(
+        `[CompanyDataMapper] Merchant verification bypassed by BYPASS_MERCHANT_VERIFICATION for ${entityLabel}.`,
+      );
+      return {
+        success: true,
+        isPanMatched: true,
+        isCompanyNameMatched: true,
+        submitted: {panNumber, companyName: entityName},
+        source: {panNumber, companyName: entityName},
+      };
+    }
+    // [MERCHANT-BYPASS-END]
+
     const companyKyc =
       indianOilJson?.CorporateDirectory?.CompanyKYC;
 
@@ -68,13 +87,24 @@ export class CompanyDataMapperService {
       return null;
     }
 
+    // [MERCHANT-BYPASS-START] merchant-verification-bypass
+    // PURPOSE: Hides IndianOil PAN/TAN and GSTINs when bypass is on, preventing duplicate-key conflicts
+    //          when multiple test merchants share the same InstaFinancials seed data.
+    // REMOVE WHEN: Real InstaFinancials API integration is live (each merchant will have unique real data).
+    // HOW TO REMOVE: Replace `isBypassed ? null : (value)` expressions with just `value`, remove isBypassed/bypassFlag vars,
+    //                and replace `isBypassed ? [] : (gstins)` with `Array.isArray(companyGstin) ? companyGstin : []`.
+    const bypassFlag = String(process.env.BYPASS_MERCHANT_VERIFICATION ?? '').trim().toLowerCase();
+    const isBypassed = ['1', 'true', 'yes', 'on'].includes(bypassFlag);
+    // [MERCHANT-BYPASS-END]
+
     return {
       cin,
       companyName: companyKyc?.CompanyName ?? null,
-      companyCin: companyKyc?.CompanyCIN ?? cin,
+      companyCin: cin,
       companyStatus: companyKyc?.CompanyStatus ?? null,
-      companyPan: companyKyc?.CompanyPAN ?? null,
-      companyTan: companyKyc?.CompanyTAN ?? null,
+      // Don't expose IndianOil's PAN/TAN when bypass is on — avoids duplicate conflicts
+      companyPan: isBypassed ? null : (companyKyc?.CompanyPAN ?? null),
+      companyTan: isBypassed ? null : (companyKyc?.CompanyTAN ?? null),
       epfNumbers: Array.isArray(companyKyc?.CompanyEPF)
         ? companyKyc.CompanyEPF
         : [],
@@ -98,7 +128,8 @@ export class CompanyDataMapperService {
       suspendedAtStockExchange: companyMaster?.SuspendedAtStockExchange ?? null,
       filingStatusForLastTwoYears:
         companyMaster?.FilingStatusForLastTwoYears ?? null,
-      gstins: Array.isArray(companyGstin) ? companyGstin : [],
+      // When bypass is on, return no GSTINs so each merchant must enter their own unique one
+      gstins: isBypassed ? [] : (Array.isArray(companyGstin) ? companyGstin : []),
     };
   }
 

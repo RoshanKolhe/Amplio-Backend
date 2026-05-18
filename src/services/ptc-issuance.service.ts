@@ -1346,7 +1346,9 @@ export class PtcIssuanceService {
     const istNow = new Date(submittedAt.getTime() + istOffsetMs);
     const submittedAfterCutoff =
       istNow.getUTCHours() >= PtcIssuanceService.IST_INTEREST_CUTOFF_HOUR;
-    const extraInterestDays = submittedAfterCutoff ? 0 : 1;
+    // Before 5 PM IST: T+1 settlement → earn 1 extra day (today).
+    // After 5 PM IST: T+2 settlement → earn 2 extra days (today + tomorrow).
+    const extraInterestDays = submittedAfterCutoff ? 2 : 1;
 
     // expectedPayoutDate: T+1 if before cutoff, T+2 if after; skip weekends.
     // Use Date.UTC with IST calendar components directly — avoids the offset-subtraction

@@ -107,10 +107,16 @@ const ACTIVE_BATCH_STATUSES = [
 const MAX_LOOKBACK_DAYS = 7;
 const RETRY_BACKOFF_MS = 5 * 60 * 1000;
 const ENABLED_DEBUG_VALUES = new Set(['1', 'true', 'yes', 'on']);
-const MAX_ALLOWED_DAILY_CAP_AMOUNT = 1000000;
-// Until the AI-led statement analysis is integrated, the platform controls
-// maxAllowedDailyCap and keeps it fixed at 10 lakh for merchant onboarding.
-const DEFAULT_PLATFORM_CONTROLLED_DAILY_CAP = MAX_ALLOWED_DAILY_CAP_AMOUNT;
+// [MERCHANT-BYPASS-START] daily-cap-ceiling
+// PURPOSE: Raised from ₹10 lakh to ₹1 Crore so test merchants can configure higher payout caps
+//          without hitting the platform ceiling. DEFAULT_PLATFORM_CONTROLLED_DAILY_CAP remains ₹10 lakh
+//          so new merchants still default to the safe limit.
+// REMOVE WHEN: AI-led bank statement analysis is live and per-merchant caps are set from real income data.
+// HOW TO REMOVE: Revert MAX_ALLOWED_DAILY_CAP_AMOUNT to 1_000_000 and tie DEFAULT_PLATFORM_CONTROLLED_DAILY_CAP
+//                back to MAX_ALLOWED_DAILY_CAP_AMOUNT (as it was originally).
+const MAX_ALLOWED_DAILY_CAP_AMOUNT = 100_000_000; // ₹1 Crore hard ceiling
+const DEFAULT_PLATFORM_CONTROLLED_DAILY_CAP = 1_000_000; // ₹10 lakh default for new configs
+// [MERCHANT-BYPASS-END]
 const DEFAULT_MINIMUM_PAYOUT_AMOUNT = 200000;
 const DEFAULT_PAYOUT_BUFFER_MINUTES = 15;
 const PAYOUT_TRANSACTION_OPTIONS = {
