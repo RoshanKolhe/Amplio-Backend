@@ -29,6 +29,10 @@ import {
 } from '../repositories';
 import {EscrowMovementService} from './escrow-movement.service';
 import {ScheduleRedemptionPayoutPayload} from './redemption-payout.service';
+import {
+  validateBuyBlockRules,
+  validateRedeemBlockRules,
+} from '../utils/ptc-block-validation';
 
 export type PtcInventorySummary = {
   totalUnits: number;
@@ -1025,6 +1029,10 @@ export class PtcIssuanceService {
       const pool = await this.fetchPoolForSpvOrFail(spvId, tx);
       const spv = await this.fetchSpvOrFail(spvId, tx);
       const ptcParameters = await this.fetchPtcParametersForSpvOrFail(spv, tx);
+
+      // Block-size rule: every buy must be an exact multiple of the ₹1 Crore block.
+      validateBuyBlockRules(normalizedRequestedUnits, ptcParameters.faceValuePerUnit);
+
       const poolEscrowSetupId = await this.findPoolEscrowSetupId(
         pool,
         spv.spvApplicationId,
@@ -1271,6 +1279,11 @@ export class PtcIssuanceService {
       'Redeem units',
     );
 
+    // Block-size rule: fetch face value and validate before any DB mutations.
+    const redeemSpv = await this.fetchSpvOrFail(spvId);
+    const redeemPtcParameters = await this.fetchPtcParametersForSpvOrFail(redeemSpv);
+    validateRedeemBlockRules(normalizedRequestedUnits, redeemPtcParameters.faceValuePerUnit);
+
     // ── Validate primary bank account BEFORE deducting any units ─────────
     const primaryBank = await this.bankDetailsRepository.findOne({
       where: {
@@ -1413,6 +1426,11 @@ export class PtcIssuanceService {
 
     try {
       const pool = await this.fetchPoolForSpvOrFail(spvId, tx);
+
+      // Block-size rule: validate before any unit reservation DB write.
+      const rsvSpv = await this.fetchSpvOrFail(spvId, tx);
+      const rsvPtcParameters = await this.fetchPtcParametersForSpvOrFail(rsvSpv, tx);
+      validateBuyBlockRules(normalizedUnits, rsvPtcParameters.faceValuePerUnit);
 
       const issuanceIds = await this.ptcIssuanceRepository
         .find(
@@ -1623,6 +1641,10 @@ export class PtcIssuanceService {
       const pool = await this.fetchPoolForSpvOrFail(spvId, tx);
       const spv = await this.fetchSpvOrFail(spvId, tx);
       const ptcParameters = await this.fetchPtcParametersForSpvOrFail(spv, tx);
+
+      // Block-size rule: validate before any allocation DB write.
+      validateBuyBlockRules(normalizedRequestedUnits, ptcParameters.faceValuePerUnit);
+
       const poolEscrowSetupId = await this.findPoolEscrowSetupId(
         pool,
         spv.spvApplicationId,
