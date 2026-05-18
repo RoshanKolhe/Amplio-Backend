@@ -90,6 +90,11 @@ export class Transaction extends Entity {
   @property({
     type: 'string',
   })
+  tokenId?: string;
+
+  @property({
+    type: 'string',
+  })
   method?: string;  // upi //netbanking // card
 
   @property({
@@ -252,6 +257,15 @@ export class Transaction extends Entity {
     type: 'string',
   })
   settlementMethod?: string;     // T+1 //T+2 //T+3 this will decide by the date gap by createdAt or settlementDate
+
+  @property({
+    type: 'string',
+    jsonSchema: {
+      enum: ['spv', 'platform'],
+    },
+    default: 'platform',
+  })
+  settlementDestination?: string;
 
   @belongsTo(() => Psp)
   pspId: string;

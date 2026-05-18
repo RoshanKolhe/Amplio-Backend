@@ -37,6 +37,7 @@ export class BankDetailsService {
       bankAccountProofType: data.bankAccountProofType,
       bankAccountProofId: data.bankAccountProofId,
       usersId: data.usersId,
+      pspMasterId: data.pspMasterId,
       roleValue: data.roleValue,
       status: data.status,
       mode: data.mode,
@@ -62,9 +63,29 @@ export class BankDetailsService {
     );
   }
 
+  private buildOwnerWhereClause(
+    owner?: {usersId?: string; roleValue?: string; pspMasterId?: string},
+  ) {
+    const ownerClause: Record<string, unknown>[] = [];
+
+    if (owner?.usersId) {
+      ownerClause.push({usersId: owner.usersId});
+    }
+
+    if (owner?.roleValue) {
+      ownerClause.push({roleValue: owner.roleValue});
+    }
+
+    if (owner?.pspMasterId) {
+      ownerClause.push({pspMasterId: owner.pspMasterId});
+    }
+
+    return ownerClause;
+  }
+
   private buildAccountWhereClause(
     accountId: string,
-    owner?: {usersId: string; roleValue?: string},
+    owner?: {usersId?: string; roleValue?: string; pspMasterId?: string},
   ) {
     const whereClause: Record<string, unknown>[] = [
       {id: accountId},
@@ -72,13 +93,30 @@ export class BankDetailsService {
       {isDeleted: false},
     ];
 
-    if (owner?.usersId) {
-      whereClause.push({usersId: owner.usersId});
+    whereClause.push(...this.buildOwnerWhereClause(owner));
+
+    return {and: whereClause};
+  }
+
+  private buildDuplicateAccountWhereClause(bankDetails: Partial<BankDetails>) {
+    const whereClause: Record<string, unknown>[] = [
+      {accountNumber: bankDetails.accountNumber},
+      {isDeleted: false},
+    ];
+
+    const ownerClause = this.buildOwnerWhereClause({
+      usersId: bankDetails.usersId,
+      roleValue: bankDetails.roleValue,
+      pspMasterId: bankDetails.pspMasterId,
+    });
+
+    if (!ownerClause.length) {
+      throw new HttpErrors.BadRequest(
+        'Bank account owner is required. Provide usersId or pspMasterId.',
+      );
     }
 
-    if (owner?.roleValue) {
-      whereClause.push({roleValue: owner.roleValue});
-    }
+    whereClause.push(...ownerClause);
 
     return {and: whereClause};
   }
@@ -134,11 +172,7 @@ export class BankDetailsService {
 
       // 2. Find if record exists, if not create one
       const existingAccount = await this.bankDetailsRepository.findOne({
-        where: {
-          usersId: data.usersId,
-          accountNumber: data.accountNumber,
-          roleValue: data.roleValue
-        }
+        where: this.buildDuplicateAccountWhereClause(data),
       });
 
       if (existingAccount) {
@@ -235,11 +269,7 @@ export class BankDetailsService {
   try {
 
     const existingAccount = await this.bankDetailsRepository.findOne({
-      where: {
-        usersId: bankDetails.usersId,
-        accountNumber: bankDetails.accountNumber,
-        roleValue: bankDetails.roleValue
-      }
+      where: this.buildDuplicateAccountWhereClause(bankDetails),
     });
 
     if (existingAccount) {
@@ -273,6 +303,56 @@ export class BankDetailsService {
   }
 }
 
+  async createOrUpdatePspMasterBankAccount(
+    pspMasterId: string,
+    bankDetails: Omit<BankDetails, 'id'>,
+  ) {
+    try {
+      const existingAccount = await this.bankDetailsRepository.findOne({
+        where: {
+          and: [
+            {pspMasterId},
+            {isDeleted: false},
+          ],
+        },
+      });
+
+      if (existingAccount) {
+        await this.bankDetailsRepository.updateById(
+          existingAccount.id,
+          this.pickBankDetailsFields({
+            ...bankDetails,
+            pspMasterId,
+          }),
+        );
+
+        const account = await this.bankDetailsRepository.findById(existingAccount.id);
+
+        return {
+          success: true,
+          message: 'PSP master bank account updated',
+          account,
+        };
+      }
+
+      const newAccount = await this.bankDetailsRepository.create(
+        this.pickBankDetailsFields({
+          ...bankDetails,
+          pspMasterId,
+        }) as Omit<BankDetails, 'id'>,
+      );
+
+      return {
+        success: true,
+        message: 'PSP master bank account created',
+        account: newAccount,
+      };
+    } catch (error) {
+      console.log('Error while creating PSP master bank account:', error);
+      throw error;
+    }
+  }
+
   // fetch user bank accounts...
   async fetchUserBankAccounts(usersId: string, roleValue: string): Promise<{success: boolean; message: string; accounts: BankDetails[]}> {
     const bankAccounts = await this.bankDetailsRepository.find({
@@ -299,7 +379,7 @@ export class BankDetailsService {
   // fetch user bank accounts...
   async fetchUserBankAccount(
     accountId: string,
-    owner?: {usersId: string; roleValue?: string},
+    owner?: {usersId?: string; roleValue?: string; pspMasterId?: string},
   ): Promise<{success: boolean; message: string; account: BankDetails}> {
     const bankAccount = await this.bankDetailsRepository.findOne({
       where: {
@@ -326,7 +406,7 @@ export class BankDetailsService {
     accountId: string,
     accountData: Partial<BankDetails>,
     tx: any,
-    owner?: {usersId: string; roleValue?: string},
+    owner?: {usersId?: string; roleValue?: string; pspMasterId?: string},
   ): Promise<{success: boolean; message: string; account: BankDetails | null}> {
     const bankAccount = await this.bankDetailsRepository.findOne({
       where: {

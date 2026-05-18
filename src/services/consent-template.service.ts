@@ -50,6 +50,16 @@ export class ConsentTemplateService {
     return template;
   }
 
+  async getAllTemplates(): Promise<ConsentTemplate[]> {
+    return this.consentTemplateRepository.find({
+      where: {
+        isActive: true,
+        isDeleted: false,
+      },
+      order: ['createdAt ASC'],
+    });
+  }
+
   private normalizeSlug(slug: string): string {
     const normalizedSlug = slug.trim().toLowerCase();
 

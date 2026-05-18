@@ -84,6 +84,7 @@ import {SpvReservationCron} from './crons/spv-reservation.cron';
 import {TransactionCron} from './crons/transaction.cron';
 import {EscalationRepository} from './repositories/escalation.repository';
 import {InvestmentOrderRepository} from './repositories/investment-order.repository';
+import {MerchantProfilesRepository} from './repositories/merchant-profiles.repository';
 import {PspRepository} from './repositories/psp.repository';
 import {PtcFreezeRepository} from './repositories/ptc-freeze.repository';
 import {SpvPaymentVerificationRepository} from './repositories/spv-payment-verification.repository';
@@ -381,6 +382,9 @@ export class AmplioBackendApplication extends BootMixin(
       const pspRepository = await this.get<PspRepository>(
         'repositories.PspRepository',
       );
+      const merchantProfilesRepository = await this.get<MerchantProfilesRepository>(
+        'repositories.MerchantProfilesRepository',
+      );
       const spvRepository = await this.get<SpvRepository>(
         'repositories.SpvRepository',
       );
@@ -395,6 +399,7 @@ export class AmplioBackendApplication extends BootMixin(
       this.transactionCron = new TransactionCron(
         transactionRepository,
         pspRepository,
+        merchantProfilesRepository,
         spvRepository,
         pspService,
         liquidityEngineService,

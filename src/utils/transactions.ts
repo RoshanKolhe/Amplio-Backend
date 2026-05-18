@@ -7,6 +7,11 @@ const MILLISECONDS_IN_A_DAY = 1000 * 60 * 60 * 24;
 const MAX_SETTLEMENT_DAYS = 8;
 const PAISE_IN_RUPEE = 100;
 const PSP_SETTLEMENT_STATUS_T_PLUS_PREFIX = 'T_PLUS_';
+const TOKEN_PLATFORM = 'SW';
+const TOKEN_OBJECT_TYPE = 'TKN';
+const TOKEN_ASSET_CLASS = 'FUL';
+const TOKEN_BUCKET_FALLBACK = 'T1';
+const TOKEN_ORIGINATOR_FALLBACK = 'GEN';
 
 export function normalizePaiseToRupees(value?: number | string | null) {
   if (value === undefined || value === null || value === '') {
@@ -60,6 +65,67 @@ export function calculateTotalRecieved(
       (Number.isFinite(parsedFee) ? parsedFee : 0)
     ).toFixed(2),
   );
+}
+
+export function buildTokenSegment(
+  value?: string | null,
+  fallback = TOKEN_ORIGINATOR_FALLBACK,
+  maxLength = 8,
+) {
+  const normalizedValue = String(value ?? '').trim();
+
+  if (!normalizedValue) {
+    return fallback;
+  }
+
+  const words = normalizedValue
+    .split(/[^A-Za-z0-9]+/)
+    .map(word => word.trim())
+    .filter(Boolean);
+
+  const initials = words.map(word => word[0]?.toUpperCase() ?? '').join('');
+
+  if (initials.length >= 2 && initials.length <= maxLength) {
+    return initials;
+  }
+
+  const compact = normalizedValue.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+
+  if (!compact) {
+    return fallback;
+  }
+
+  return compact.slice(0, maxLength);
+}
+
+export function resolveTokenBucket(settlementMethod?: string | null) {
+  const normalizedMethod = String(settlementMethod ?? '')
+    .trim()
+    .toUpperCase();
+  const match = normalizedMethod.match(/^T\+?(\d+)$/);
+
+  if (!match) {
+    return TOKEN_BUCKET_FALLBACK;
+  }
+
+  return `T${match[1]}`;
+}
+
+export function buildTransactionTokenId(parts: {
+  year: number;
+  originatorName?: string | null;
+  settlementMethod?: string | null;
+  sequence: number;
+}) {
+  return [
+    TOKEN_PLATFORM,
+    TOKEN_OBJECT_TYPE,
+    String(parts.year),
+    TOKEN_ASSET_CLASS,
+    buildTokenSegment(parts.originatorName),
+    resolveTokenBucket(parts.settlementMethod),
+    String(parts.sequence).padStart(10, '0'),
+  ].join('-');
 }
 
 export function generateTransactions(count = 5) {
