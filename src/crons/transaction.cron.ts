@@ -3,8 +3,9 @@ import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import cron, {ScheduledTask} from 'node-cron';
 import {v4 as uuidv4} from 'uuid';
-import {SpvWithRelations} from '../models';
+import {MerchantProfiles, SpvWithRelations} from '../models';
 import {
+  MerchantProfilesRepository,
   PspRepository,
   SpvRepository,
   TransactionRepository,
@@ -13,6 +14,7 @@ import {EscrowService} from '../services/escrow.service';
 import {LiquidityEngineService} from '../services/liquidity-engine.service';
 import {PspService} from '../services/psp.service';
 import {
+  buildTransactionTokenId,
   calculateTotalRecieved,
   formatTransactionCharge,
   normalizePaiseToRupees,
@@ -24,6 +26,8 @@ const TRANSACTION_CRON_SCHEDULE = '*/1 * * * *';
 const ENABLED_DEBUG_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const MERCHANT_FUNDED_STATUS = 'fundeed';
 const MERCHANT_NOT_FUNDED_STATUS = 'notfunded';
+const SETTLEMENT_DESTINATION_SPV = 'spv';
+const SETTLEMENT_DESTINATION_PLATFORM = 'platform';
 
 type RazorpayPayment = {
   id: string;
@@ -54,6 +58,9 @@ export class TransactionCron {
 
     @repository(PspRepository)
     public pspRepository: PspRepository,
+
+    @repository(MerchantProfilesRepository)
+    public merchantProfilesRepository: MerchantProfilesRepository,
 
     @repository(SpvRepository)
     public spvRepository: SpvRepository,
@@ -187,6 +194,7 @@ export class TransactionCron {
         id: string;
         pspId: string;
         spvId?: string;
+        settlementDestination?: string;
         status?: string;
         releasedAmount?: number;
         lastReleasedAt?: Date;
@@ -202,6 +210,7 @@ export class TransactionCron {
         id: true,
         pspId: true,
         spvId: true,
+        settlementDestination: true,
         status: true,
         releasedAmount: true,
         lastReleasedAt: true,
@@ -299,6 +308,49 @@ export class TransactionCron {
     return cache.get(pspMasterId)!;
   }
 
+  private async resolveTransactionOriginatorName(psp: {
+    merchantProfilesId: string;
+  }) {
+    const merchantProfile = await this.merchantProfilesRepository
+      .findById(psp.merchantProfilesId)
+      .catch(() => undefined as MerchantProfiles | undefined);
+
+    return merchantProfile?.companyName ?? undefined;
+  }
+
+  private async generateTransactionTokenId(payload: {
+    createdAt: Date;
+    settlementMethod?: string;
+    originatorName?: string;
+  }) {
+    let sequence =
+      (
+        await this.transactionRepository.count({
+          tokenId: {neq: null},
+        } as never)
+      ).count + 1;
+
+    while (true) {
+      const tokenId = buildTransactionTokenId({
+        year: payload.createdAt.getUTCFullYear(),
+        originatorName: payload.originatorName,
+        settlementMethod: payload.settlementMethod,
+        sequence,
+      });
+
+      const existingTransaction = await this.transactionRepository.findOne({
+        where: {tokenId},
+        fields: {id: true},
+      });
+
+      if (!existingTransaction) {
+        return tokenId;
+      }
+
+      sequence += 1;
+    }
+  }
+
   start() {
     if (this.job) {
       return;
@@ -386,6 +438,9 @@ export class TransactionCron {
             psp.pspMasterId,
             spvResolutionCache,
           );
+          const settlementDestination = resolvedSpvId
+            ? SETTLEMENT_DESTINATION_SPV
+            : SETTLEMENT_DESTINATION_PLATFORM;
 
           const exists = await this.findExistingTransactionForSync(psp, txn.id);
           const resolvedPspSettlementStatus = resolvePspSettlementStatus(
@@ -398,6 +453,12 @@ export class TransactionCron {
           if (exists) {
             const resolvedPlatformStatus = this.resolvePlatformStatus(exists);
             const updatedAt = new Date();
+            const effectiveSettlementDestination =
+              exists.settlementDestination ?? settlementDestination;
+            const effectiveSpvId =
+              effectiveSettlementDestination === SETTLEMENT_DESTINATION_SPV
+                ? exists.spvId ?? resolvedSpvId
+                : undefined;
             // console.log('Assigning SPV:', exists.id, psp.id, resolvedSpvId);
 
             await this.transactionRepository.updateById(exists.id, {
@@ -426,7 +487,8 @@ export class TransactionCron {
               acquirerData: txn.acquirer_data,
               settlementMethod: settlementDetails.settlementMethod,
               settlementDate: settlementDetails.settlementDate,
-              spvId: resolvedSpvId ?? exists.spvId,
+              spvId: effectiveSpvId,
+              settlementDestination: effectiveSettlementDestination,
               createdAt,
               updatedAt,
             });
@@ -439,15 +501,19 @@ export class TransactionCron {
                 pspStatus: txn.status,
                 pspSettlementStatus: resolvedPspSettlementStatus,
                 status: resolvedPlatformStatus,
+                settlementDestination: effectiveSettlementDestination,
                 releasedAmount: exists.releasedAmount,
                 lastReleasedAt: exists.lastReleasedAt?.toISOString(),
               },
             );
 
-            if (resolvedSpvId && resolvedPspSettlementStatus === 'SETTLED') {
+            if (
+              effectiveSpvId &&
+              resolvedPspSettlementStatus === 'SETTLED'
+            ) {
               await this.escrowService.ensureEscrowTransactionForSettledTransaction({
                 transactionId: exists.id,
-                spvId: resolvedSpvId,
+                spvId: effectiveSpvId,
                 amount: amountInRupees,
               });
             }
@@ -457,11 +523,18 @@ export class TransactionCron {
           }
 
           const transactionId = uuidv4();
+          const originatorName = await this.resolveTransactionOriginatorName(psp);
+          const tokenId = await this.generateTransactionTokenId({
+            createdAt,
+            settlementMethod: settlementDetails.settlementMethod,
+            originatorName,
+          });
           // console.log('Assigning SPV:', transactionId, psp.id, resolvedSpvId);
 
           await this.transactionRepository.create({
             id: transactionId,
             tnsId: txn.id,
+            tokenId,
             orderId: txn.order_id,
             amount: amountInRupees,
             totalRecieved,
@@ -489,16 +562,19 @@ export class TransactionCron {
             settlementDate: settlementDetails.settlementDate,
             pspId: psp.id,
             spvId: resolvedSpvId,
+            settlementDestination,
             createdAt,
           });
           this.logTransactionCronDebug(
             '[TransactionCron] Created transaction status fields',
             {
+              tokenId,
               tnsId: txn.id,
               pspId: psp.id,
               pspStatus: txn.status,
               pspSettlementStatus: resolvedPspSettlementStatus,
               status: MERCHANT_NOT_FUNDED_STATUS,
+              settlementDestination,
             },
           );
 

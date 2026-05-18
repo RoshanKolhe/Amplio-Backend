@@ -5,6 +5,8 @@ import {
   EscrowTransactionDirection,
   PoolFinancials,
   PtcIssuance,
+  SpvPaymentVerification,
+  SpvPaymentVerificationStatus,
   Spv,
   SpvApplication,
   TrusteeProfiles,
@@ -15,6 +17,7 @@ import {
   EscrowTransactionRepository,
   PoolFinancialsRepository,
   PtcIssuanceRepository,
+  SpvPaymentVerificationRepository,
   SpvApplicationRepository,
   SpvRepository,
   TrusteeProfilesRepository,
@@ -113,6 +116,8 @@ export class SpvManagementService {
     private escrowTransactionRepository: EscrowTransactionRepository,
     @repository(PtcIssuanceRepository)
     private ptcIssuanceRepository: PtcIssuanceRepository,
+    @repository(SpvPaymentVerificationRepository)
+    private spvPaymentVerificationRepository: SpvPaymentVerificationRepository,
     @repository(InvestorPtcHoldingRepository)
     private investorPtcHoldingRepository: InvestorPtcHoldingRepository,
     @repository(TrusteeProfilesRepository)
@@ -132,6 +137,17 @@ export class SpvManagementService {
     );
   }
 
+  async getSpvManagementListForAdmin(): Promise<SpvManagementListItem[]> {
+    const groups = this.filterRealSpvGroups(await this.buildApplicationGroups());
+
+    return Promise.all(
+      groups.map(async group => {
+        const trusteeProfile = await this.resolveTrusteeProfileForGroup(group);
+        return this.buildListItem(group, trusteeProfile);
+      }),
+    );
+  }
+
   async getSpvManagementSummary(
     trusteeProfileId: string,
   ): Promise<SpvManagementSummary> {
@@ -146,6 +162,39 @@ export class SpvManagementService {
     let spvsEligibleForNewPool = 0;
 
     for (const group of groups) {
+      const listItem = await this.buildListItem(group, trusteeProfile);
+
+      if (listItem.status === 'Active') {
+        liveIssuances += 1;
+      }
+
+      aumManaged += listItem.outstandingValue;
+      totalPools += listItem.totalPools;
+
+      if (listItem.canCreateNewPool) {
+        spvsEligibleForNewPool += 1;
+      }
+    }
+
+    return {
+      totalSpv: groups.length,
+      liveIssuances,
+      aumManaged: this.normalizeAmount(aumManaged),
+      totalPools,
+      spvsEligibleForNewPool,
+    };
+  }
+
+  async getSpvManagementSummaryForAdmin(): Promise<SpvManagementSummary> {
+    const groups = this.filterRealSpvGroups(await this.buildApplicationGroups());
+
+    let liveIssuances = 0;
+    let aumManaged = 0;
+    let totalPools = 0;
+    let spvsEligibleForNewPool = 0;
+
+    for (const group of groups) {
+      const trusteeProfile = await this.resolveTrusteeProfileForGroup(group);
       const listItem = await this.buildListItem(group, trusteeProfile);
 
       if (listItem.status === 'Active') {
@@ -251,6 +300,102 @@ export class SpvManagementService {
     });
   }
 
+  async getSpvPoolsForAdmin(spvId: string): Promise<SpvManagementPoolItem[]> {
+    const groups = this.filterRealSpvGroups(await this.buildApplicationGroups());
+    const group = groups.find(
+      item => item.spv?.id === spvId || item.spvIdentifier === spvId,
+    );
+
+    if (!group?.spv) {
+      throw new HttpErrors.NotFound('SPV not found');
+    }
+
+    const pools = await this.findPoolsForGroup(group);
+    const currentPool = this.pickCurrentPool(group, pools);
+
+    return pools.map(pool => {
+      const reviewStatus =
+        group.applications.find(
+          application => application.id === pool.spvApplicationId,
+        )?.status ?? 0;
+      const utilizationPercent = this.calculatePoolUtilizationPercent(pool);
+
+      return {
+        poolId: pool.id,
+        applicationId: pool.spvApplicationId,
+        reviewStatus,
+        status: reviewStatus === 1 ? 'Active' : 'Pending',
+        poolLimit: this.toFiniteNumber(pool.poolLimit),
+        outstanding: this.toFiniteNumber(pool.outstanding),
+        utilizationPercent,
+        coupon:
+          typeof pool.targetYield === 'number' ? pool.targetYield : null,
+        maturityDate: this.deriveMaturityDate(pool),
+        isCurrentPool: currentPool?.id === pool.id,
+      };
+    });
+  }
+
+  async getUnallocatedFunds(
+    trusteeProfileId: string,
+    spvId: string,
+  ): Promise<SpvPaymentVerification[]> {
+    await this.findManagedSpvGroup(trusteeProfileId, spvId);
+
+    return this.spvPaymentVerificationRepository.find({
+      where: {
+        and: [
+          {spvId},
+          {isDeleted: false},
+          {
+            status: {
+              inq: [
+                SpvPaymentVerificationStatus.VERIFIED,
+                SpvPaymentVerificationStatus.AUTO_VERIFIED,
+              ],
+            },
+          },
+        ],
+      },
+      order: ['verifiedAt DESC'],
+      include: ['investorProfile', 'spv'],
+      limit: 200,
+    });
+  }
+
+  async getUnallocatedFundsForAdmin(
+    spvId: string,
+  ): Promise<SpvPaymentVerification[]> {
+    const groups = this.filterRealSpvGroups(await this.buildApplicationGroups());
+    const group = groups.find(
+      item => item.spv?.id === spvId || item.spvIdentifier === spvId,
+    );
+
+    if (!group?.spv) {
+      throw new HttpErrors.NotFound('SPV not found');
+    }
+
+    return this.spvPaymentVerificationRepository.find({
+      where: {
+        and: [
+          {spvId: group.spv.id},
+          {isDeleted: false},
+          {
+            status: {
+              inq: [
+                SpvPaymentVerificationStatus.VERIFIED,
+                SpvPaymentVerificationStatus.AUTO_VERIFIED,
+              ],
+            },
+          },
+        ],
+      },
+      order: ['verifiedAt DESC'],
+      include: ['investorProfile', 'spv'],
+      limit: 200,
+    });
+  }
+
   private async fetchTrusteeApplications(
     trusteeProfileId: string,
   ): Promise<SpvApplication[]> {
@@ -266,10 +411,21 @@ export class SpvManagementService {
     });
   }
 
+  private async fetchAllActiveApplications(): Promise<SpvApplication[]> {
+    return this.spvApplicationRepository.find({
+      where: {
+        and: [{isActive: true}, {isDeleted: false}],
+      },
+      order: ['createdAt DESC'],
+    });
+  }
+
   private async buildApplicationGroups(
-    trusteeProfileId: string,
+    trusteeProfileId?: string,
   ): Promise<SpvApplicationGroup[]> {
-    const applications = await this.fetchTrusteeApplications(trusteeProfileId);
+    const applications = trusteeProfileId
+      ? await this.fetchTrusteeApplications(trusteeProfileId)
+      : await this.fetchAllActiveApplications();
     const groups = new Map<string, SpvApplicationGroup>();
 
     for (const application of applications) {
@@ -296,15 +452,45 @@ export class SpvManagementService {
     return Array.from(groups.values());
   }
 
+  private async findManagedSpvGroup(
+    trusteeProfileId: string,
+    spvId: string,
+  ): Promise<SpvApplicationGroup> {
+    const groups = this.filterRealSpvGroups(
+      await this.buildApplicationGroups(trusteeProfileId),
+    );
+    const group = groups.find(
+      item => item.spv?.id === spvId || item.spvIdentifier === spvId,
+    );
+
+    if (!group?.spv) {
+      throw new HttpErrors.NotFound('SPV not found');
+    }
+
+    return group;
+  }
+
   private filterRealSpvGroups(
     groups: SpvApplicationGroup[],
   ): SpvApplicationGroup[] {
     return groups.filter(group => Boolean(group.spv?.id));
   }
 
+  private async resolveTrusteeProfileForGroup(
+    group: SpvApplicationGroup,
+  ): Promise<TrusteeProfiles | null> {
+    const trusteeProfileId = group.applications[0]?.trusteeProfilesId;
+
+    if (!trusteeProfileId) {
+      return null;
+    }
+
+    return this.trusteeProfilesRepository.findById(trusteeProfileId);
+  }
+
   private async buildListItem(
     group: SpvApplicationGroup,
-    trusteeProfile: TrusteeProfiles,
+    trusteeProfile: TrusteeProfiles | null,
   ): Promise<SpvManagementListItem> {
     const [pools, ptcs] = await Promise.all([
       this.findPoolsForGroup(group),
@@ -336,8 +522,8 @@ export class SpvManagementService {
           ? group.spvIdentifier
           : null),
       issuer: group.spv?.originatorName ?? null,
-      monitoringTrustee: trusteeProfile.legalEntityName ?? null,
-      monitoringTrusteeId: trusteeProfile.id ?? null,
+      monitoringTrustee: trusteeProfile?.legalEntityName ?? null,
+      monitoringTrusteeId: trusteeProfile?.id ?? null,
       incorporationDate: group.spv?.incorporationDate ?? null,
       status: group.applications.some(application => application.status === 1)
         ? 'Active'

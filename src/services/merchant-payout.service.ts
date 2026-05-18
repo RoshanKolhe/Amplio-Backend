@@ -7,6 +7,7 @@ import {
   MerchantPayoutBatch,
   MerchantPayoutBatchItem,
   MerchantPayoutConfig,
+  PoolFinancials,
   Transaction,
 } from '../models';
 import {
@@ -17,6 +18,7 @@ import {
   MerchantPayoutConfigRepository,
   PoolFinancialsRepository,
   PspRepository,
+  SpvRepository,
   TransactionRepository,
 } from '../repositories';
 import {isSettlementEligibleForDiscounting} from '../utils/transactions';
@@ -110,8 +112,7 @@ const MAX_ALLOWED_DAILY_CAP_AMOUNT = 1000000;
 // maxAllowedDailyCap and keeps it fixed at 10 lakh for merchant onboarding.
 const DEFAULT_PLATFORM_CONTROLLED_DAILY_CAP = MAX_ALLOWED_DAILY_CAP_AMOUNT;
 const DEFAULT_MINIMUM_PAYOUT_AMOUNT = 200000;
-const DEFAULT_FALLBACK_START_TIME = '09:00';
-const DEFAULT_FALLBACK_CUTOFF_TIME = '20:00';
+const DEFAULT_PAYOUT_BUFFER_MINUTES = 15;
 const PAYOUT_TRANSACTION_OPTIONS = {
   isolationLevel: 'READ COMMITTED',
 } as const;
@@ -136,6 +137,8 @@ export class MerchantPayoutService {
     private bankDetailsRepository: BankDetailsRepository,
     @repository(PoolFinancialsRepository)
     private poolFinancialsRepository: PoolFinancialsRepository,
+    @repository(SpvRepository)
+    private spvRepository: SpvRepository,
   ) {}
 
   private isMerchantPayoutCronDebugEnabled() {
@@ -393,6 +396,7 @@ export class MerchantPayoutService {
         `Only ${DEFAULT_TIMEZONE} is supported for automated payouts right now`,
       );
     }
+
   }
 
   async findConfigForMerchant(merchantProfilesId: string, usersId: string) {
@@ -506,11 +510,11 @@ export class MerchantPayoutService {
       startTime:
         payload.startTime ??
         existingConfig?.startTime ??
-        DEFAULT_FALLBACK_START_TIME,
+        this.getMerchantConfigDefaultWindow().startTime,
       cutoffTime:
         payload.cutoffTime ??
         existingConfig?.cutoffTime ??
-        DEFAULT_FALLBACK_CUTOFF_TIME,
+        this.getMerchantConfigDefaultWindow().cutoffTime,
       timezone:
         payload.timezone ?? existingConfig?.timezone ?? DEFAULT_TIMEZONE,
       commitmentUnit,
@@ -739,87 +743,128 @@ export class MerchantPayoutService {
       : undefined;
   }
 
+  private getMerchantConfigDefaultWindow() {
+    const startTime =
+      this.normalizePoolCutoffTime(
+        MerchantPayoutConfig.definition?.properties?.startTime?.default,
+      ) ?? '09:00';
+    const cutoffTime =
+      this.normalizePoolCutoffTime(
+        MerchantPayoutConfig.definition?.properties?.cutoffTime?.default,
+      ) ?? '20:00';
+
+    return {startTime, cutoffTime};
+  }
+
+  private getDefaultPoolCutoffWindow() {
+    const morningDefault =
+      PoolFinancials.definition?.properties?.morningCutoffTime?.default;
+    const eveningDefault =
+      PoolFinancials.definition?.properties?.eveningCutoffTime?.default;
+
+    const startTime =
+      this.normalizePoolCutoffTime(
+        typeof morningDefault === 'string' ? morningDefault : undefined,
+      ) ?? '09:00';
+    const cutoffTime =
+      this.normalizePoolCutoffTime(
+        typeof eveningDefault === 'string' ? eveningDefault : undefined,
+      ) ?? '18:00';
+
+    return {startTime, cutoffTime};
+  }
+
   private normalizeFallbackWindow(startTime: string, cutoffTime: string) {
+    const defaultWindow = this.getDefaultPoolCutoffWindow();
+
     if (cutoffTime > startTime) {
       return {startTime, cutoffTime};
     }
 
-    if (cutoffTime > DEFAULT_FALLBACK_START_TIME) {
+    if (cutoffTime > defaultWindow.startTime) {
       return {
-        startTime: DEFAULT_FALLBACK_START_TIME,
+        startTime: defaultWindow.startTime,
         cutoffTime,
       };
     }
 
-    return {
-      startTime: DEFAULT_FALLBACK_START_TIME,
-      cutoffTime: DEFAULT_FALLBACK_CUTOFF_TIME,
-    };
+    return defaultWindow;
   }
 
-  private async resolvePoolFallbackTimesForMerchant(
+  private async findPoolFallbackWindowForMerchant(
     merchantProfile: MerchantProfiles,
   ) {
-    const pspIds = await this.getMerchantPspIds(
-      new MerchantPayoutConfig({
-        merchantProfilesId: merchantProfile.id,
-        usersId: merchantProfile.usersId,
-      }),
-    );
-
-    if (!pspIds.length) {
-      return {
-        startTime: DEFAULT_FALLBACK_START_TIME,
-        cutoffTime: DEFAULT_FALLBACK_CUTOFF_TIME,
-      };
-    }
-
-    const transactions = await this.transactionRepository.find({
+    const merchantPsps = await this.pspRepository.find({
       where: {
-        and: [{pspId: {inq: pspIds}}, {isDeleted: false}],
+        and: [
+          {merchantProfilesId: merchantProfile.id},
+          {isActive: true},
+          {isDeleted: false},
+        ],
       },
-      fields: {
-        spvId: true,
-        createdAt: true,
-      },
-      order: ['createdAt DESC'],
-      limit: 50,
+      fields: {pspMasterId: true},
     });
 
-    const spvIds = Array.from(
+    const uniquePspMasterIds = Array.from(
       new Set(
-        transactions
-          .map(transaction => transaction.spvId)
-          .filter((spvId): spvId is string => Boolean(spvId)),
+        merchantPsps
+          .map(psp => String(psp.pspMasterId ?? '').trim())
+          .filter(Boolean),
       ),
     );
 
-    for (const spvId of spvIds) {
+    for (const pspMasterId of uniquePspMasterIds) {
+      const spvs = (await this.spvRepository.find({
+        where: {
+          and: [{pspMasterId}, {isDeleted: false}, {isActive: true}],
+        },
+        include: [{relation: 'spvApplication'}],
+      })) as Array<{
+        id: string;
+        spvApplication?: {status?: number};
+      }>;
+
+      const activeSpv = spvs.find(spv => spv.spvApplication?.status === 1);
+
+      if (!activeSpv) {
+        continue;
+      }
+
       const poolFinancials = await this.poolFinancialsRepository.findOne({
         where: {
-          and: [{spvId}, {isActive: true}, {isDeleted: false}],
+          and: [
+            {spvId: activeSpv.id},
+            {isActive: true},
+            {isDeleted: false},
+          ],
         },
-        order: ['updatedAt DESC'],
       });
 
       if (!poolFinancials) {
         continue;
       }
 
-      const startTime =
-        this.normalizePoolCutoffTime(poolFinancials.morningCutoffTime) ??
-        DEFAULT_FALLBACK_START_TIME;
-      const cutoffTime =
-        this.normalizePoolCutoffTime(poolFinancials.eveningCutoffTime) ??
-        DEFAULT_FALLBACK_CUTOFF_TIME;
+      const startTime = this.normalizePoolCutoffTime(
+        poolFinancials.morningCutoffTime,
+      );
+      const cutoffTime = this.normalizePoolCutoffTime(
+        poolFinancials.eveningCutoffTime,
+      );
+
+      if (!startTime || !cutoffTime) {
+        continue;
+      }
 
       return this.normalizeFallbackWindow(startTime, cutoffTime);
     }
 
-    return {
-      startTime: DEFAULT_FALLBACK_START_TIME,
-      cutoffTime: DEFAULT_FALLBACK_CUTOFF_TIME,
-    };
+    return this.getDefaultPoolCutoffWindow();
+  }
+
+  private async resolveDefaultFallbackTimesForMerchant(
+    merchantProfile: MerchantProfiles,
+  ) {
+    return this.findPoolFallbackWindowForMerchant(merchantProfile);
   }
 
   private createFallbackConfigData(
@@ -867,7 +912,7 @@ export class MerchantPayoutService {
     if (existingConfig) {
       if (!existingConfig.lastManualConfigChangeAt) {
         const fallbackTimes =
-          await this.resolvePoolFallbackTimesForMerchant(merchantProfile);
+          await this.resolveDefaultFallbackTimesForMerchant(merchantProfile);
 
         await this.merchantPayoutConfigRepository.updateById(existingConfig.id, {
           startTime: fallbackTimes.startTime,
@@ -882,7 +927,7 @@ export class MerchantPayoutService {
     }
 
     const fallbackTimes =
-      await this.resolvePoolFallbackTimesForMerchant(merchantProfile);
+      await this.resolveDefaultFallbackTimesForMerchant(merchantProfile);
     const fallbackConfig = await this.merchantPayoutConfigRepository.create({
       id: uuidv4(),
       ...this.createFallbackConfigData(
@@ -1064,6 +1109,14 @@ export class MerchantPayoutService {
     };
   }
 
+  private applyPayoutBuffer(date: Date) {
+    const bufferedDate = new Date(date);
+    bufferedDate.setUTCMinutes(
+      bufferedDate.getUTCMinutes() + DEFAULT_PAYOUT_BUFFER_MINUTES,
+    );
+    return bufferedDate;
+  }
+
   getPayoutWindowsForBusinessDate(
     config: MerchantPayoutConfig,
     businessDate: string,
@@ -1090,7 +1143,7 @@ export class MerchantPayoutService {
           businessDate,
           bucketStartAt: previousCutoffAt,
           bucketEndAt: startAt,
-          scheduledFor: startAt,
+          scheduledFor: this.applyPayoutBuffer(startAt),
           scheduleMode: 'eod',
           runType: 'opening_sweep',
         });
@@ -1100,7 +1153,7 @@ export class MerchantPayoutService {
         businessDate,
         bucketStartAt: startAt,
         bucketEndAt: cutoffAt,
-        scheduledFor: cutoffAt,
+        scheduledFor: this.applyPayoutBuffer(cutoffAt),
         scheduleMode: 'eod',
         runType: 'eod_default',
       });
@@ -1123,7 +1176,7 @@ export class MerchantPayoutService {
         businessDate,
         bucketStartAt: previousCutoffAt,
         bucketEndAt: startAt,
-        scheduledFor: startAt,
+        scheduledFor: this.applyPayoutBuffer(startAt),
         frequencyHours,
         scheduleMode: 'bucketed',
         runType: 'opening_sweep',
@@ -1144,7 +1197,7 @@ export class MerchantPayoutService {
         businessDate,
         bucketStartAt: new Date(cursor),
         bucketEndAt: nextEndAt,
-        scheduledFor: nextEndAt,
+        scheduledFor: this.applyPayoutBuffer(nextEndAt),
         frequencyHours,
         scheduleMode: 'bucketed',
         runType:

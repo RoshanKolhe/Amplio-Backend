@@ -593,13 +593,15 @@ export class PtcIssuanceService {
       };
     }
 
-    const totalUnits = Math.floor(Number(transaction.amount ?? 0) / unitPrice);
+    const totalUnits = Math.floor(
+      Number(transaction.totalRecieved ?? 0) / unitPrice,
+    );
 
     if (totalUnits <= 0) {
       return {
         created: false,
         issuance: null,
-        reason: 'Transaction amount is below the PTC unit price',
+        reason: 'Transaction total received is below the PTC unit price',
       };
     }
 

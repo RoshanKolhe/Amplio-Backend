@@ -294,7 +294,8 @@ export class PoolService {
     const poolFinancials = await this.getPoolFinancialsForSpvOrFail(spvId);
     const refreshedPool = await this.recomputePoolFinancials(spvId);
     const nextOutstanding = this.normalizeAmount(
-      Number(refreshedPool.outstanding ?? 0) + Number(transaction.amount ?? 0),
+      Number(refreshedPool.outstanding ?? 0) +
+        Number(transaction.totalRecieved ?? 0),
     );
 
     if (nextOutstanding > Number(poolFinancials.poolLimit)) {
@@ -308,7 +309,7 @@ export class PoolService {
       id: uuidv4(),
       transactionId: transaction.id,
       spvId,
-      amount: this.normalizeAmount(transaction.amount),
+      amount: this.normalizeAmount(transaction.totalRecieved),
       status: ACTIVE_POOL_STATUS,
       isSettledProcessed: false,
       isActive: true,

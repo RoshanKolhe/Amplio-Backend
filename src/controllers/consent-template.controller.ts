@@ -9,6 +9,22 @@ export class ConsentTemplateController {
     private consentTemplateService: ConsentTemplateService,
   ) { }
 
+  @get('/consent-templates')
+  @response(200, {
+    description: 'Array of active consent templates',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'array',
+          items: getModelSchemaRef(ConsentTemplate),
+        },
+      },
+    },
+  })
+  async findAll(): Promise<ConsentTemplate[]> {
+    return this.consentTemplateService.getAllTemplates();
+  }
+
   @post('/consent-templates')
   @response(200, {
     description: 'ConsentTemplate model instance',

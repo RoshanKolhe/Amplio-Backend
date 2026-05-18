@@ -94,11 +94,13 @@ export class PoolFinancials extends Entity {
 
   @property({
     type: 'string',
+    default: '09:00',
   })
   morningCutoffTime?: string;
 
   @property({
     type: 'string',
+    default: '18:00',
   })
   eveningCutoffTime?: string;
 

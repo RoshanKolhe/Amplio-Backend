@@ -5,8 +5,10 @@ import {
   belongsTo,
   hasMany,
 } from '@loopback/repository';
+import {BankDetails} from './bank-details.model';
 import {Media} from './media.model';
 import {PspMasterFields} from './psp-master-fields.model';
+import {Psp} from './psp.model';
 
 @model({
   settings: {
@@ -86,6 +88,12 @@ export class PspMaster extends Entity {
   @hasMany(() => PspMasterFields)
   pspMasterFields: PspMasterFields[];
 
+  @hasMany(() => Psp)
+  psps: Psp[];
+
+  @hasMany(() => BankDetails)
+  bankDetails: BankDetails[];
+
   constructor(data?: Partial<PspMaster>) {
     super(data);
   }
@@ -95,6 +103,7 @@ export interface PspMasterRelations {
   // describe navigational properties here
   logoMedia?: Media;
   pspMasterFields?: PspMasterFields[];
+  bankDetails?: BankDetails[];
 }
 
 export type PspMasterWithRelations = PspMaster & PspMasterRelations;

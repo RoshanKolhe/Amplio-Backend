@@ -8,6 +8,8 @@ import {runLegacySpvBackfillMigration} from './migrations/legacy-spv-backfill.mi
 import {runReservationSchemaMigration} from './migrations/reservation-schema.migration';
 import {runSpvLegalMetadataMigration} from './migrations/spv-legal-metadata.migration';
 import {runSpvPaymentVerificationMigration} from './migrations/spv-payment-verification.migration';
+import {runTransactionSettlementDestinationMigration} from './migrations/transaction-settlement-destination.migration';
+import {runTransactionTokenIdMigration} from './migrations/transaction-token-id.migration';
 import {runUsersConsentIdentifierIdNullableMigration} from './migrations/users-consent-identifierid-nullable.migration';
 import {runUsersConsentIsCheckedMigration} from './migrations/users-consent-ischecked.migration';
 
@@ -126,6 +128,8 @@ export async function migrate(args: string[]) {
   await runReservationSchemaMigration(app);
   await runInvestmentOrderFoundationMigration(app);
   await runRedemptionPayoutSettlementMigration(app);
+  await runTransactionSettlementDestinationMigration(app);
+  await runTransactionTokenIdMigration(app);
 
   // Connectors usually keep a pool of opened connections,
   // this keeps the process running even after all work is done.

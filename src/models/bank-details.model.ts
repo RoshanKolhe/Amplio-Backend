@@ -1,5 +1,6 @@
 import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {Media} from './media.model';
+import {PspMaster} from './psp-master.model';
 import {Users} from './users.model';
 
 @model({
@@ -90,6 +91,11 @@ export class BankDetails extends Entity {
   @belongsTo(() => Users)
   usersId: string;
 
+  @belongsTo(
+    () => PspMaster,
+  )
+  pspMasterId?: string;
+
   @property({
     type: 'string',
     required: true
@@ -164,6 +170,7 @@ export class BankDetails extends Entity {
 
 export interface BankDetailsRelations {
   // describe navigational properties here
+  pspMaster?: PspMaster;
 }
 
 export type BankDetailsWithRelations = BankDetails & BankDetailsRelations;

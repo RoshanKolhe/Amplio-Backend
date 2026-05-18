@@ -15,10 +15,18 @@ import {UserProfile} from '@loopback/security';
 import {v4 as uuidv4} from 'uuid';
 import {authorize} from '../authorization';
 import {Transaction} from '../models';
-import {PspRepository, TransactionRepository} from '../repositories';
+import {
+  MerchantProfilesRepository,
+  PspRepository,
+  SpvRepository,
+  TransactionRepository,
+} from '../repositories';
 import {EscrowService} from '../services/escrow.service';
 import {PoolService} from '../services/pool.service';
-import {isSettlementEligibleForDiscounting} from '../utils/transactions';
+import {
+  buildTransactionTokenId,
+  isSettlementEligibleForDiscounting,
+} from '../utils/transactions';
 
 const MERCHANT_FUNDED_STATUS = 'fundeed';
 const MERCHANT_NOT_FUNDED_STATUS = 'notfunded';
@@ -135,11 +143,58 @@ export class TransactionController {
     public transactionRepository: TransactionRepository,
     @repository(PspRepository)
     public pspRepository: PspRepository,
+    @repository(MerchantProfilesRepository)
+    public merchantProfilesRepository: MerchantProfilesRepository,
+    @repository(SpvRepository)
+    public spvRepository: SpvRepository,
     @inject('service.pool.service')
     private poolService: PoolService,
     @inject('service.escrow.service')
     private escrowService: EscrowService,
   ) { }
+
+  private async resolveTransactionOriginatorName(psp: {
+    merchantProfilesId: string;
+  }) {
+    const merchantProfile = await this.merchantProfilesRepository
+      .findById(psp.merchantProfilesId)
+      .catch(() => undefined);
+
+    return merchantProfile?.companyName ?? undefined;
+  }
+
+  private async generateTransactionTokenId(payload: {
+    createdAt: Date;
+    settlementMethod?: string;
+    originatorName?: string;
+  }) {
+    let sequence =
+      (
+        await this.transactionRepository.count({
+          tokenId: {neq: null},
+        } as never)
+      ).count + 1;
+
+    while (true) {
+      const tokenId = buildTransactionTokenId({
+        year: payload.createdAt.getUTCFullYear(),
+        originatorName: payload.originatorName,
+        settlementMethod: payload.settlementMethod,
+        sequence,
+      });
+
+      const existingTransaction = await this.transactionRepository.findOne({
+        where: {tokenId},
+        fields: {id: true},
+      });
+
+      if (!existingTransaction) {
+        return tokenId;
+      }
+
+      sequence += 1;
+    }
+  }
 
   private async getCurrentMerchantPspIds(usersId: string) {
     const merchantPsps = await this.pspRepository.find({
@@ -421,9 +476,18 @@ async requestReceivableAmount(
       throw new HttpErrors.BadRequest('Active PSP not found');
     }
 
+    const createdAt = new Date();
+    const originatorName = await this.resolveTransactionOriginatorName(psp);
+    const tokenId = await this.generateTransactionTokenId({
+      createdAt,
+      settlementMethod: 'T+1',
+      originatorName,
+    });
+
     const transaction = await this.transactionRepository.create({
       id: uuidv4(),
       tnsId: body.tnsId,
+      tokenId,
       amount: Number(body.amount),
       totalRecieved: Number(body.amount),
       currency: body.currency ?? 'INR',
@@ -438,12 +502,13 @@ async requestReceivableAmount(
       requestReceivableAmount: 0,
       releasedAmount: Number(body.amount),
       captured: true,
-      lastReleasedAt: new Date(),
+      lastReleasedAt: createdAt,
       pspId: body.pspId,
       spvId: body.spvId,
       isInPool: false,
       isActive: true,
       isDeleted: false,
+      createdAt,
     });
 
     const poolResult = await this.poolService.addFundedTransactionToPool(
