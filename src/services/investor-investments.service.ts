@@ -29,6 +29,7 @@ import {
   PtcInventorySummary,
   PtcIssuanceService,
 } from './ptc-issuance.service';
+import {calculateAccruedInterestDays as calcAccruedDays} from '../utils/ptc-allocation-cutoff';
 
 export type InvestorInvestmentRecord = {
   id: string;
@@ -178,8 +179,6 @@ const DEFAULT_PRODUCT_ICON = 'solar:card-recive-bold-duotone';
 const DEFAULT_PAYOUT_LABEL = 'Interest payout';
 
 export class InvestorInvestmentsService {
-  private static readonly IST_OFFSET_MINUTES = 330;
-  private static readonly IST_INTEREST_CUTOFF_HOUR = 17;
 
   private readonly currencyFormatter = new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -248,34 +247,11 @@ export class InvestorInvestmentsService {
     return this.normalizeAmount(netPayout - totalInvested);
   }
 
-  private toIstPseudoDate(date: Date): Date {
-    const offsetMs = InvestorInvestmentsService.IST_OFFSET_MINUTES * 60 * 1000;
-    return new Date(date.getTime() + offsetMs);
-  }
-
-  private calculateAccruedInterestDays(holdingCreatedAt?: Date): number {
+  private calculateAccruedInterestDays(holdingCreatedAt?: Date, allocationDate?: Date | null): number {
     if (!holdingCreatedAt) {
       return 0;
     }
-
-    const effectiveStart = this.toIstPseudoDate(holdingCreatedAt);
-    if (
-      effectiveStart.getUTCHours() >=
-      InvestorInvestmentsService.IST_INTEREST_CUTOFF_HOUR
-    ) {
-      effectiveStart.setUTCDate(effectiveStart.getUTCDate() + 1);
-    }
-    effectiveStart.setUTCHours(0, 0, 0, 0);
-
-    const todayStart = this.toIstPseudoDate(new Date());
-    todayStart.setUTCHours(0, 0, 0, 0);
-
-    const msPerDay = 24 * 60 * 60 * 1000;
-    const dayDiff = Math.floor(
-      (todayStart.getTime() - effectiveStart.getTime()) / msPerDay,
-    );
-
-    return Math.max(dayDiff, 0);
+    return calcAccruedDays(holdingCreatedAt, new Date(), allocationDate);
   }
 
   private formatCurrency(value: number | undefined | null): string {
@@ -931,6 +907,7 @@ export class InvestorInvestmentsService {
 
         const interestDays = this.calculateAccruedInterestDays(
           holding.createdAt ? new Date(holding.createdAt) : undefined,
+          holding.allocationDate ? new Date(holding.allocationDate) : null,
         );
         return sum + (investedAmount * dailyInterestRate * interestDays);
       }, 0),

@@ -33,6 +33,7 @@ import {
   validateBuyBlockRules,
   validateRedeemBlockRules,
 } from '../utils/ptc-block-validation';
+import {calculateAccruedInterestDays as calcAccruedDays} from '../utils/ptc-allocation-cutoff';
 
 export type PtcInventorySummary = {
   totalUnits: number;
@@ -322,26 +323,19 @@ export class PtcIssuanceService {
     return this.fromIstPseudoDate(istPseudoDate);
   }
 
-  private calculateAccruedInterestDays(holdingCreatedAt?: Date): number {
+  private calculateAccruedInterestDays(
+    holdingCreatedAt?: Date,
+    allocationDate?: Date | null,
+    nowUtc: Date = new Date(),
+  ): number {
     if (!holdingCreatedAt) {
       return 0;
     }
-
-    const effectiveStart = this.toIstPseudoDate(holdingCreatedAt);
-    if (effectiveStart.getUTCHours() >= PtcIssuanceService.IST_INTEREST_CUTOFF_HOUR) {
-      effectiveStart.setUTCDate(effectiveStart.getUTCDate() + 1);
-    }
-    effectiveStart.setUTCHours(0, 0, 0, 0);
-
-    const todayStart = this.toIstPseudoDate(new Date());
-    todayStart.setUTCHours(0, 0, 0, 0);
-
-    const msPerDay = 24 * 60 * 60 * 1000;
-    const dayDiff = Math.floor(
-      (todayStart.getTime() - effectiveStart.getTime()) / msPerDay,
-    );
-
-    return Math.max(dayDiff, 0);
+    // Uses allocationDate when available (preferred path); falls back to
+    // createdAt-based derivation with 3 PM IST cutoff + weekend skipping.
+    // nowUtc must be the REDEMPTION SUBMISSION TIME — not the admin processing time —
+    // so that baseDays is not inflated when the admin processes the request next day.
+    return calcAccruedDays(holdingCreatedAt, nowUtc, allocationDate);
   }
 
   private getConfiguredRedemptionStampDutyRate(): number {
@@ -1603,6 +1597,7 @@ export class PtcIssuanceService {
     verificationId: string,
     createdBy: string,
     existingReservations?: UnitReservation[],
+    allocationDate?: Date | null,
     externalTx?: unknown,
   ): Promise<BuyUnitsResult> {
     const normalizedRequestedUnits = this.validatePositiveIntegerUnits(units);
@@ -1779,6 +1774,7 @@ export class PtcIssuanceService {
                 poolFinancialsId: pool.id,
                 ownedUnits: planItem.allocatedUnits,
                 investedAmount: planItem.costForThisBatch,
+                allocationDate: allocationDate ?? undefined,
                 isActive: true,
                 isDeleted: false,
               },
@@ -1999,6 +1995,7 @@ export class PtcIssuanceService {
               poolFinancialsId: pool.id,
               ownedUnits: planItem.allocatedUnits,
               investedAmount: planItem.costForThisBatch,
+              allocationDate: allocationDate ?? undefined,
               isActive: true,
               isDeleted: false,
             },
@@ -2290,10 +2287,22 @@ export class PtcIssuanceService {
         }
 
         const redeemedPrincipal = principalAllocations[index] ?? 0;
+        // baseDays = complete calendar days held from allocationDate (or createdAt
+        // fallback) up to but NOT including the SUBMISSION DATE (not processing date).
+        // Using submittedAt prevents admin processing delay from inflating baseDays:
+        // same-day sell processed next day should still give baseDays = 0, not 1.
+        const submittedAt = request.submittedAt
+          ? new Date(request.submittedAt)
+          : new Date();
         const baseDays = this.calculateAccruedInterestDays(
           holding.createdAt ? new Date(holding.createdAt) : undefined,
+          holding.allocationDate ? new Date(holding.allocationDate) : null,
+          submittedAt,
         );
-        // Add 1 extra day if submitted before 5 PM IST (investor earns the day's interest)
+        // Settlement bonus: T+1 before 5 PM IST → +1 day (investor holds overnight,
+        // earns today's interest and gets paid tomorrow). T+2 after 5 PM → +2 days.
+        // Even a same-day buy-and-sell earns 1 day because the PTC is held overnight
+        // until T+1 settlement.
         const extraInterestDays = request.extraInterestDays ?? 1;
         const accruedDays = baseDays + extraInterestDays;
         const interestForHolding = this.normalizeAmount(

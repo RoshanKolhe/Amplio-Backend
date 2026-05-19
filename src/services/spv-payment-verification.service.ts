@@ -19,9 +19,12 @@ import {
 } from '../repositories';
 import {PtcIssuanceService, UnitReservation} from './ptc-issuance.service';
 import {PoolFinancials} from '../models/pool-financials.model';
-
-// IST is UTC+5:30
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+import {
+  computeAllocationDate as computeAllocationDateUtil,
+  isBeforeAllocationCutoff,
+  IST_OFFSET_MS,
+  INVESTOR_ALLOCATION_CUTOFF_IST,
+} from '../utils/ptc-allocation-cutoff';
 
 const PAYMENT_INTENT_EXPIRY_HOURS = 48;
 const AMOUNT_VARIANCE_THRESHOLD_PERCENT = 5;
@@ -506,20 +509,6 @@ export class SpvPaymentVerificationService {
 
     const investorProfileId = await this.resolveInvestorProfileId(currentUser.id);
 
-    // Enforce cutoff window when opted in
-    const poolFinancials = await this.poolFinancialsRepository.findOne({
-      where: {spvId, isActive: true, isDeleted: false},
-    });
-    if (poolFinancials?.enforceCutoffWindow) {
-      if (!this.isWithinTradingWindow(poolFinancials)) {
-        const morning = poolFinancials.morningCutoffTime ?? '09:00:00';
-        const evening = poolFinancials.eveningCutoffTime ?? '15:00:00';
-        throw new HttpErrors.BadRequest(
-          `Investments for this pool are only accepted between ${morning} and ${evening} IST. Please try again during trading hours.`,
-        );
-      }
-    }
-
     const referenceId = uuidv4();
 
     return this.spvPaymentVerificationRepository.create({
@@ -588,10 +577,8 @@ export class SpvPaymentVerificationService {
       const poolFinancials = await this.poolFinancialsRepository.findOne({
         where: {spvId: verification.spvId, isActive: true, isDeleted: false},
       });
-      const submittedInWindow = poolFinancials
-        ? this.isWithinTradingWindow(poolFinancials)
-        : true;
-      const allocationDate = this.computeAllocationDate(poolFinancials ?? null);
+      const submittedInWindow = this.isWithinTradingWindow();
+      const allocationDate = this.computeAllocationDate();
 
       // Reserve units within the SAME transaction — atomic with the status check above.
       // If reservation fails the entire tx rolls back and the verification stays PENDING.
@@ -674,43 +661,17 @@ export class SpvPaymentVerificationService {
     }
   }
 
-  // Returns true when the current IST wall-clock time falls within the pool's trading window
-  private isWithinTradingWindow(pool: PoolFinancials): boolean {
-    const istNow = new Date(Date.now() + IST_OFFSET_MS);
-    const morningStr = pool.morningCutoffTime ?? '09:00:00';
-    const eveningStr = pool.eveningCutoffTime ?? '15:00:00';
-
-    const [mh, mm] = morningStr.split(':').map(Number);
-    const [eh, em] = eveningStr.split(':').map(Number);
-
-    const nowMinutes = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
-    const morningMinutes = mh * 60 + mm;
-    const eveningMinutes = eh * 60 + em;
-
-    return nowMinutes >= morningMinutes && nowMinutes < eveningMinutes;
+  // Returns true when current IST time is before the 3 PM investor allocation cutoff.
+  // Uses the fixed INVESTOR_ALLOCATION_CUTOFF_IST constant — never reads pool config.
+  // Used only to record submittedInWindow on the UTR — does NOT block investment.
+  private isWithinTradingWindow(): boolean {
+    return isBeforeAllocationCutoff(new Date(), INVESTOR_ALLOCATION_CUTOFF_IST);
   }
 
-  // Same day if submitted before OR within the window; next business day only if submitted AFTER window closes
-  private computeAllocationDate(pool: PoolFinancials | null): Date {
-    const istNow = new Date(Date.now() + IST_OFFSET_MS);
-    const base = new Date(istNow.toISOString().split('T')[0] + 'T00:00:00.000Z');
-
-    if (!pool) return base;
-
-    const eveningStr = pool.eveningCutoffTime ?? '15:00:00';
-    const [eh, em] = eveningStr.split(':').map(Number);
-    const eveningMinutes = eh * 60 + em;
-    const nowMinutes = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
-
-    // Only advance to next business day when submitted AFTER the evening cutoff
-    if (nowMinutes >= eveningMinutes) {
-      base.setUTCDate(base.getUTCDate() + 1);
-      while (base.getUTCDay() === 0 || base.getUTCDay() === 6) {
-        base.setUTCDate(base.getUTCDate() + 1);
-      }
-    }
-
-    return base;
+  // Today if UTR submitted before 3 PM IST; next business day otherwise.
+  // Uses the fixed INVESTOR_ALLOCATION_CUTOFF_IST constant — never reads pool config.
+  private computeAllocationDate(): Date {
+    return computeAllocationDateUtil(new Date(), INVESTOR_ALLOCATION_CUTOFF_IST);
   }
 
   private async findConflictingUtr(
@@ -1145,6 +1106,7 @@ export class SpvPaymentVerificationService {
         verification.id,
         triggeredBy,
         useReservationPath ? existingReservations : undefined,
+        verification.allocationDate ? new Date(verification.allocationDate) : null,
         tx,
       );
 

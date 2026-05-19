@@ -54,6 +54,14 @@ export class InvestorPtcHolding extends Entity {
   })
   investedAmount: number;
 
+  // Effective start date for interest accrual — set at allocation time from
+  // the payment verification's allocationDate (3 PM IST cutoff, weekends skipped).
+  // Null on legacy holdings; fallback logic in calculateAccruedInterestDays handles them.
+  @property({
+    type: 'date',
+  })
+  allocationDate?: Date;
+
   @property({
     type: 'boolean',
     default: true,

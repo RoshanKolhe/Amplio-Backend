@@ -1,5 +1,6 @@
 import {AmplioBackendApplication} from './application';
 import {runConsentTemplateSlugMigration} from './migrations/consent-template-slug.migration';
+import {runInvestorHoldingAllocationDateMigration} from './migrations/investor-holding-allocation-date.migration';
 import {runEscrowLedgerArchitectureMigration} from './migrations/escrow-ledger-architecture.migration';
 import {runFintechIntegrityMigration} from './migrations/fintech-integrity.migration';
 import {runInvestmentOrderFoundationMigration} from './migrations/investment-order-foundation.migration';
@@ -130,6 +131,7 @@ export async function migrate(args: string[]) {
   await runRedemptionPayoutSettlementMigration(app);
   await runTransactionSettlementDestinationMigration(app);
   await runTransactionTokenIdMigration(app);
+  await runInvestorHoldingAllocationDateMigration(app);
 
   // Connectors usually keep a pool of opened connections,
   // this keeps the process running even after all work is done.
