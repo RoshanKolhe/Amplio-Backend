@@ -121,6 +121,32 @@ export class BankDetailsService {
     return {and: whereClause};
   }
 
+  private async shouldMarkNewAccountAsPrimary(
+    bankDetails: Partial<BankDetails>,
+  ): Promise<boolean> {
+    const ownerClause = this.buildOwnerWhereClause({
+      usersId: bankDetails.usersId,
+      roleValue: bankDetails.roleValue,
+      pspMasterId: bankDetails.pspMasterId,
+    });
+
+    if (!ownerClause.length) {
+      throw new HttpErrors.BadRequest(
+        'Bank account owner is required. Provide usersId or pspMasterId.',
+      );
+    }
+
+    const existingAccountsCount = await this.bankDetailsRepository.count({
+      and: [
+        ...ownerClause,
+        {isActive: true},
+        {isDeleted: false},
+      ],
+    });
+
+    return existingAccountsCount.count === 0;
+  }
+
   // verify bank account with Perfios
   async verifyWithPerfios(data: {
     accountNumber: string;
@@ -221,6 +247,7 @@ export class BankDetailsService {
         verifiedAt: isVerified ? new Date() : undefined,
         accountType: 0,
         bankAccountProofType: 0,
+        isPrimary: await this.shouldMarkNewAccountAsPrimary(data),
       }) as Omit<BankDetails, 'id'>);
 
       return {
@@ -265,43 +292,46 @@ export class BankDetailsService {
   }
 
   // create new bank account...
- async createNewBankAccount(bankDetails: Omit<BankDetails, 'id'>) {
-  try {
+  async createNewBankAccount(bankDetails: Omit<BankDetails, 'id'>) {
+    try {
 
-    const existingAccount = await this.bankDetailsRepository.findOne({
-      where: this.buildDuplicateAccountWhereClause(bankDetails),
-    });
+      const existingAccount = await this.bankDetailsRepository.findOne({
+        where: this.buildDuplicateAccountWhereClause(bankDetails),
+      });
 
-    if (existingAccount) {
-      await this.bankDetailsRepository.updateById(
-        existingAccount.id,
-        this.pickBankDetailsFields(bankDetails)
+      if (existingAccount) {
+        await this.bankDetailsRepository.updateById(
+          existingAccount.id,
+          this.pickBankDetailsFields(bankDetails)
+        );
+
+        const account = await this.bankDetailsRepository.findById(existingAccount.id);
+
+        return {
+          success: true,
+          message: 'Bank account updated',
+          account
+        };
+      }
+
+      const newAccount = await this.bankDetailsRepository.create(
+        this.pickBankDetailsFields({
+          ...bankDetails,
+          isPrimary: await this.shouldMarkNewAccountAsPrimary(bankDetails),
+        }) as Omit<BankDetails, 'id'>
       );
-
-      const account = await this.bankDetailsRepository.findById(existingAccount.id);
 
       return {
         success: true,
-        message: 'Bank account updated',
-        account
+        message: 'New Account Created',
+        account: newAccount
       };
+
+    } catch (error) {
+      console.log('Error while creating new bank account:', error);
+      throw error;
     }
-
-    const newAccount = await this.bankDetailsRepository.create(
-      this.pickBankDetailsFields(bankDetails) as Omit<BankDetails, 'id'>
-    );
-
-    return {
-      success: true,
-      message: 'New Account Created',
-      account: newAccount
-    };
-
-  } catch (error) {
-    console.log('Error while creating new bank account:', error);
-    throw error;
   }
-}
 
   async createOrUpdatePspMasterBankAccount(
     pspMasterId: string,
