@@ -2,6 +2,7 @@ import {inject} from '@loopback/core';
 import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {
+  CustomerSupport,
   Escalation,
   EscalationStatus,
   InvestmentOrder,
@@ -11,12 +12,14 @@ import {
   SpvPaymentVerificationStatus,
 } from '../models';
 import {
+  CustomerSupportRepository,
   EscalationRepository,
   InvestmentOrderRepository,
   InvestorProfileRepository,
   PoolFinancialsRepository,
   PtcFreezeRepository,
   SpvPaymentVerificationRepository,
+  SpvRepository,
   UsersRepository,
 } from '../repositories';
 import {PtcIssuanceService, UnitReservation} from './ptc-issuance.service';
@@ -80,6 +83,25 @@ export type OrderDashboardStats = {
   };
 };
 
+export type AdminCustomerSupportListItem = CustomerSupport & {
+  investorName?: string | null;
+  investorId?: string;
+  transactionId?: string | null;
+  amount?: number;
+  units?: number;
+  shortDescription?: string;
+  description?: string;
+  spvId?: string;
+  spvName?: string | null;
+};
+
+export type AdminCustomerSupportListResult = {
+  data: AdminCustomerSupportListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export class AdminInvestmentOrderService {
   constructor(
     @repository(InvestmentOrderRepository)
@@ -87,6 +109,9 @@ export class AdminInvestmentOrderService {
 
     @repository(EscalationRepository)
     private escalationRepository: EscalationRepository,
+
+    @repository(CustomerSupportRepository)
+    private customerSupportRepository: CustomerSupportRepository,
 
     @repository(SpvPaymentVerificationRepository)
     private spvPaymentVerificationRepository: SpvPaymentVerificationRepository,
@@ -99,6 +124,9 @@ export class AdminInvestmentOrderService {
 
     @repository(PoolFinancialsRepository)
     private poolFinancialsRepository: PoolFinancialsRepository,
+
+    @repository(SpvRepository)
+    private spvRepository: SpvRepository,
 
     @repository(UsersRepository)
     private usersRepository: UsersRepository,
@@ -454,6 +482,97 @@ export class AdminInvestmentOrderService {
   }
 
   // ── Pool cutoff settings ────────────────────────────────────────────────────
+
+  async listCustomerSupport(
+    filters: {spvId?: string; limit?: number; offset?: number},
+  ): Promise<AdminCustomerSupportListResult> {
+    const limit = Math.min(filters.limit ?? 50, 100);
+    const offset = filters.offset ?? 0;
+
+    const orderWhere = filters.spvId
+      ? {spvId: filters.spvId, isDeleted: false}
+      : {isDeleted: false};
+
+    const orders = await this.investmentOrderRepository.find({
+      where: orderWhere,
+      fields: {
+        id: true,
+        investorProfileId: true,
+        spvId: true,
+        transactionId: true,
+        investmentAmount: true,
+        requestedUnits: true,
+      },
+    });
+
+    if (orders.length === 0) {
+      return {data: [], total: 0, limit, offset};
+    }
+
+    const orderIds = orders.map(order => order.id);
+    const orderMap = new Map(orders.map(order => [order.id, order]));
+    const supportWhere = {orderId: {inq: orderIds}};
+
+    const [supports, total] = await Promise.all([
+      this.customerSupportRepository.find({
+        where: supportWhere,
+        include: [{relation: 'attachmentMedia'}],
+        limit,
+        skip: offset,
+        order: ['createdAt DESC'],
+      }),
+      this.customerSupportRepository.count(supportWhere),
+    ]);
+
+    const investorProfileIds = [
+      ...new Set(supports.map(item => item.investorProfileId).filter(Boolean)),
+    ];
+    const spvIds = [
+      ...new Set(
+        supports
+          .map(item => orderMap.get(item.orderId)?.spvId)
+          .filter(Boolean),
+      ),
+    ] as string[];
+
+    const [profiles, spvs] = await Promise.all([
+      investorProfileIds.length > 0
+        ? this.investorProfileRepository.find({
+            where: {id: {inq: investorProfileIds}},
+            fields: {id: true, fullName: true},
+          })
+        : Promise.resolve([]),
+      spvIds.length > 0
+        ? this.spvRepository.find({
+            where: {id: {inq: spvIds}},
+            fields: {id: true, spvName: true},
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const profileMap = new Map(profiles.map(profile => [profile.id, profile]));
+    const spvMap = new Map(spvs.map(spv => [spv.id, spv]));
+
+    const data: AdminCustomerSupportListItem[] = supports.map(item => {
+      const order = orderMap.get(item.orderId);
+      const profile = profileMap.get(item.investorProfileId);
+      const spv = order?.spvId ? spvMap.get(order.spvId) : undefined;
+
+      return Object.assign(item, {
+        investorName: profile?.fullName ?? null,
+        investorId: item.investorProfileId,
+        transactionId: order?.transactionId ?? null,
+        amount: order?.investmentAmount ? Number(order.investmentAmount) : 0,
+        units: order?.requestedUnits ?? 0,
+        shortDescription: item.issueType,
+        description: item.complaintDescription,
+        spvId: order?.spvId,
+        spvName: spv?.spvName ?? null,
+      });
+    });
+
+    return {data, total: total.count, limit, offset};
+  }
 
   async getPoolCutoffSettings(spvId: string): Promise<Partial<PoolFinancials>> {
     const pool = await this.poolFinancialsRepository.findOne({

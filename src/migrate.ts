@@ -1,5 +1,6 @@
 import {AmplioBackendApplication} from './application';
 import {runConsentTemplateSlugMigration} from './migrations/consent-template-slug.migration';
+import {runCustomerSupportMigration} from './migrations/customer-support.migration';
 import {runInvestorHoldingAllocationDateMigration} from './migrations/investor-holding-allocation-date.migration';
 import {runEscrowLedgerArchitectureMigration} from './migrations/escrow-ledger-architecture.migration';
 import {runFintechIntegrityMigration} from './migrations/fintech-integrity.migration';
@@ -115,6 +116,7 @@ export async function migrate(args: string[]) {
       'PaymentAttempt',
       'PtcFreeze',
       'Escalation',
+      'CustomerSupport',
     ],
   });
 
@@ -132,6 +134,7 @@ export async function migrate(args: string[]) {
   await runTransactionSettlementDestinationMigration(app);
   await runTransactionTokenIdMigration(app);
   await runInvestorHoldingAllocationDateMigration(app);
+  await runCustomerSupportMigration(app);
 
   // Connectors usually keep a pool of opened connections,
   // this keeps the process running even after all work is done.

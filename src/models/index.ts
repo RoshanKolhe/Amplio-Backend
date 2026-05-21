@@ -96,3 +96,4 @@ export * from './investment-order.model';
 export * from './payment-attempt.model';
 export * from './ptc-freeze.model';
 export * from './escalation.model';
+export * from './customer-support.model';

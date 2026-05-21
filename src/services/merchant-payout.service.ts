@@ -3,19 +3,19 @@ import {HttpErrors} from '@loopback/rest';
 import {v4 as uuidv4} from 'uuid';
 import {
   BankDetails,
-  MerchantProfiles,
   MerchantPayoutBatch,
   MerchantPayoutBatchItem,
   MerchantPayoutConfig,
+  MerchantProfiles,
   PoolFinancials,
   Transaction,
 } from '../models';
 import {
   BankDetailsRepository,
-  MerchantProfilesRepository,
   MerchantPayoutBatchItemRepository,
   MerchantPayoutBatchRepository,
   MerchantPayoutConfigRepository,
+  MerchantProfilesRepository,
   PoolFinancialsRepository,
   PspRepository,
   SpvRepository,
@@ -118,7 +118,6 @@ const MAX_ALLOWED_DAILY_CAP_AMOUNT = 100_000_000; // ₹1 Crore hard ceiling
 const DEFAULT_PLATFORM_CONTROLLED_DAILY_CAP = 1_000_000; // ₹10 lakh default for new configs
 // [MERCHANT-BYPASS-END]
 const DEFAULT_MINIMUM_PAYOUT_AMOUNT = 200000;
-const DEFAULT_PAYOUT_BUFFER_MINUTES = 15;
 const PAYOUT_TRANSACTION_OPTIONS = {
   isolationLevel: 'READ COMMITTED',
 } as const;
@@ -145,7 +144,7 @@ export class MerchantPayoutService {
     private poolFinancialsRepository: PoolFinancialsRepository,
     @repository(SpvRepository)
     private spvRepository: SpvRepository,
-  ) {}
+  ) { }
 
   private isMerchantPayoutCronDebugEnabled() {
     return ENABLED_DEBUG_VALUES.has(
@@ -321,7 +320,7 @@ export class MerchantPayoutService {
       if (
         !currentLatestWindow ||
         dueWindow.scheduledFor.getTime() >
-          currentLatestWindow.scheduledFor.getTime()
+        currentLatestWindow.scheduledFor.getTime()
       ) {
         latestWindowByDate.set(dueWindow.businessDate, dueWindow);
       }
@@ -470,8 +469,8 @@ export class MerchantPayoutService {
 
     const minimumPayoutAmount = Number(
       payload.minimumPayoutAmount ??
-        existingConfig?.minimumPayoutAmount ??
-        DEFAULT_MINIMUM_PAYOUT_AMOUNT,
+      existingConfig?.minimumPayoutAmount ??
+      DEFAULT_MINIMUM_PAYOUT_AMOUNT,
     );
 
     const scheduleMode =
@@ -486,8 +485,8 @@ export class MerchantPayoutService {
       commitmentUnit === 'none'
         ? 0
         : Number(
-            payload.commitmentValue ?? existingConfig?.commitmentValue ?? 0,
-          );
+          payload.commitmentValue ?? existingConfig?.commitmentValue ?? 0,
+        );
 
     if (
       commitmentUnit !== 'none' &&
@@ -715,6 +714,20 @@ export class MerchantPayoutService {
 
   private getTransactionSettledConsumedAmount(transaction: Transaction) {
     return Math.max(Number(transaction.releasedAmount ?? 0), 0);
+  }
+
+  private getTransactionNetAmount(transaction: Transaction) {
+    return Math.max(Number(transaction.netAmount ?? 0), 0);
+  }
+
+  private getTransactionRemainingReleasableAmount(transaction: Transaction) {
+    return Number(
+      Math.max(
+        this.getTransactionNetAmount(transaction) -
+        this.getTransactionSettledConsumedAmount(transaction),
+        0,
+      ).toFixed(2),
+    );
   }
 
   private resolvePlatformFundingStatus(transaction?: Partial<Transaction>) {
@@ -1115,14 +1128,6 @@ export class MerchantPayoutService {
     };
   }
 
-  private applyPayoutBuffer(date: Date) {
-    const bufferedDate = new Date(date);
-    bufferedDate.setUTCMinutes(
-      bufferedDate.getUTCMinutes() + DEFAULT_PAYOUT_BUFFER_MINUTES,
-    );
-    return bufferedDate;
-  }
-
   getPayoutWindowsForBusinessDate(
     config: MerchantPayoutConfig,
     businessDate: string,
@@ -1149,7 +1154,7 @@ export class MerchantPayoutService {
           businessDate,
           bucketStartAt: previousCutoffAt,
           bucketEndAt: startAt,
-          scheduledFor: this.applyPayoutBuffer(startAt),
+          scheduledFor: new Date(startAt),
           scheduleMode: 'eod',
           runType: 'opening_sweep',
         });
@@ -1159,7 +1164,7 @@ export class MerchantPayoutService {
         businessDate,
         bucketStartAt: startAt,
         bucketEndAt: cutoffAt,
-        scheduledFor: this.applyPayoutBuffer(cutoffAt),
+        scheduledFor: new Date(cutoffAt),
         scheduleMode: 'eod',
         runType: 'eod_default',
       });
@@ -1182,7 +1187,7 @@ export class MerchantPayoutService {
         businessDate,
         bucketStartAt: previousCutoffAt,
         bucketEndAt: startAt,
-        scheduledFor: this.applyPayoutBuffer(startAt),
+        scheduledFor: new Date(startAt),
         frequencyHours,
         scheduleMode: 'bucketed',
         runType: 'opening_sweep',
@@ -1203,7 +1208,7 @@ export class MerchantPayoutService {
         businessDate,
         bucketStartAt: new Date(cursor),
         bucketEndAt: nextEndAt,
-        scheduledFor: this.applyPayoutBuffer(nextEndAt),
+        scheduledFor: new Date(nextEndAt),
         frequencyHours,
         scheduleMode: 'bucketed',
         runType:
@@ -1446,9 +1451,9 @@ export class MerchantPayoutService {
         this.resolveTransactionBusinessDate(createdAt, config);
 
       return (
-        transaction.status !== MERCHANT_FUNDED_STATUS &&
         isSettlementEligibleForDiscounting(transaction.pspSettlementStatus) &&
         resolvedBusinessDate === businessDate &&
+        this.getTransactionRemainingReleasableAmount(transaction) > 0 &&
         createdAt.getTime() <= bucketEndAt.getTime()
       );
     });
@@ -1470,13 +1475,10 @@ export class MerchantPayoutService {
         break;
       }
 
-      // Do not partially fund a transaction. Fund it only when the whole
-      // discountable amount fits within the remaining daily capacity.
-      if (candidate.availableAmount > remainingAmount) {
-        continue;
-      }
-
-      const allocatedAmount = candidate.availableAmount;
+      const allocatedAmount = Math.min(
+        candidate.availableAmount,
+        remainingAmount,
+      );
 
       if (allocatedAmount <= 0) {
         continue;
@@ -1812,7 +1814,7 @@ export class MerchantPayoutService {
         availableDailyCap: Number(
           Math.max(
             Number(existingBatch.effectiveDailyCap ?? 0) -
-              Number(existingBatch.alreadyReleasedToday ?? 0),
+            Number(existingBatch.alreadyReleasedToday ?? 0),
             0,
           ).toFixed(2),
         ),
@@ -1822,8 +1824,8 @@ export class MerchantPayoutService {
           (
             Number(
               existingBatch.totalFundedAmount ??
-                Number(existingBatch.alreadyReleasedToday ?? 0) +
-                  Number(existingBatch.releasedAmount ?? 0),
+              Number(existingBatch.alreadyReleasedToday ?? 0) +
+              Number(existingBatch.releasedAmount ?? 0),
             ) ?? 0
           ).toFixed(2),
         ),
@@ -2058,23 +2060,23 @@ export class MerchantPayoutService {
       const items =
         batchDraft.releasedAmount > 0
           ? await this.merchantPayoutBatchItemRepository.createAll(
-              batchDraft.allocations.map(allocation => ({
-                id: uuidv4(),
-                transactionAmount: Number(allocation.transaction.amount ?? 0),
-                totalReceivedAmount: Number(
-                  allocation.transaction.totalRecieved ?? 0,
-                ),
-                haircutPercentage: Number(allocation.transaction.haircut ?? 0),
-                transactionNetAmount: Number(
-                  allocation.transaction.netAmount ?? 0,
-                ),
-                allocatedAmount: Number(allocation.allocatedAmount ?? 0),
-                status: 'allocated',
-                merchantPayoutBatchId: failedBatch.id,
-                transactionId: allocation.transaction.id,
-              })),
-              {transaction: tx},
-            )
+            batchDraft.allocations.map(allocation => ({
+              id: uuidv4(),
+              transactionAmount: Number(allocation.transaction.amount ?? 0),
+              totalReceivedAmount: Number(
+                allocation.transaction.totalRecieved ?? 0,
+              ),
+              haircutPercentage: Number(allocation.transaction.haircut ?? 0),
+              transactionNetAmount: Number(
+                allocation.transaction.netAmount ?? 0,
+              ),
+              allocatedAmount: Number(allocation.allocatedAmount ?? 0),
+              status: 'allocated',
+              merchantPayoutBatchId: failedBatch.id,
+              transactionId: allocation.transaction.id,
+            })),
+            {transaction: tx},
+          )
           : [];
 
       await tx.commit();
@@ -2085,17 +2087,17 @@ export class MerchantPayoutService {
 
       return batchDraft.releasedAmount > 0
         ? {
-            batch,
-            items,
-            beneficiaryAccount,
-            window,
-            effectiveDailyCap: batchDraft.effectiveDailyCap,
-            availableDailyCap: batchDraft.availableDailyCap,
-            eligibleAmount: batchDraft.eligibleAmount,
-            releasedAmount: batchDraft.releasedAmount,
-            totalFundedAmount: batchDraft.totalFundedAmount,
-            wasCreated: false,
-          }
+          batch,
+          items,
+          beneficiaryAccount,
+          window,
+          effectiveDailyCap: batchDraft.effectiveDailyCap,
+          availableDailyCap: batchDraft.availableDailyCap,
+          eligibleAmount: batchDraft.eligibleAmount,
+          releasedAmount: batchDraft.releasedAmount,
+          totalFundedAmount: batchDraft.totalFundedAmount,
+          wasCreated: false,
+        }
         : null;
     } catch (error) {
       await tx.rollback();
@@ -2333,13 +2335,13 @@ export class MerchantPayoutService {
       );
       const transactions = transactionIds.length
         ? await this.transactionRepository.find(
-            {
-              where: {
-                id: {inq: transactionIds},
-              },
+          {
+            where: {
+              id: {inq: transactionIds},
             },
-            {transaction: tx},
-          )
+          },
+          {transaction: tx},
+        )
         : [];
       const transactionById = new Map(
         transactions.map(transaction => [transaction.id, transaction]),
@@ -2500,3 +2502,4 @@ export class MerchantPayoutService {
     }
   }
 }
+

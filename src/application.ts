@@ -105,6 +105,7 @@ import {RedemptionPayoutService} from './services/redemption-payout.service';
 import {AdminInvestmentOrderService} from './services/admin-investment-order.service';
 import {AdminReconciliationService} from './services/admin-reconciliation.service';
 import {InvestmentOrderService} from './services/investment-order.service';
+import {CustomerSupportService} from './services/customer-support.service';
 
 export {ApplicationConfig};
 
@@ -341,6 +342,9 @@ export class AmplioBackendApplication extends BootMixin(
     );
     this.bind('service.adminInvestmentOrder.service').toClass(
       AdminInvestmentOrderService,
+    );
+    this.bind('service.customerSupport.service').toClass(
+      CustomerSupportService,
     );
   }
 

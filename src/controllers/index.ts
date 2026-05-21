@@ -53,4 +53,5 @@ export * from './admin-payment-verification.controller';
 export * from './admin-reconciliation.controller';
 export * from './investment-order.controller';
 export * from './admin-investment-order.controller';
+export * from './customer-support.controller';
 export * from './admin-redemption-order.controller';

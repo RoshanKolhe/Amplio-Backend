@@ -91,3 +91,4 @@ export * from './investment-order.repository';
 export * from './payment-attempt.repository';
 export * from './ptc-freeze.repository';
 export * from './escalation.repository';
+export * from './customer-support.repository';

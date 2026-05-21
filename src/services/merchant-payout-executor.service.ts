@@ -79,6 +79,20 @@ export class MerchantPayoutExecutorService {
     return `SIM-${String(batch.id).slice(0, 8)}-${String(item.id).slice(0, 8)}-${referenceAt.getTime()}`;
   }
 
+  private getTransactionNetAmount(transaction: Transaction) {
+    return Math.max(Number(transaction.netAmount ?? 0), 0);
+  }
+
+  private getRemainingReleasableAmount(transaction: Transaction) {
+    return Number(
+      Math.max(
+        this.getTransactionNetAmount(transaction) -
+          Math.max(Number(transaction.releasedAmount ?? 0), 0),
+        0,
+      ).toFixed(2),
+    );
+  }
+
   private simulateBankTransfer(
     batch: MerchantPayoutBatch,
     item: MerchantPayoutBatchItem,
@@ -428,18 +442,20 @@ export class MerchantPayoutExecutorService {
 
       if (
         transaction.status === MERCHANT_FUNDED_STATUS &&
+        this.getRemainingReleasableAmount(transaction) <= 0 &&
         Number(transaction.releasedAmount ?? 0) > 0
       ) {
         outcomes.push({
           itemId: item.id,
           success: false,
-          failureReason: 'Transaction is already fundeed',
+          failureReason: 'Transaction is already fully fundeed',
         });
         continue;
       }
 
       if (
         transaction.status === MERCHANT_FUNDED_STATUS &&
+        this.getRemainingReleasableAmount(transaction) <= 0 &&
         Number(transaction.releasedAmount ?? 0) <= 0
       ) {
         outcomes.push({

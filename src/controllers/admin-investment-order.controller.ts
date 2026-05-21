@@ -157,6 +157,32 @@ export class AdminInvestmentOrderController {
 
   @authenticate('jwt')
   @authorize({roles: ['admin', 'super_admin']})
+  @get('/admin/customer-support')
+  async listCustomerSupport(
+    @param.query.string('spvId') spvId?: string,
+    @param.query.number('limit') limit?: number,
+    @param.query.number('offset') offset?: number,
+  ) {
+    const result = await this.adminInvestmentOrderService.listCustomerSupport({
+      spvId,
+      limit,
+      offset,
+    });
+
+    return {
+      success: true,
+      message: 'Customer support requests fetched successfully',
+      data: result.data,
+      pagination: {
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+      },
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['admin', 'super_admin']})
   @get('/admin/escalations/{escalationId}')
   async getEscalationDetail(
     @param.path.string('escalationId') escalationId: string,
