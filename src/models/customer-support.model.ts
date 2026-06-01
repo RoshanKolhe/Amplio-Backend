@@ -2,6 +2,7 @@ import {belongsTo, Entity, model, property} from '@loopback/repository';
 import {InvestmentOrder} from './investment-order.model';
 import {InvestorProfile} from './investor-profile.model';
 import {Media} from './media.model';
+import {Users} from './users.model';
 
 export enum CustomerSupportStatus {
   OPEN = 'OPEN',
@@ -61,6 +62,16 @@ export class CustomerSupport extends Entity {
   })
   adminResponse?: string;
 
+  @belongsTo(
+    () => Users,
+    {name: 'superAdmin'},
+    {
+      postgresql: {dataType: 'uuid'},
+    },
+  )
+  superAdminId?: string;
+  
+
   @property({type: 'date', defaultFn: 'now'})
   createdAt?: Date;
 
@@ -83,7 +94,12 @@ export class CustomerSupport extends Entity {
   }
 }
 
-export interface CustomerSupportRelations { }
+export interface CustomerSupportRelations {
+  order?: InvestmentOrder;
+  investorProfile?: InvestorProfile;
+  attachmentMedia?: Media;
+  superAdmin?: Users;
+}
 
 export type CustomerSupportWithRelations = CustomerSupport &
   CustomerSupportRelations;

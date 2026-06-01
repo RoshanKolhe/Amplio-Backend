@@ -3,8 +3,11 @@ import {inject} from '@loopback/core';
 import {get, patch, param, post, requestBody} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {authorize} from '../authorization';
-import {EscalationStatus} from '../models';
-import {AdminInvestmentOrderService} from '../services/admin-investment-order.service';
+import {CustomerSupportStatus, EscalationStatus} from '../models';
+import {
+  AdminInvestmentOrderService,
+  UpdateAdminCustomerSupportDto,
+} from '../services/admin-investment-order.service';
 
 export class AdminInvestmentOrderController {
   constructor(
@@ -178,6 +181,72 @@ export class AdminInvestmentOrderController {
         limit: result.limit,
         offset: result.offset,
       },
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['admin', 'super_admin']})
+  @get('/admin/rejected-orders')
+  async listRejectedOrders(
+    @param.query.string('spvId') spvId?: string,
+    @param.query.number('limit') limit?: number,
+    @param.query.number('offset') offset?: number,
+  ) {
+    const result = await this.adminInvestmentOrderService.listRejectedOrders({
+      spvId,
+      limit,
+      offset,
+    });
+
+    return {
+      success: true,
+      message: 'Rejected orders fetched successfully',
+      data: result.data,
+      pagination: {
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+      },
+    };
+  }
+
+  @authenticate('jwt')
+  @authorize({roles: ['admin', 'super_admin']})
+  @patch('/admin/customer-support/{supportId}')
+  async updateCustomerSupport(
+    @inject(AuthenticationBindings.CURRENT_USER) currentUser: UserProfile,
+    @param.path.string('supportId') supportId: string,
+    @requestBody({
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              status: {
+                type: 'string',
+                enum: Object.values(CustomerSupportStatus),
+              },
+              adminResponse: {type: 'string', maxLength: 2000},
+              assignSuperAdmin: {type: 'boolean'},
+            },
+          },
+        },
+      },
+    })
+    body: UpdateAdminCustomerSupportDto,
+  ) {
+    const support = await this.adminInvestmentOrderService.updateCustomerSupport(
+      supportId,
+      currentUser.id,
+      body,
+    );
+
+    return {
+      success: true,
+      message: 'Customer support request updated successfully',
+      data: support,
     };
   }
 

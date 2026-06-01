@@ -3,6 +3,7 @@ import {repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {
   CustomerSupport,
+  CustomerSupportWithRelations,
   Escalation,
   EscalationStatus,
   InvestmentOrder,
@@ -37,6 +38,12 @@ export type AdminOrderFilters = {
 export type AdminOrderListItem = InvestmentOrder & {
   investorName?: string | null;
   investorEmail?: string | null;
+  investorProfile?: {
+    id: string;
+    fullName?: string | null;
+    companyName?: string | null;
+    usersId?: string | null;
+  } | null;
 };
 
 export type AdminOrderListResult = {
@@ -100,6 +107,29 @@ export type AdminCustomerSupportListResult = {
   total: number;
   limit: number;
   offset: number;
+};
+
+export type AdminRejectedOrderListItem = InvestmentOrder & {
+  orderId: string;
+  investorName?: string | null;
+  investorId?: string;
+  spvName?: string | null;
+  amount?: number;
+  rejectedReason?: string | null;
+  rejectedAt?: Date | null;
+};
+
+export type AdminRejectedOrderListResult = {
+  data: AdminRejectedOrderListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type UpdateAdminCustomerSupportDto = {
+  status?: CustomerSupport['status'];
+  adminResponse?: string;
+  assignSuperAdmin?: boolean;
 };
 
 export class AdminInvestmentOrderService {
@@ -169,15 +199,25 @@ export class AdminInvestmentOrderService {
 
     // Enrich with investor name and email via batch lookups
     const profileIds = [...new Set(orders.map((o) => o.investorProfileId).filter(Boolean))];
-    const profileMap = new Map<string, {fullName?: string; usersId?: string}>();
+    const profileMap = new Map<
+      string,
+      {id: string; fullName?: string; companyName?: string; usersId?: string}
+    >();
     const userMap = new Map<string, string>();
 
     if (profileIds.length > 0) {
       const profiles = await this.investorProfileRepository.find({
         where: {id: {inq: profileIds}},
-        fields: {id: true, fullName: true, usersId: true},
+        fields: {id: true, fullName: true, companyName: true, usersId: true},
       });
-      profiles.forEach((p) => profileMap.set(p.id, {fullName: p.fullName, usersId: p.usersId}));
+      profiles.forEach((p) =>
+        profileMap.set(p.id, {
+          id: p.id,
+          fullName: p.fullName,
+          companyName: p.companyName,
+          usersId: p.usersId,
+        }),
+      );
 
       const userIds = [...new Set(profiles.map((p) => p.usersId).filter(Boolean))];
       if (userIds.length > 0) {
@@ -193,8 +233,16 @@ export class AdminInvestmentOrderService {
       const profile = profileMap.get(order.investorProfileId);
       const email = profile?.usersId ? userMap.get(profile.usersId) : undefined;
       return Object.assign(order, {
-        investorName: profile?.fullName ?? null,
+        investorName: profile?.companyName ?? profile?.fullName ?? email ?? null,
         investorEmail: email ?? null,
+        investorProfile: profile
+          ? {
+              id: profile.id,
+              fullName: profile.fullName ?? null,
+              companyName: profile.companyName ?? null,
+              usersId: profile.usersId ?? null,
+            }
+          : null,
       });
     });
 
@@ -483,6 +531,61 @@ export class AdminInvestmentOrderService {
 
   // ── Pool cutoff settings ────────────────────────────────────────────────────
 
+  async listRejectedOrders(
+    filters: {spvId?: string; limit?: number; offset?: number},
+  ): Promise<AdminRejectedOrderListResult> {
+    const limit = Math.min(filters.limit ?? 50, 100);
+    const offset = filters.offset ?? 0;
+
+    const where = {
+      and: [
+        {isDeleted: false},
+        {status: InvestmentOrderStatus.CANCELLED},
+        ...(filters.spvId ? [{spvId: filters.spvId}] : []),
+      ],
+    };
+
+    const [orders, total] = await Promise.all([
+      this.investmentOrderRepository.find({
+        where,
+        include: [{relation: 'investorProfile'}],
+        limit,
+        skip: offset,
+        order: ['updatedAt DESC'],
+      }),
+      this.investmentOrderRepository.count(where),
+    ]);
+
+    const spvIds = [...new Set(orders.map(order => order.spvId).filter(Boolean))];
+
+    const spvs =
+      spvIds.length > 0
+        ? await this.spvRepository.find({
+            where: {id: {inq: spvIds}},
+            fields: {id: true, spvName: true},
+          })
+        : [];
+
+    const spvMap = new Map(spvs.map(spv => [spv.id, spv]));
+
+    const data: AdminRejectedOrderListItem[] = orders.map(order => {
+      const profile = (order as InvestmentOrder & {investorProfile?: {fullName?: string; companyName?: string}}).investorProfile;
+      const spv = spvMap.get(order.spvId);
+
+      return Object.assign(order, {
+        orderId: order.id,
+        investorName: profile?.companyName ?? profile?.fullName ?? null,
+        investorId: order.investorProfileId,
+        spvName: spv?.spvName ?? null,
+        amount: order.investmentAmount ? Number(order.investmentAmount) : 0,
+        rejectedReason: order.cancellationReason ?? null,
+        rejectedAt: order.resolvedAt ?? order.updatedAt ?? null,
+      });
+    });
+
+    return {data, total: total.count, limit, offset};
+  }
+
   async listCustomerSupport(
     filters: {spvId?: string; limit?: number; offset?: number},
   ): Promise<AdminCustomerSupportListResult> {
@@ -516,7 +619,11 @@ export class AdminInvestmentOrderService {
     const [supports, total] = await Promise.all([
       this.customerSupportRepository.find({
         where: supportWhere,
-        include: [{relation: 'attachmentMedia'}],
+        include: [
+          {relation: 'order'},
+          {relation: 'investorProfile'},
+          {relation: 'attachmentMedia'},
+        ],
         limit,
         skip: offset,
         order: ['createdAt DESC'],
@@ -553,9 +660,11 @@ export class AdminInvestmentOrderService {
     const profileMap = new Map(profiles.map(profile => [profile.id, profile]));
     const spvMap = new Map(spvs.map(spv => [spv.id, spv]));
 
-    const data: AdminCustomerSupportListItem[] = supports.map(item => {
-      const order = orderMap.get(item.orderId);
-      const profile = profileMap.get(item.investorProfileId);
+    const data: AdminCustomerSupportListItem[] = (
+      supports as CustomerSupportWithRelations[]
+    ).map(item => {
+      const order = item.order ?? orderMap.get(item.orderId);
+      const profile = item.investorProfile ?? profileMap.get(item.investorProfileId);
       const spv = order?.spvId ? spvMap.get(order.spvId) : undefined;
 
       return Object.assign(item, {
@@ -572,6 +681,47 @@ export class AdminInvestmentOrderService {
     });
 
     return {data, total: total.count, limit, offset};
+  }
+
+  async updateCustomerSupport(
+    supportId: string,
+    adminId: string,
+    payload: UpdateAdminCustomerSupportDto,
+  ): Promise<CustomerSupportWithRelations> {
+    const support = await this.customerSupportRepository.findById(supportId);
+
+    if (!payload.status && payload.adminResponse === undefined && !payload.assignSuperAdmin) {
+      throw new HttpErrors.BadRequest(
+        'At least one of status, adminResponse, or assignSuperAdmin is required.',
+      );
+    }
+
+    const update: Partial<CustomerSupport> = {
+      updatedBy: adminId,
+    };
+
+    if (payload.status) {
+      update.status = payload.status;
+    }
+
+    if (payload.adminResponse !== undefined) {
+      update.adminResponse = payload.adminResponse.trim();
+    }
+
+    if (payload.assignSuperAdmin) {
+      update.superAdminId = adminId;
+    }
+
+    await this.customerSupportRepository.updateById(support.id, update);
+
+    return this.customerSupportRepository.findById(support.id, {
+      include: [
+        {relation: 'order'},
+        {relation: 'investorProfile'},
+        {relation: 'attachmentMedia'},
+        {relation: 'superAdmin'},
+      ],
+    });
   }
 
   async getPoolCutoffSettings(spvId: string): Promise<Partial<PoolFinancials>> {

@@ -12,10 +12,12 @@ import {
   InvestmentOrder,
   InvestorProfile,
   Media,
+  Users,
 } from '../models';
 import {InvestmentOrderRepository} from './investment-order.repository';
 import {InvestorProfileRepository} from './investor-profile.repository';
 import {MediaRepository} from './media.repository';
+import {UsersRepository} from './users.repository';
 
 export class CustomerSupportRepository extends TimeStampRepositoryMixin<
   CustomerSupport,
@@ -43,6 +45,11 @@ export class CustomerSupportRepository extends TimeStampRepositoryMixin<
     typeof CustomerSupport.prototype.id
   >;
 
+  public readonly superAdmin: BelongsToAccessor<
+    Users,
+    typeof CustomerSupport.prototype.id
+  >;
+
   constructor(
     @inject('datasources.amplio') dataSource: AmplioDataSource,
     @repository.getter('InvestmentOrderRepository')
@@ -51,6 +58,8 @@ export class CustomerSupportRepository extends TimeStampRepositoryMixin<
     protected investorProfileRepositoryGetter: Getter<InvestorProfileRepository>,
     @repository.getter('MediaRepository')
     protected mediaRepositoryGetter: Getter<MediaRepository>,
+    @repository.getter('UsersRepository')
+    protected usersRepositoryGetter: Getter<UsersRepository>,
   ) {
     super(CustomerSupport, dataSource);
     this.order = this.createBelongsToAccessorFor(
@@ -75,6 +84,15 @@ export class CustomerSupportRepository extends TimeStampRepositoryMixin<
     this.registerInclusionResolver(
       'attachmentMedia',
       this.attachmentMedia.inclusionResolver,
+    );
+
+    this.superAdmin = this.createBelongsToAccessorFor(
+      'superAdmin',
+      usersRepositoryGetter,
+    );
+    this.registerInclusionResolver(
+      'superAdmin',
+      this.superAdmin.inclusionResolver,
     );
   }
 }
