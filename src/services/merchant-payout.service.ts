@@ -163,11 +163,11 @@ export class MerchantPayoutService {
     }
 
     if (payload) {
-      console.log(message, payload);
+      // console.log(message, payload);
       return;
     }
 
-    console.log(message);
+    // console.log(message);
   }
 
   private getErrorMessage(error: unknown) {
@@ -1838,19 +1838,19 @@ export class MerchantPayoutService {
     if (batchDraft.releasedAmount <= 0) {
       await this.updateLastProcessedWindowEndAt(config.id, window.bucketEndAt);
 
-      if (options?.debug) {
-        this.logMerchantPayoutCronDebug(
-          '[MerchantPayoutCron] Skipping due window because nothing is releasable',
-          {
-            ...this.getConfigDebugContext(config),
-            ...this.getWindowDebugContext(window),
-            eligibleAmount: batchDraft.eligibleAmount,
-            releasedAmount: batchDraft.releasedAmount,
-            availableDailyCap: batchDraft.availableDailyCap,
-            alreadyReleasedToday: batchDraft.alreadyReleasedToday,
-          },
-        );
-      }
+      // if (options?.debug) {
+      //   this.logMerchantPayoutCronDebug(
+      //     '[MerchantPayoutCron] Skipping due window because nothing is releasable',
+      //     {
+      //       ...this.getConfigDebugContext(config),
+      //       ...this.getWindowDebugContext(window),
+      //       eligibleAmount: batchDraft.eligibleAmount,
+      //       releasedAmount: batchDraft.releasedAmount,
+      //       availableDailyCap: batchDraft.availableDailyCap,
+      //       alreadyReleasedToday: batchDraft.alreadyReleasedToday,
+      //     },
+      //   );
+      // }
 
       return null;
     }
@@ -2237,19 +2237,19 @@ export class MerchantPayoutService {
             }
 
             preparedBatches.push(preparedBatch);
-            this.logMerchantPayoutCronDebug(
-              '[MerchantPayoutCron] Due window prepared successfully',
-              {
-                ...this.getConfigDebugContext(config),
-                batchId: preparedBatch.batch.id,
-                releasedAmount: preparedBatch.releasedAmount,
-                eligibleAmount: preparedBatch.eligibleAmount,
-                availableDailyCap: preparedBatch.availableDailyCap,
-                itemCount: preparedBatch.items.length,
-                wasCreated: preparedBatch.wasCreated,
-                ...this.getWindowDebugContext(preparedBatch.window),
-              },
-            );
+            // this.logMerchantPayoutCronDebug(
+            //   '[MerchantPayoutCron] Due window prepared successfully',
+            //   {
+            //     ...this.getConfigDebugContext(config),
+            //     batchId: preparedBatch.batch.id,
+            //     releasedAmount: preparedBatch.releasedAmount,
+            //     eligibleAmount: preparedBatch.eligibleAmount,
+            //     availableDailyCap: preparedBatch.availableDailyCap,
+            //     itemCount: preparedBatch.items.length,
+            //     wasCreated: preparedBatch.wasCreated,
+            //     ...this.getWindowDebugContext(preparedBatch.window),
+            //   },
+            // );
           } catch (error) {
             console.error(
               `[MerchantPayoutCron] Failed due window ${window.businessDate} (${window.bucketStartAt.toISOString()} - ${window.bucketEndAt.toISOString()}) for config ${config.id}: ${this.getErrorMessage(error)}`,

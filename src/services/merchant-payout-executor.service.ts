@@ -64,11 +64,11 @@ export class MerchantPayoutExecutorService {
     }
 
     if (payload) {
-      console.log(message, payload);
+      // console.log(message, payload);
       return;
     }
 
-    console.log(message);
+    // console.log(message);
   }
 
   private buildProviderReferenceId(

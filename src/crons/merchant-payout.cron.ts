@@ -21,27 +21,16 @@ export class MerchantPayoutCron {
       return;
     }
 
-    console.log(
-      `[MerchantPayoutCron] Scheduling merchant payout cron with expression "${MERCHANT_PAYOUT_CRON_SCHEDULE}" and lookbackDays=${MERCHANT_PAYOUT_LOOKBACK_DAYS}`,
-    );
-
     this.job = cron.schedule(MERCHANT_PAYOUT_CRON_SCHEDULE, async () => {
       const referenceAt = new Date();
 
-      console.log(`[MerchantPayoutCron] Tick started at ${referenceAt.toISOString()}`);
-
       try {
-        const preparedBatches = await this.merchantPayoutService.prepareDueBatches(
+        await this.merchantPayoutService.prepareDueBatches(
           referenceAt,
           MERCHANT_PAYOUT_LOOKBACK_DAYS,
         );
-        const executedBatches =
-          await this.merchantPayoutExecutorService.executePendingBatches(
-            referenceAt,
-          );
-
-        console.log(
-          `[MerchantPayoutCron] Tick finished at ${referenceAt.toISOString()} with ${preparedBatches.length} prepared payout batch(es) and ${executedBatches.length} executed payout batch(es)`,
+        await this.merchantPayoutExecutorService.executePendingBatches(
+          referenceAt,
         );
       } catch (error) {
         const message =

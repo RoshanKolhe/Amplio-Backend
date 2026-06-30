@@ -23,10 +23,6 @@ export class PaymentWindowTimeoutCron {
   start() {
     if (this.job) return;
 
-    console.log(
-      `[PaymentWindowTimeoutCron] Scheduling with expression "${PAYMENT_TIMEOUT_CRON_SCHEDULE}"`,
-    );
-
     this.job = cron.schedule(PAYMENT_TIMEOUT_CRON_SCHEDULE, async () => {
       await this.expireTimedOutOrders();
     });
@@ -57,10 +53,6 @@ export class PaymentWindowTimeoutCron {
     });
 
     if (!candidates.length) return;
-
-    console.log(
-      `[PaymentWindowTimeoutCron] Found ${candidates.length} expired order candidate(s)`,
-    );
 
     for (const candidate of candidates) {
       await this.expireOrderSafely(candidate.id, now);
@@ -133,10 +125,6 @@ export class PaymentWindowTimeoutCron {
       if (order.verificationId) {
         await this.expireLinkedVerification(order.verificationId);
       }
-
-      console.log(
-        `[PaymentWindowTimeoutCron] Timed out order ${orderId} (deadline: ${order.paymentDeadlineAt})`,
-      );
     } catch (error) {
       await tx.rollback();
       const message = error instanceof Error ? error.message : 'Unknown error';

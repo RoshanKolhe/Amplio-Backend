@@ -34,7 +34,7 @@ export class PoolService {
     private ptcIssuanceService: PtcIssuanceService,
     @inject('service.spv.service')
     private spvService: SpvService,
-  ) {}
+  ) { }
 
   private normalizeAmount(amount: number): number {
     return Number(Number(amount ?? 0).toFixed(2));
@@ -295,7 +295,7 @@ export class PoolService {
     const refreshedPool = await this.recomputePoolFinancials(spvId);
     const nextOutstanding = this.normalizeAmount(
       Number(refreshedPool.outstanding ?? 0) +
-        Number(transaction.totalRecieved ?? 0),
+      Number(transaction.totalRecieved ?? 0),
     );
 
     if (nextOutstanding > Number(poolFinancials.poolLimit)) {
@@ -352,13 +352,13 @@ export class PoolService {
     const skipped: Array<{transactionId: string; reason: string}> = [];
 
     for (const transaction of transactions) {
-      console.log(
-        'CHECK:',
-        transaction.id,
-        transaction.status,
-        transaction.releasedAmount,
-        transaction.lastReleasedAt,
-      );
+      // console.log(
+      //   'CHECK:',
+      //   transaction.id,
+      //   transaction.status,
+      //   transaction.releasedAmount,
+      //   transaction.lastReleasedAt,
+      // );
 
       if (transaction.spvId !== spvId) {
         skipped.push({

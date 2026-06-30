@@ -321,7 +321,7 @@ export class PspService {
         return items; // For now return first page or implement full fetch
       }
     } catch (error) {
-      console.error('Error fetching Razorpay transactions:', error);
+      // console.error('Error fetching Razorpay transactions:', error);
       throw new HttpErrors.InternalServerError(
         'Failed to fetch transactions from payment provider',
       );

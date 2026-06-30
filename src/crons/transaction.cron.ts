@@ -200,15 +200,15 @@ export class TransactionCron {
     pspMasterId: string;
   }, tnsId: string): Promise<
     | {
-        id: string;
-        pspId: string;
-        spvId?: string;
-        settlementDestination?: string;
-        status?: string;
-        releasedAmount?: number;
-        lastReleasedAt?: Date;
-        createdAt?: Date;
-      }
+      id: string;
+      pspId: string;
+      spvId?: string;
+      settlementDestination?: string;
+      status?: string;
+      releasedAmount?: number;
+      lastReleasedAt?: Date;
+      createdAt?: Date;
+    }
     | undefined
   > {
     const existingTransactions = await this.transactionRepository.find({
@@ -236,14 +236,14 @@ export class TransactionCron {
     );
     const existingPsps = existingPspIds.length
       ? await this.pspRepository.find({
-          where: {
-            id: {inq: existingPspIds},
-          },
-          fields: {
-            id: true,
-            pspMasterId: true,
-          },
-        })
+        where: {
+          id: {inq: existingPspIds},
+        },
+        fields: {
+          id: true,
+          pspMasterId: true,
+        },
+      })
       : [];
     const pspMasterIdByPspId = new Map(
       existingPsps.map(existingPsp => [existingPsp.id, existingPsp.pspMasterId]),
@@ -365,13 +365,8 @@ export class TransactionCron {
       return;
     }
 
-    console.log(
-      `[TransactionCron] Scheduling transaction cron with expression "${TRANSACTION_CRON_SCHEDULE}"`,
-    );
-
     this.job = cron.schedule(TRANSACTION_CRON_SCHEDULE, async () => {
       const referenceAt = new Date();
-      console.log(`[TransactionCron] Tick started at ${referenceAt.toISOString()}`);
 
       const psps = await this.pspRepository.find({
         where: {isActive: true},
@@ -409,10 +404,6 @@ export class TransactionCron {
             );
             realSyncFailed = true;
           }
-        } else {
-          console.log(
-            `[TransactionCron] Real PSP sync disabled (DISABLE_REAL_PSP_SYNC); skipping live fetch for PSP ${psp.id}`,
-          );
         }
 
         if (realSyncFailed && !SyntheticTransactionService.isSyntheticEnabled()) {
@@ -435,9 +426,6 @@ export class TransactionCron {
             ...transactions,
             ...(synthetics as RazorpayPayment[]),
           ];
-          console.log(
-            `[TransactionCron] Injected ${synthetics.length} synthetic transactions for PSP ${psp.id}`,
-          );
         }
         // [MERCHANT-BYPASS-END]
 
@@ -543,20 +531,20 @@ export class TransactionCron {
               createdAt,
               updatedAt,
             });
-            this.logTransactionCronDebug(
-              '[TransactionCron] Updated transaction status fields',
-              {
-                transactionId: exists.id,
-                tnsId: txn.id,
-                pspId: psp.id,
-                pspStatus: txn.status,
-                pspSettlementStatus: resolvedPspSettlementStatus,
-                status: resolvedPlatformStatus,
-                settlementDestination: effectiveSettlementDestination,
-                releasedAmount: exists.releasedAmount,
-                lastReleasedAt: exists.lastReleasedAt?.toISOString(),
-              },
-            );
+            // this.logTransactionCronDebug(
+            //   '[TransactionCron] Updated transaction status fields',
+            //   {
+            //     transactionId: exists.id,
+            //     tnsId: txn.id,
+            //     pspId: psp.id,
+            //     pspStatus: txn.status,
+            //     pspSettlementStatus: resolvedPspSettlementStatus,
+            //     status: resolvedPlatformStatus,
+            //     settlementDestination: effectiveSettlementDestination,
+            //     releasedAmount: exists.releasedAmount,
+            //     lastReleasedAt: exists.lastReleasedAt?.toISOString(),
+            //   },
+            // );
 
             if (
               effectiveSpvId &&
@@ -656,9 +644,6 @@ export class TransactionCron {
         // );
       }
 
-      console.log(
-        `[TransactionCron] Tick finished at ${referenceAt.toISOString()} for ${psps.length} PSP(s); fetched=${totalFetchedTransactions}, created=${totalCreatedTransactions}, updated=${totalUpdatedTransactions}`,
-      );
     });
   }
 

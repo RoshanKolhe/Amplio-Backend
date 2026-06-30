@@ -39,10 +39,6 @@ export class SpvReservationCron {
       return;
     }
 
-    console.log(
-      `[SpvReservationCron] Scheduling with expression "${SPV_RESERVATION_CRON_SCHEDULE}"`,
-    );
-
     this.job = cron.schedule(SPV_RESERVATION_CRON_SCHEDULE, async () => {
       await this.releaseExpiredReservations();
     });
@@ -75,9 +71,6 @@ export class SpvReservationCron {
     });
 
     if (expiredCandidates.length) {
-      console.log(
-        `[SpvReservationCron] Found ${expiredCandidates.length} expired RESERVED candidate(s)`,
-      );
       for (const candidate of expiredCandidates) {
         await this.processExpiredVerificationSafely(candidate.id, now);
       }
@@ -108,10 +101,6 @@ export class SpvReservationCron {
     ) as Array<{id: string}>;
 
     if (!rows.length) return;
-
-    console.log(
-      `[SpvReservationCron] Found ${rows.length} stale CONSUMING reservation(s) to release`,
-    );
 
     for (const row of rows) {
       await this.releaseConsumingReservationSafely(row.id);
@@ -176,10 +165,6 @@ export class SpvReservationCron {
       }, {transaction: tx});
 
       await tx.commit();
-
-      console.log(
-        `[SpvReservationCron] Released stale CONSUMING reservation for verification ${verificationId} — admin retry required`,
-      );
     } catch (error) {
       await tx.rollback();
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -257,10 +242,6 @@ export class SpvReservationCron {
       // Post-commit side-effects — these are non-critical and can run outside the tx
       await this.expirePtcFreezes(verificationId, now);
       await this.expireLinkedOrder(verificationId, now);
-
-      console.log(
-        `[SpvReservationCron] Released reservation and expired verification ${verificationId}`,
-      );
     } catch (error) {
       await tx.rollback();
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -309,9 +290,5 @@ export class SpvReservationCron {
       isActive: false,
       updatedBy: 'system',
     });
-
-    console.log(
-      `[SpvReservationCron] Marked order ${order.id} as PTC_FREEZE_EXPIRED`,
-    );
   }
 }

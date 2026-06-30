@@ -20,10 +20,6 @@ export class EscalationSlaCron {
   start() {
     if (this.job) return;
 
-    console.log(
-      `[EscalationSlaCron] Scheduling with expression "${ESCALATION_SLA_CRON_SCHEDULE}"`,
-    );
-
     this.job = cron.schedule(ESCALATION_SLA_CRON_SCHEDULE, async () => {
       await this.checkSlaBreaches();
     });

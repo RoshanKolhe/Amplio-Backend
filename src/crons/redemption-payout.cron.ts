@@ -15,10 +15,6 @@ export class RedemptionPayoutCron {
   start() {
     if (this.job) return;
 
-    console.log(
-      `[RedemptionPayoutCron] Scheduling with expression "${REDEMPTION_PAYOUT_CRON_SCHEDULE}"`,
-    );
-
     this.job = cron.schedule(REDEMPTION_PAYOUT_CRON_SCHEDULE, async () => {
       await this.execute();
     });
@@ -33,8 +29,6 @@ export class RedemptionPayoutCron {
   }
 
   private async execute(): Promise<void> {
-    console.log(`[RedemptionPayoutCron] tick at ${new Date().toISOString()}`);
-
     try {
       await this.redemptionPayoutService.recoverStaleProcessingPayouts();
     } catch (err) {
