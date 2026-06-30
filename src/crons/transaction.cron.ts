@@ -397,8 +397,8 @@ export class TransactionCron {
               psp,
             )) as RazorpayPayment[];
           } catch (error) {
-            const message =
-              error instanceof Error ? error.message : 'Unknown PSP sync error';
+            // const message =
+            //   error instanceof Error ? error.message : 'Unknown PSP sync error';
             // console.error(
             //   `[TransactionCron] Failed to sync PSP ${psp.id}: ${message}`,
             // );
