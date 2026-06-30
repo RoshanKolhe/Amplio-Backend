@@ -1597,9 +1597,14 @@ export class MerchantPayoutService {
     const lastProcessedWindowEndAt = config.lastProcessedWindowEndAt
       ? new Date(config.lastProcessedWindowEndAt)
       : undefined;
-    const earliestBusinessDate = lastProcessedWindowEndAt
+    const lookbackBusinessDate = this.addDays(currentBusinessDate, -boundedLookbackDays);
+    let earliestBusinessDate = lastProcessedWindowEndAt
       ? this.getLocalBusinessDate(lastProcessedWindowEndAt, timezone)
-      : this.addDays(currentBusinessDate, -boundedLookbackDays);
+      : lookbackBusinessDate;
+
+    if (earliestBusinessDate < lookbackBusinessDate) {
+      earliestBusinessDate = lookbackBusinessDate;
+    }
     const businessDates: string[] = [];
 
     for (
