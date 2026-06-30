@@ -1004,8 +1004,14 @@ export class MerchantPayoutService {
       }
     }
 
+    const activeMerchantIds = new Set(merchantProfiles.map(m => m.id));
+
     return [
-      ...existingConfigs.filter(config => Boolean(config.lastManualConfigChangeAt)),
+      ...existingConfigs.filter(
+        config =>
+          Boolean(config.lastManualConfigChangeAt) &&
+          activeMerchantIds.has(config.merchantProfilesId),
+      ),
       ...fallbackConfigs,
     ];
   }
