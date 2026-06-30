@@ -2251,9 +2251,9 @@ export class MerchantPayoutService {
             //   },
             // );
           } catch (error) {
-            console.error(
-              `[MerchantPayoutCron] Failed due window ${window.businessDate} (${window.bucketStartAt.toISOString()} - ${window.bucketEndAt.toISOString()}) for config ${config.id}: ${this.getErrorMessage(error)}`,
-            );
+            // console.error(
+            //   `[MerchantPayoutCron] Failed due window ${window.businessDate} (${window.bucketStartAt.toISOString()} - ${window.bucketEndAt.toISOString()}) for config ${config.id}: ${this.getErrorMessage(error)}`,
+            // );
           }
         }
       } catch (error) {

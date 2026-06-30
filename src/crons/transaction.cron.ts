@@ -399,9 +399,9 @@ export class TransactionCron {
           } catch (error) {
             const message =
               error instanceof Error ? error.message : 'Unknown PSP sync error';
-            console.error(
-              `[TransactionCron] Failed to sync PSP ${psp.id}: ${message}`,
-            );
+            // console.error(
+            //   `[TransactionCron] Failed to sync PSP ${psp.id}: ${message}`,
+            // );
             realSyncFailed = true;
           }
         }
