@@ -1602,8 +1602,9 @@ export class MerchantPayoutService {
       ? this.getLocalBusinessDate(lastProcessedWindowEndAt, timezone)
       : lookbackBusinessDate;
 
-    if (earliestBusinessDate < lookbackBusinessDate) {
-      earliestBusinessDate = lookbackBusinessDate;
+    const maxHistoryLookbackDate = this.addDays(currentBusinessDate, -90);
+    if (earliestBusinessDate < maxHistoryLookbackDate) {
+      earliestBusinessDate = maxHistoryLookbackDate;
     }
     const businessDates: string[] = [];
 
@@ -1873,7 +1874,7 @@ export class MerchantPayoutService {
     if (!beneficiaryAccount) {
       if (options?.debug) {
         this.logMerchantPayoutCronDebug(
-          '[MerchantPayoutCron] Beneficiary bank account missing for releasable batch',
+          '[MerchantPayoutCron] Beneficiary bank account missing for releasable batch, creating failed batch to avoid deadlock',
           {
             ...this.getConfigDebugContext(config),
             ...this.getWindowDebugContext(window),
@@ -1883,9 +1884,73 @@ export class MerchantPayoutService {
         );
       }
 
-      throw new HttpErrors.BadRequest(
-        'No approved primary merchant bank account found for payout',
-      );
+      const tx =
+        await this.merchantPayoutBatchRepository.dataSource.beginTransaction(
+          PAYOUT_TRANSACTION_OPTIONS,
+        );
+
+      try {
+        const batch = await this.merchantPayoutBatchRepository.create(
+          {
+            id: uuidv4(),
+            businessDate: window.businessDate,
+            bucketStartAt: window.bucketStartAt,
+            bucketEndAt: window.bucketEndAt,
+            scheduledFor: window.scheduledFor,
+            frequencyHours: window.frequencyHours,
+            scheduleMode: window.scheduleMode,
+            effectiveDailyCap: batchDraft.effectiveDailyCap,
+            alreadyReleasedToday: batchDraft.alreadyReleasedToday,
+            eligibleAmount: batchDraft.eligibleAmount,
+            releasedAmount: batchDraft.releasedAmount,
+            totalFundedAmount: batchDraft.alreadyReleasedToday,
+            runType: window.runType,
+            status: 'failed',
+            failureReason: 'No approved primary merchant bank account found for payout',
+            merchantPayoutConfigId: config.id,
+            merchantProfilesId: config.merchantProfilesId,
+            usersId: config.usersId,
+          },
+          {transaction: tx},
+        );
+
+        await this.merchantPayoutBatchItemRepository.createAll(
+          batchDraft.allocations.map(allocation => ({
+            id: uuidv4(),
+            transactionAmount: Number(allocation.transaction.amount ?? 0),
+            totalReceivedAmount: Number(
+              allocation.transaction.totalRecieved ?? 0,
+            ),
+            haircutPercentage: Number(allocation.transaction.haircut ?? 0),
+            transactionNetAmount: Number(allocation.transaction.netAmount ?? 0),
+            allocatedAmount: Number(allocation.allocatedAmount ?? 0),
+            status: 'failed',
+            failureReason: 'No approved primary merchant bank account found for payout',
+            merchantPayoutBatchId: batch.id,
+            transactionId: allocation.transaction.id,
+          })),
+          {transaction: tx},
+        );
+
+        await tx.commit();
+        await this.updateLastProcessedWindowEndAt(config.id, window.bucketEndAt);
+
+        return {
+          batch,
+          items: [],
+          beneficiaryAccount: null,
+          window,
+          effectiveDailyCap: batchDraft.effectiveDailyCap,
+          availableDailyCap: batchDraft.availableDailyCap,
+          eligibleAmount: batchDraft.eligibleAmount,
+          releasedAmount: 0,
+          totalFundedAmount: batchDraft.alreadyReleasedToday,
+          wasCreated: true,
+        };
+      } catch (error) {
+        await tx.rollback();
+        throw error;
+      }
     }
 
     const createdBatch = await this.createBatchAndItems(
