@@ -100,10 +100,22 @@ export class SyntheticTransactionService {
     const dateStr = formatDateStr(referenceDate);
     const slug = pspSlug(pspId);
 
-    // Spread transactions across an 8 AM–10 PM window (50400 seconds)
-    const dayStart8am = new Date(referenceDate);
-    dayStart8am.setHours(8, 0, 0, 0);
-    const windowStart = Math.floor(dayStart8am.getTime() / 1000);
+    // Spread transactions across an 8 AM–10 PM IST window (50400 seconds)
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    });
+    const parts = formatter.formatToParts(referenceDate);
+    const year = parseInt(parts.find(p => p.type === 'year')!.value, 10);
+    const month = parseInt(parts.find(p => p.type === 'month')!.value, 10) - 1;
+    const day = parseInt(parts.find(p => p.type === 'day')!.value, 10);
+
+    const paddedMonth = String(month + 1).padStart(2, '0');
+    const paddedDay = String(day).padStart(2, '0');
+    const dayStart8amUtc = new Date(`${year}-${paddedMonth}-${paddedDay}T02:30:00.000Z`);
+    const windowStart = Math.floor(dayStart8amUtc.getTime() / 1000);
 
     // Distribute INR amounts across transactions with ±30% variance, min ₹1 lakh each
     const baseAmountInr = Math.floor(dailyTargetInr / count);
